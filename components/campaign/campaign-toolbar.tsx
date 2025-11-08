@@ -121,7 +121,7 @@ export default function CampaignToolbar({
                         Advanced Filter
                     </Button>
         
-                    {/* Create Event Button Group with Dropdown */}
+                    {/* Create Event Button Group with Dropdown Menu*/}
                     <ButtonGroup 
                         variant="solid"
                         radius="md"
