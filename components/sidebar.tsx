@@ -13,13 +13,21 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Popover, PopoverTrigger, PopoverContent } from "@heroui/popover";
     
-export default function Sidebar() {
+interface SidebarProps {
+    role?: string;
+    userInfo?: {
+        name?: string;
+        email?: string;
+    };
+}
+
+export default function Sidebar({ role, userInfo }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
     
     const links = [
-        { href: "/dashboard/sysadmin/campaign", icon: Ticket },
-        { href: "/inventory", icon: Calendar },
+        { href: "/dashboard/campaign", icon: Ticket },
+    { href: "/dashboard/calendar", icon: Calendar },
         { href: "/requests", icon: UsersRound },
         { href: "/campaign", icon: ContactRound },
     ];

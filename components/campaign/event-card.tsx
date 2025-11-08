@@ -126,7 +126,6 @@ const EventCard: React.FC<EventCardProps> = ({
           className="text-danger"
           color="danger"
           description="Cancel an event"
-          shortcut="⌘ D"
           startContent={<Trash2 className="text-xl text-danger pointer-events-none shrink-0" />}
           onPress={() => setCancelOpen(true)}
         >
@@ -210,8 +209,9 @@ const EventCard: React.FC<EventCardProps> = ({
           <div className="flex items-center gap-3">
             <Avatar />
             <div>
-              <h3 className="text-sm font-semibold">{title}</h3>
-              <p className="text-xs text-default-800">{organizationType}</p>
+                <h3 className="text-sm font-semibold">{title}</h3>
+                {/* Show coordinator/stakeholder full name when available; fall back to organizationType */}
+                <p className="text-xs text-default-800">{organization || organizationType}</p>
             </div>
           </div>
           <Dropdown>

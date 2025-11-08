@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { Input } from "@heroui/input";
+import { Check } from "lucide-react";
 import { Tabs, Tab } from "@heroui/tabs";
 import { Button, ButtonGroup } from "@heroui/button";
 import { 
@@ -8,6 +10,7 @@ import {
     DropdownTrigger,
     DropdownMenu,
     DropdownItem,
+    DropdownSection,
 } from "@heroui/dropdown";
 import { 
     Download, 
@@ -21,11 +24,12 @@ import {
     CreateBloodDriveEventModal,
     CreateAdvocacyEventModal,
 } from "./event-creation-modal";
+import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/modal";
     
 interface CampaignToolbarProps {
     onExport?: () => void;
-    onQuickFilter?: () => void;
-    onAdvancedFilter?: () => void;
+    onQuickFilter?: (filter?: any) => void;
+    onAdvancedFilter?: (filter?: any) => void;
     onCreateEvent?: (eventType: string, eventData: any) => void;
     onTabChange?: (tab: string) => void;
     defaultTab?: string;
@@ -41,11 +45,21 @@ export default function CampaignToolbar({
 }: CampaignToolbarProps) {
     const [selectedTab, setSelectedTab] = useState(defaultTab);
     const [selectedEventType, setSelectedEventType] = useState(new Set(["blood-drive"]));
+    const [quickQuery, setQuickQuery] = useState("");
+    const [selectedQuick, setSelectedQuick] = useState<string | undefined>(undefined);
     
     // Modal states
     const [isTrainingModalOpen, setIsTrainingModalOpen] = useState(false);
     const [isBloodDriveModalOpen, setIsBloodDriveModalOpen] = useState(false);
     const [isAdvocacyModalOpen, setIsAdvocacyModalOpen] = useState(false);
+    // submission/loading states to prevent duplicate creates
+    const [isTrainingSubmitting, setIsTrainingSubmitting] = useState(false);
+    const [isBloodSubmitting, setIsBloodSubmitting] = useState(false);
+    const [isAdvocacySubmitting, setIsAdvocacySubmitting] = useState(false);
+    const [isAdvancedModalOpen, setIsAdvancedModalOpen] = useState(false);
+    const [advStart, setAdvStart] = useState("");
+    const [advEnd, setAdvEnd] = useState("");
+    const [advCoordinator, setAdvCoordinator] = useState("");
     
     // Event type labels and descriptions
     const eventLabelsMap = {
@@ -68,7 +82,9 @@ export default function CampaignToolbar({
     };
     
     // Get selected event type value
-    const selectedEventTypeValue = Array.from(selectedEventType)[0] as string;
+    const selectedEventTypeValue = Array.from(selectedEventType)[0] as string | undefined;
+    const typedEventKey = selectedEventTypeValue as keyof typeof eventLabelsMap | undefined;
+    const currentEventLabel = typedEventKey ? eventLabelsMap[typedEventKey] : "Event";
     
     // Handle create event button click - opens appropriate modal
     const handleCreateEventClick = () => {
@@ -86,19 +102,44 @@ export default function CampaignToolbar({
     };
     
     // Handle modal confirmations
-    const handleTrainingEventConfirm = (data: any) => {
-        onCreateEvent?.("training", data);
-        setIsTrainingModalOpen(false);
+    const handleTrainingEventConfirm = async (data: any) => {
+        if (!onCreateEvent) return;
+        setIsTrainingSubmitting(true);
+        try {
+            await onCreateEvent("training", data);
+            setIsTrainingModalOpen(false);
+        } catch (err) {
+            // allow parent to handle errors; keep modal open so user can retry
+            console.error('Training create failed', err);
+        } finally {
+            setIsTrainingSubmitting(false);
+        }
     };
     
-    const handleBloodDriveEventConfirm = (data: any) => {
-        onCreateEvent?.("blood-drive", data);
-        setIsBloodDriveModalOpen(false);
+    const handleBloodDriveEventConfirm = async (data: any) => {
+        if (!onCreateEvent) return;
+        setIsBloodSubmitting(true);
+        try {
+            await onCreateEvent("blood-drive", data);
+            setIsBloodDriveModalOpen(false);
+        } catch (err) {
+            console.error('Blood drive create failed', err);
+        } finally {
+            setIsBloodSubmitting(false);
+        }
     };
     
-    const handleAdvocacyEventConfirm = (data: any) => {
-        onCreateEvent?.("advocacy", data);
-        setIsAdvocacyModalOpen(false);
+    const handleAdvocacyEventConfirm = async (data: any) => {
+        if (!onCreateEvent) return;
+        setIsAdvocacySubmitting(true);
+        try {
+            await onCreateEvent("advocacy", data);
+            setIsAdvocacyModalOpen(false);
+        } catch (err) {
+            console.error('Advocacy create failed', err);
+        } finally {
+            setIsAdvocacySubmitting(false);
+        }
     };
     
     return (
@@ -132,24 +173,52 @@ export default function CampaignToolbar({
                             Export
                         </Button>
             
-                        {/* Quick Filter Button */}
-                        <Button
-                            variant="faded"
-                            startContent={<Filter className="w-4 h-4" />}
-                            endContent={<ChevronDown className="w-4 h-4"/>}
-                            onPress={onQuickFilter}
-                            radius="md"
-                            size="sm"
-                        >
-                            Quick Filter
-                        </Button>
+                        {/* Quick Filter Dropdown */}
+                        <Dropdown>
+                            <DropdownTrigger>
+                                <Button
+                                    variant="faded"
+                                    startContent={<Filter className="w-4 h-4" />}
+                                    endContent={<ChevronDown className="w-4 h-4"/>}
+                                    radius="md"
+                                    size="sm"
+                                >
+                                    Quick Filter
+                                </Button>
+                            </DropdownTrigger>
+                            <DropdownMenu
+                                disallowEmptySelection
+                                selectionMode="single"
+                                selectedKeys={selectedQuick ? new Set([selectedQuick]) : new Set()}
+                                onSelectionChange={(keys: any) => {
+                                    try {
+                                        const arr = Array.from(keys as Iterable<any>);
+                                        const val = arr[0] as string | undefined;
+                                        setSelectedQuick(val);
+                                    } catch {
+                                        setSelectedQuick(undefined);
+                                    }
+                                }}
+                            >
+                                <DropdownSection title="Category">
+                                    <DropdownItem key="">All</DropdownItem>
+                                    <DropdownItem key="Blood Drive">Blood Drive</DropdownItem>
+                                    <DropdownItem key="Training">Training</DropdownItem>
+                                    <DropdownItem key="Advocacy">Advocacy</DropdownItem>
+                                </DropdownSection>
+                                <DropdownSection>
+                                    <DropdownItem key="apply" onPress={() => onQuickFilter?.({ category: selectedQuick })}>Apply</DropdownItem>
+                                    <DropdownItem key="clear" onPress={() => { setSelectedQuick(undefined); onQuickFilter?.({ category: undefined }); }}>Clear</DropdownItem>
+                                </DropdownSection>
+                            </DropdownMenu>
+                        </Dropdown>
             
-                        {/* Advanced Filter Button */}
+                        {/* Advanced Filter opens modal */}
                         <Button
                             variant="faded"
                             startContent={<SlidersHorizontal className="w-4 h-4" />}
                             endContent={<ChevronDown className="w-4 h-4"/>}
-                            onPress={onAdvancedFilter}
+                            onPress={() => setIsAdvancedModalOpen(true)}
                             radius="md"
                             size="sm"
                         >
@@ -162,13 +231,13 @@ export default function CampaignToolbar({
                             radius="md"
                             size="sm"
                         >
-                            <Button
-                                onPress={handleCreateEventClick}
-                                color="primary"
-                                startContent={<Ticket className="w-4 h-4" />}
-                            >
-                                {eventLabelsMap[selectedEventTypeValue]}
-                            </Button>
+                                <Button
+                                    onPress={handleCreateEventClick}
+                                    color="primary"
+                                    startContent={<Ticket className="w-4 h-4" />}
+                                >
+                                    {currentEventLabel}
+                                </Button>
                             <Dropdown placement="bottom-end">
                                 <DropdownTrigger>
                                     <Button 
@@ -184,7 +253,16 @@ export default function CampaignToolbar({
                                     className="max-w-2xl"
                                     selectedKeys={selectedEventType}
                                     selectionMode="single"
-                                    onSelectionChange={setSelectedEventType}
+                                    onSelectionChange={(keys: any) => {
+                                        // Convert the incoming selection (SharedSelection) to Set<string>
+                                        try {
+                                            const arr = Array.from(keys as Iterable<any>);
+                                            setSelectedEventType(new Set(arr.map(String)));
+                                        } catch {
+                                            // fallback: clear selection
+                                            setSelectedEventType(new Set());
+                                        }
+                                    }}
                                 >
                                     <DropdownItem 
                                         key="blood-drive" 
@@ -216,19 +294,50 @@ export default function CampaignToolbar({
                 isOpen={isTrainingModalOpen}
                 onClose={() => setIsTrainingModalOpen(false)}
                 onConfirm={handleTrainingEventConfirm}
+                isSubmitting={isTrainingSubmitting}
             />
 
             <CreateBloodDriveEventModal
                 isOpen={isBloodDriveModalOpen}
                 onClose={() => setIsBloodDriveModalOpen(false)}
                 onConfirm={handleBloodDriveEventConfirm}
+                isSubmitting={isBloodSubmitting}
             />
 
             <CreateAdvocacyEventModal
                 isOpen={isAdvocacyModalOpen}
                 onClose={() => setIsAdvocacyModalOpen(false)}
                 onConfirm={handleAdvocacyEventConfirm}
+                isSubmitting={isAdvocacySubmitting}
             />
+                        {/* Advanced Filter Modal */}
+                        <Modal isOpen={isAdvancedModalOpen} onClose={() => setIsAdvancedModalOpen(false)} size="md" placement="center">
+                            <ModalContent>
+                                <ModalHeader>
+                                    <h3 className="text-lg font-semibold">Advanced Filter</h3>
+                                </ModalHeader>
+                                <ModalBody>
+                                    <div className="space-y-3">
+                                        <div className="flex items-center gap-3">
+                                            <label className="w-20 text-sm">Start</label>
+                                            <input type="date" value={advStart} onChange={(e) => setAdvStart(e.target.value)} className="px-2 py-1 border rounded w-full" />
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <label className="w-20 text-sm">End</label>
+                                            <input type="date" value={advEnd} onChange={(e) => setAdvEnd(e.target.value)} className="px-2 py-1 border rounded w-full" />
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <label className="w-20 text-sm">Coordinator</label>
+                                            <Input placeholder="Coordinator name" value={advCoordinator} onChange={(e) => setAdvCoordinator((e.target as HTMLInputElement).value)} />
+                                        </div>
+                                    </div>
+                                </ModalBody>
+                                <ModalFooter>
+                                    <Button variant="bordered" onPress={() => { setIsAdvancedModalOpen(false); }}>Cancel</Button>
+                                    <Button color="primary" onPress={() => { onAdvancedFilter?.({ start: advStart || undefined, end: advEnd || undefined, coordinator: advCoordinator || undefined }); setIsAdvancedModalOpen(false); }} className="ml-2">Apply</Button>
+                                </ModalFooter>
+                            </ModalContent>
+                        </Modal>
         </>
     );
 }
