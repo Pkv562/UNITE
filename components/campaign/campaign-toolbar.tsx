@@ -14,15 +14,19 @@ import {
     Filter, 
     SlidersHorizontal,
     Ticket,
-    Check,
     ChevronDown,
 } from "lucide-react";
+import {
+    CreateTrainingEventModal,
+    CreateBloodDriveEventModal,
+    CreateAdvocacyEventModal,
+} from "./event-creation-modal";
     
 interface CampaignToolbarProps {
     onExport?: () => void;
     onQuickFilter?: () => void;
     onAdvancedFilter?: () => void;
-    onCreateEvent?: (eventType: string) => void;
+    onCreateEvent?: (eventType: string, eventData: any) => void;
     onTabChange?: (tab: string) => void;
     defaultTab?: string;
 }
@@ -37,6 +41,11 @@ export default function CampaignToolbar({
 }: CampaignToolbarProps) {
     const [selectedTab, setSelectedTab] = useState(defaultTab);
     const [selectedEventType, setSelectedEventType] = useState(new Set(["blood-drive"]));
+    
+    // Modal states
+    const [isTrainingModalOpen, setIsTrainingModalOpen] = useState(false);
+    const [isBloodDriveModalOpen, setIsBloodDriveModalOpen] = useState(false);
+    const [isAdvocacyModalOpen, setIsAdvocacyModalOpen] = useState(false);
     
     // Event type labels and descriptions
     const eventLabelsMap = {
@@ -61,118 +70,165 @@ export default function CampaignToolbar({
     // Get selected event type value
     const selectedEventTypeValue = Array.from(selectedEventType)[0] as string;
     
-    // Handle create event button click
-    const handleCreateEvent = () => {
-        onCreateEvent?.(selectedEventTypeValue);
+    // Handle create event button click - opens appropriate modal
+    const handleCreateEventClick = () => {
+        switch (selectedEventTypeValue) {
+            case "blood-drive":
+                setIsBloodDriveModalOpen(true);
+                break;
+            case "training":
+                setIsTrainingModalOpen(true);
+                break;
+            case "advocacy":
+                setIsAdvocacyModalOpen(true);
+                break;
+        }
+    };
+    
+    // Handle modal confirmations
+    const handleTrainingEventConfirm = (data: any) => {
+        onCreateEvent?.("training", data);
+        setIsTrainingModalOpen(false);
+    };
+    
+    const handleBloodDriveEventConfirm = (data: any) => {
+        onCreateEvent?.("blood-drive", data);
+        setIsBloodDriveModalOpen(false);
+    };
+    
+    const handleAdvocacyEventConfirm = (data: any) => {
+        onCreateEvent?.("advocacy", data);
+        setIsAdvocacyModalOpen(false);
     };
     
     return (
-        <div className="w-full bg-white">
-            <div className="flex items-center justify-between px-6 py-3">
-                {/* Left side - Status Tabs */}
-                <Tabs
-                    radius="md"
-                    size="sm"
-                    selectedKey={selectedTab}
-                    onSelectionChange={handleTabChange}
-                    variant="solid"
-                >
-                    <Tab key="all" title="All" />
-                    <Tab key="approved" title="Approved" />
-                    <Tab key="pending" title="Pending" />
-                    <Tab key="rejected" title="Rejected" />
-                </Tabs>
-        
-                {/* Right side - Action Buttons */}
-                <div className="flex items-center gap-2">
-                    {/* Export Button */}
-                    <Button
-                        variant="faded"
-                        startContent={<Download className="w-4 h-4" />}
-                        onPress={onExport}
+        <>
+            <div className="w-full bg-white">
+                <div className="flex items-center justify-between px-6 py-3">
+                    {/* Left side - Status Tabs */}
+                    <Tabs
                         radius="md"
                         size="sm"
-                    >
-                        Export
-                    </Button>
-        
-                    {/* Quick Filter Button */}
-                    <Button
-                        variant="faded"
-                        startContent={<Filter className="w-4 h-4" />}
-                        endContent={<ChevronDown className="w-4 h-4"/>}
-                        onPress={onQuickFilter}
-                        radius="md"
-                        size="sm"
-                    >
-                        Quick Filter
-                    </Button>
-        
-                    {/* Advanced Filter Button */}
-                    <Button
-                        variant="faded"
-                        startContent={<SlidersHorizontal className="w-4 h-4" />}
-                        endContent={<ChevronDown className="w-4 h-4"/>}
-                        onPress={onAdvancedFilter}
-                        radius="md"
-                        size="sm"
-                    >
-                        Advanced Filter
-                    </Button>
-        
-                    {/* Create Event Button Group with Dropdown Menu*/}
-                    <ButtonGroup 
+                        selectedKey={selectedTab}
+                        onSelectionChange={handleTabChange}
                         variant="solid"
-                        radius="md"
-                        size="sm"
                     >
+                        <Tab key="all" title="All" />
+                        <Tab key="approved" title="Approved" />
+                        <Tab key="pending" title="Pending" />
+                        <Tab key="rejected" title="Rejected" />
+                    </Tabs>
+            
+                    {/* Right side - Action Buttons */}
+                    <div className="flex items-center gap-2">
+                        {/* Export Button */}
                         <Button
-                            onPress={handleCreateEvent}
-                            color="primary"
-                            startContent={<Ticket className="w-4 h-4" />}
+                            variant="faded"
+                            startContent={<Download className="w-4 h-4" />}
+                            onPress={onExport}
+                            radius="md"
+                            size="sm"
                         >
-                            {eventLabelsMap[selectedEventTypeValue]}
+                            Export
                         </Button>
-                        <Dropdown placement="bottom-end">
-                            <DropdownTrigger>
-                                <Button 
-                                    isIconOnly
-                                    color="primary"
-                                >
-                                    <ChevronDown className="w-4 h-4"/>
-                                </Button>
-                            </DropdownTrigger>
-                            <DropdownMenu
-                                disallowEmptySelection
-                                aria-label="Event type options"
-                                className="max-w-2xl"
-                                selectedKeys={selectedEventType}
-                                selectionMode="single"
-                                onSelectionChange={setSelectedEventType}
+            
+                        {/* Quick Filter Button */}
+                        <Button
+                            variant="faded"
+                            startContent={<Filter className="w-4 h-4" />}
+                            endContent={<ChevronDown className="w-4 h-4"/>}
+                            onPress={onQuickFilter}
+                            radius="md"
+                            size="sm"
+                        >
+                            Quick Filter
+                        </Button>
+            
+                        {/* Advanced Filter Button */}
+                        <Button
+                            variant="faded"
+                            startContent={<SlidersHorizontal className="w-4 h-4" />}
+                            endContent={<ChevronDown className="w-4 h-4"/>}
+                            onPress={onAdvancedFilter}
+                            radius="md"
+                            size="sm"
+                        >
+                            Advanced Filter
+                        </Button>
+            
+                        {/* Create Event Button Group with Dropdown Menu*/}
+                        <ButtonGroup 
+                            variant="solid"
+                            radius="md"
+                            size="sm"
+                        >
+                            <Button
+                                onPress={handleCreateEventClick}
+                                color="primary"
+                                startContent={<Ticket className="w-4 h-4" />}
                             >
-                                <DropdownItem 
-                                    key="blood-drive" 
-                                    description={eventDescriptionsMap["blood-drive"]}
+                                {eventLabelsMap[selectedEventTypeValue]}
+                            </Button>
+                            <Dropdown placement="bottom-end">
+                                <DropdownTrigger>
+                                    <Button 
+                                        isIconOnly
+                                        color="primary"
+                                    >
+                                        <ChevronDown className="w-4 h-4"/>
+                                    </Button>
+                                </DropdownTrigger>
+                                <DropdownMenu
+                                    disallowEmptySelection
+                                    aria-label="Event type options"
+                                    className="max-w-2xl"
+                                    selectedKeys={selectedEventType}
+                                    selectionMode="single"
+                                    onSelectionChange={setSelectedEventType}
                                 >
-                                    {eventLabelsMap["blood-drive"]}
-                                </DropdownItem>
-                                <DropdownItem 
-                                    key="training" 
-                                    description={eventDescriptionsMap["training"]}
-                                >
-                                    {eventLabelsMap["training"]}
-                                </DropdownItem>
-                                <DropdownItem 
-                                    key="advocacy" 
-                                    description={eventDescriptionsMap["advocacy"]}
-                                >
-                                    {eventLabelsMap["advocacy"]}
-                                </DropdownItem>
-                            </DropdownMenu>
-                        </Dropdown>
-                    </ButtonGroup>
+                                    <DropdownItem 
+                                        key="blood-drive" 
+                                        description={eventDescriptionsMap["blood-drive"]}
+                                    >
+                                        {eventLabelsMap["blood-drive"]}
+                                    </DropdownItem>
+                                    <DropdownItem 
+                                        key="training" 
+                                        description={eventDescriptionsMap["training"]}
+                                    >
+                                        {eventLabelsMap["training"]}
+                                    </DropdownItem>
+                                    <DropdownItem 
+                                        key="advocacy" 
+                                        description={eventDescriptionsMap["advocacy"]}
+                                    >
+                                        {eventLabelsMap["advocacy"]}
+                                    </DropdownItem>
+                                </DropdownMenu>
+                            </Dropdown>
+                        </ButtonGroup>
+                    </div>
                 </div>
             </div>
-        </div>
+
+            {/* Event Creation Modals */}
+            <CreateTrainingEventModal
+                isOpen={isTrainingModalOpen}
+                onClose={() => setIsTrainingModalOpen(false)}
+                onConfirm={handleTrainingEventConfirm}
+            />
+
+            <CreateBloodDriveEventModal
+                isOpen={isBloodDriveModalOpen}
+                onClose={() => setIsBloodDriveModalOpen(false)}
+                onConfirm={handleBloodDriveEventConfirm}
+            />
+
+            <CreateAdvocacyEventModal
+                isOpen={isAdvocacyModalOpen}
+                onClose={() => setIsAdvocacyModalOpen(false)}
+                onConfirm={handleAdvocacyEventConfirm}
+            />
+        </>
     );
 }
