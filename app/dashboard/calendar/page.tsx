@@ -28,9 +28,14 @@ import {
 export default function CalendarPage() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [activeView, setActiveView] = useState("week");
-  const [selectedDate, setSelectedDate] = useState(26);
+  // Default to today so the week view starts on the current week
+  const today = new Date();
+  const [selectedDate, setSelectedDate] = useState(today.getDate());
   const [selectedEventType, setSelectedEventType] = useState<Set<string> | null>(null);
-  const [currentDate, setCurrentDate] = useState(new Date(2025, 9, 26)); // October 26, 2025
+  const [currentDate, setCurrentDate] = useState<Date>(today);
+  const [weekEventsByDate, setWeekEventsByDate] = useState<Record<string, any[]>>({});
+  const [monthEventsByDate, setMonthEventsByDate] = useState<Record<string, any[]>>({});
+  const [eventsLoading, setEventsLoading] = useState(false);
   const [isDateTransitioning, setIsDateTransitioning] = useState(false);
   const [isViewTransitioning, setIsViewTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('right');
@@ -155,6 +160,62 @@ export default function CalendarPage() {
     return days;
   };
 
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+
+  // Fetch week events from API and populate weekEventsByDate
+  const fetchWeekEvents = async (date: Date) => {
+    try {
+      setEventsLoading(true);
+      const token = localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`${API_URL}/api/calendar/week?date=${encodeURIComponent(date.toISOString())}`, { headers });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Failed to fetch calendar week');
+      const week = body.data || body.week || {};
+      const weekDays = week.weekDays || {};
+      setWeekEventsByDate(weekDays);
+    } catch (e: any) {
+      console.error('Failed to load week events', e);
+      setWeekEventsByDate({});
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  // Fetch month events from API and populate monthEventsByDate
+  const fetchMonthEvents = async (date: Date) => {
+    try {
+      setEventsLoading(true);
+      const token = localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token');
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const year = date.getFullYear();
+      const month = date.getMonth() + 1; // API expects 1-12
+      const res = await fetch(`${API_URL}/api/calendar/month?year=${year}&month=${month}`, { headers });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || 'Failed to fetch calendar month');
+      const monthData = body.data || body.month || {};
+      // month.eventsByDate is expected (keys yyyy-mm-dd -> events[])
+      const eventsByDate = monthData.eventsByDate || {};
+      setMonthEventsByDate(eventsByDate);
+    } catch (e: any) {
+      console.error('Failed to load month events', e);
+      setMonthEventsByDate({});
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  // Fetch events when currentDate or activeView changes
+  useEffect(() => {
+    if (activeView === 'week') {
+      fetchWeekEvents(currentDate);
+    } else if (activeView === 'month') {
+      fetchMonthEvents(currentDate);
+    }
+  }, [currentDate, activeView]);
+
   // Helper functions for month view
   const generateMonthDays = (date: Date) => {
     const year = date.getFullYear();
@@ -189,48 +250,63 @@ export default function CalendarPage() {
     return days;
   };
 
+  // Helper to convert numeric district to ordinal string (1 -> 1st)
+  const makeOrdinal = (n: number | string) => {
+    const num = parseInt(String(n), 10);
+    if (isNaN(num)) return String(n);
+    const suffixes = ['th', 'st', 'nd', 'rd'];
+    const v = num % 100;
+    const suffix = (v >= 11 && v <= 13) ? 'th' : (suffixes[num % 10] || 'th');
+    return `${num}${suffix}`;
+  };
+
   const getEventsForDate = (date: Date) => {
-    const events = [];
-    const day = date.getDate();
-    const month = date.getMonth();
-    const year = date.getFullYear();
-
-    // Sample events data based on the provided image
-    if (month === 9 && year === 2025) { // October 2025
-      if (day === 26) {
-        events.push({ 
-          title: "Lifesavers Blood Drive", 
-          time: "8:50 AM",
-          type: "training",
-          district: "1st District",
-          location: "Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippines",
-          countType: "Audience Count",
-          count: "205 no."
-        });
-      } else if (day === 27) {
-        events.push({ 
-          title: "Lifesavers Blood Drive", 
-          time: "8:50 AM",
-          type: "blood-drive",
-          district: "1st District",
-          location: "Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippines",
-          countType: "Goal Count",
-          count: "205 u."
-        });
-      } else if (day === 28) {
-        events.push({ 
-          title: "Lifesavers Blood Drive", 
-          time: "8:50 AM",
-          type: "advocacy",
-          district: "1st District",
-          location: "Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippines",
-          countType: "Audience Count",
-          count: "205 no."
-        });
+    const key = date.toISOString().split('T')[0];
+  // choose source depending on the active view (month or week)
+  const source = activeView === 'month' ? monthEventsByDate : weekEventsByDate;
+  const raw = source[key] || [];
+    // Normalize each event to the shape expected by the UI
+    return raw.map((e: any) => {
+      const start = e.Start_Date ? new Date(e.Start_Date) : null;
+      const time = start ? start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+      // coordinator name or fallback to event coordinator data
+      const coordinatorName = (e.coordinator && e.coordinator.name) ? e.coordinator.name : (e.coordinator_id || '');
+      // district display
+      const districtNumber = e.coordinator && e.coordinator.district_number ? e.coordinator.district_number : null;
+      const districtDisplay = districtNumber ? `${makeOrdinal(districtNumber)} District` : (e.coordinator && e.coordinator.district_name ? e.coordinator.district_name : '');
+      // count based on category
+      let countType = '';
+      let count = '';
+      if (e.category === 'BloodDrive' && e.categoryData && e.categoryData.Target_Donation !== undefined) {
+        countType = 'Goal Count';
+        count = `${e.categoryData.Target_Donation} u.`;
+      } else if (e.category === 'Training' && e.categoryData && e.categoryData.MaxParticipants !== undefined) {
+        countType = 'Participant Count';
+        count = `${e.categoryData.MaxParticipants} no.`;
+      } else if (e.category === 'Advocacy' && e.categoryData && e.categoryData.ExpectedAudienceSize !== undefined) {
+        countType = 'Audience Count';
+        count = `${e.categoryData.ExpectedAudienceSize} no.`;
       }
-    }
 
-    return events;
+      // normalize type key for UI labels (backend uses BloodDrive, Training, Advocacy)
+      const rawCat = (e.category || '').toString().toLowerCase();
+      let typeKey: string = 'event';
+      if (rawCat.includes('blood')) typeKey = 'blood-drive';
+      else if (rawCat.includes('train')) typeKey = 'training';
+      else if (rawCat.includes('advoc')) typeKey = 'advocacy';
+
+      return {
+        title: e.Event_Title || e.title || '',
+        time,
+        type: typeKey,
+        district: districtDisplay,
+        location: e.Location || '',
+        countType,
+        count,
+        coordinatorName,
+        raw: e
+      };
+    });
   };
 
   const isToday = (date: Date) => {
@@ -640,7 +716,7 @@ export default function CalendarPage() {
                                         />
                                       </div>
                                       <div>
-                                        <h5 className="text-sm font-medium text-gray-700">Local Government Unit</h5>
+                                        <h5 className="text-sm font-medium text-gray-700">{event.coordinatorName || 'Local Government Unit'}</h5>
                                       </div>
                                     </div>
 
