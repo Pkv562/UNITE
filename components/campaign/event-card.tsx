@@ -72,6 +72,7 @@ const EventCard: React.FC<EventCardProps> = ({
   const [newRole, setNewRole] = useState('');
   const [staffSaving, setStaffSaving] = useState(false);
   const [staffError, setStaffError] = useState<string | null>(null);
+  const [staffLoading, setStaffLoading] = useState(false);
 
   // Reschedule dialog state
   const [rescheduledDate, setRescheduledDate] = useState<any>(null);
@@ -164,8 +165,33 @@ const EventCard: React.FC<EventCardProps> = ({
           description="Manage staff for this event"
           startContent={<Users />}
           onPress={() => {
-            // open local manage staff modal and optionally call parent handler
+            // open local manage staff modal and load existing staff assignments
             setManageStaffOpen(true);
+            (async () => {
+              try {
+                setStaffError(null);
+                setStaffLoading(true);
+                if (!request || !request.Request_ID) return;
+                const token = localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token');
+                const headers: any = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/requests/${request.Request_ID}`, { headers });
+                const body = await res.json();
+                if (!res.ok) throw new Error(body.message || 'Failed to fetch request details');
+                const reqData = body.data || body.request || body;
+                const staff = reqData?.staff || [];
+                if (Array.isArray(staff)) {
+                  setStaffMembers(staff.map((s: any) => ({ FullName: s.FullName || s.Staff_FullName || s.Staff_Fullname || '', Role: s.Role || '' })));
+                } else {
+                  setStaffMembers([]);
+                }
+              } catch (e: any) {
+                setStaffError(e?.message || 'Failed to load staff');
+              } finally {
+                setStaffLoading(false);
+              }
+            })();
+
             if (typeof onManageStaff === 'function') onManageStaff();
           }}
         >
@@ -221,6 +247,31 @@ const EventCard: React.FC<EventCardProps> = ({
           startContent={<Users />}
           onPress={() => {
             setManageStaffOpen(true);
+            (async () => {
+              try {
+                setStaffError(null);
+                setStaffLoading(true);
+                if (!request || !request.Request_ID) return;
+                const token = localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token');
+                const headers: any = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/requests/${request.Request_ID}`, { headers });
+                const body = await res.json();
+                if (!res.ok) throw new Error(body.message || 'Failed to fetch request details');
+                const reqData = body.data || body.request || body;
+                const staff = reqData?.staff || [];
+                if (Array.isArray(staff)) {
+                  setStaffMembers(staff.map((s: any) => ({ FullName: s.FullName || s.Staff_FullName || s.Staff_Fullname || '', Role: s.Role || '' })));
+                } else {
+                  setStaffMembers([]);
+                }
+              } catch (e: any) {
+                setStaffError(e?.message || 'Failed to load staff');
+              } finally {
+                setStaffLoading(false);
+              }
+            })();
+
             if (typeof onManageStaff === 'function') onManageStaff();
           }}
         >
