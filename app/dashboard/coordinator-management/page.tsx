@@ -6,6 +6,7 @@ import Topbar from "@/components/topbar"
 import CoordinatorToolbar from "@/components/coordinator-management/coordinator-management-toolbar"
 import CoordinatorTable from "@/components/coordinator-management/coordinator-management-table"
 import AddCoordinatorModal from "@/components/coordinator-management/add-coordinator-modal"
+import QuickFilterModal from "@/components/coordinator-management/quick-filter-modal"
 import EditCoordinatorModal from "@/components/coordinator-management/coordinator-edit-modal"
 import DeleteCoordinatorModal from "@/components/coordinator-management/delete-coordinator-modal"
 
@@ -34,6 +35,8 @@ export default function CoordinatorManagement() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [filters, setFilters] = useState<{ province?: string; districtId?: string }>({})
+  const [openQuickFilter, setOpenQuickFilter] = useState(false)
   const [editingCoordinator, setEditingCoordinator] = useState<any | null>(null)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [deletingCoordinator, setDeletingCoordinator] = useState<{ id: string; name: string } | null>(null)
@@ -41,6 +44,14 @@ export default function CoordinatorManagement() {
   const rawUserNow = (typeof window !== 'undefined') ? (localStorage.getItem('unite_user') || null) : null
   const parsedUser = rawUserNow ? JSON.parse(rawUserNow) : null
   const isAdmin = !!(parsedUser && ((parsedUser.staff_type && parsedUser.staff_type.toLowerCase() === 'admin') || (parsedUser.role && parsedUser.role.toLowerCase() === 'admin') || (parsedUser.type && parsedUser.type.toLowerCase() === 'admin')))
+
+  // derive display name and email for Topbar (match campaign page behavior)
+  const first = parsedUser?.First_Name || parsedUser?.FirstName || parsedUser?.first_name || parsedUser?.First || parsedUser?.first || ''
+  const middle = parsedUser?.Middle_Name || parsedUser?.MiddleName || parsedUser?.middle_name || parsedUser?.middleName || parsedUser?.Middle || ''
+  const last = parsedUser?.Last_Name || parsedUser?.LastName || parsedUser?.last_name || parsedUser?.lastName || parsedUser?.Last || parsedUser?.last || ''
+  const nameParts = [first, middle, last].map((p) => (p || '').toString().trim()).filter(Boolean)
+  const displayName = nameParts.join(' ') || parsedUser?.name || parsedUser?.Name || 'Bicol Medical Center'
+  const displayEmail = parsedUser?.Email || parsedUser?.email || parsedUser?.Email_Address || parsedUser?.emailAddress || parsedUser?.EmailAddress || 'bmc@gmail.com'
 
 
   const handleSearch = (query: string) => {
@@ -59,7 +70,7 @@ export default function CoordinatorManagement() {
 
 
   const handleQuickFilter = () => {
-    console.log("Opening quick filter...")
+    setOpenQuickFilter(true)
   }
 
 
@@ -255,7 +266,7 @@ export default function CoordinatorManagement() {
 
 
   // Fetch coordinators from backend and normalize shape for the table
-  const fetchCoordinators = async () => {
+  const fetchCoordinators = async (appliedFilters?: { province?: string; districtId?: string }) => {
     const ordinalSuffix = (n: number | string) => {
       const num = Number(n)
       if (Number.isNaN(num)) return String(n)
@@ -289,9 +300,16 @@ export default function CoordinatorManagement() {
       const adminId = user?.id || user?.ID || user?.Staff_ID || user?.StaffId || user?.Admin_ID || user?.adminId || null
       const isAdmin = (user && ((user.staff_type && user.staff_type.toLowerCase() === 'admin') || (user.role && user.role.toLowerCase() === 'admin') || (user.type && user.type.toLowerCase() === 'admin')))
 
+      // attach filters as query params when present
+      const params = new URLSearchParams()
+      params.set('limit', '1000')
+      const af = appliedFilters || filters || {}
+      if (af.districtId) params.set('districtId', String(af.districtId))
+      if (af.province) params.set('province', String(af.province))
+
       const url = base
-        ? (isAdmin && adminId ? `${base}/api/admin/${encodeURIComponent(adminId)}/coordinators?limit=1000` : `${base}/api/coordinators?limit=1000`)
-        : (isAdmin && adminId ? `/api/admin/${encodeURIComponent(adminId)}/coordinators?limit=1000` : `/api/coordinators?limit=1000`)
+        ? (isAdmin && adminId ? `${base}/api/admin/${encodeURIComponent(adminId)}/coordinators?${params.toString()}` : `${base}/api/coordinators?${params.toString()}`)
+        : (isAdmin && adminId ? `/api/admin/${encodeURIComponent(adminId)}/coordinators?${params.toString()}` : `/api/coordinators?${params.toString()}`)
 
       const headers: any = {}
       if (token) headers['Authorization'] = `Bearer ${token}`
@@ -350,8 +368,8 @@ export default function CoordinatorManagement() {
 
       {/* Topbar Component */}
       <Topbar
-        userName="Bicol Medical Center"
-        userEmail="bmc@gmail.com"
+        userName={displayName}
+        userEmail={displayEmail}
         onUserClick={handleUserClick}
       />
 
@@ -359,8 +377,8 @@ export default function CoordinatorManagement() {
       {/* Toolbar with Search and Actions */}
       <CoordinatorToolbar
         onExport={handleExport}
-        onQuickFilter={handleQuickFilter}
         onAdvancedFilter={handleAdvancedFilter}
+        onQuickFilter={handleQuickFilter}
         onAddCoordinator={handleAddCoordinator}
         onSearch={handleSearch}
       />
@@ -403,6 +421,16 @@ export default function CoordinatorManagement() {
         onClose={() => { setIsEditModalOpen(false); setEditingCoordinator(null); }}
         coordinator={editingCoordinator}
         onSaved={async () => { await fetchCoordinators(); setIsEditModalOpen(false); setEditingCoordinator(null); }}
+      />
+
+      <QuickFilterModal
+        isOpen={openQuickFilter}
+        onClose={() => setOpenQuickFilter(false)}
+        onApply={(f) => {
+          setFilters(f)
+          setOpenQuickFilter(false)
+          fetchCoordinators(f)
+        }}
       />
     </div>
   )
