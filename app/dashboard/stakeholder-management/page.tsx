@@ -24,6 +24,7 @@ interface StakeholderFormData {
 	province: string
 	district: string
 	districtId?: string
+	cityMunicipality?: string
 }
 
 
@@ -33,6 +34,7 @@ export default function StakeholderManagement() {
 	const [selectedStakeholders, setSelectedStakeholders] = useState<string[]>([])
 	const [isAddModalOpen, setIsAddModalOpen] = useState(false)
 	const [isCreating, setIsCreating] = useState(false)
+	const [modalError, setModalError] = useState<string | null>(null)
 	const [stakeholders, setStakeholders] = useState<any[]>([])
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
@@ -44,6 +46,8 @@ export default function StakeholderManagement() {
 	const [deletingStakeholder, setDeletingStakeholder] = useState<{ id: string; name: string } | null>(null)
     // map of District_ID -> district object to resolve province and formatted district
     const [districtsMap, setDistrictsMap] = useState<Record<string, any> | null>(null)
+	const [districtsList, setDistrictsList] = useState<any[]>([])
+	const [userDistrictId, setUserDistrictId] = useState<string | null>(null)
 
 		// Do not call getUserInfo() synchronously — read it on mount so server and client
 		// produce the same initial HTML; update user-derived state after hydration.
@@ -65,6 +69,13 @@ export default function StakeholderManagement() {
 				setCanManageStakeholders(!!(isStaffAdmin && (isSystemAdmin || roleLower === 'admin')))
 				setDisplayName(info?.displayName || 'Bicol Medical Center')
 				setDisplayEmail(info?.email || 'bmc@gmail.com')
+				// determine logged-in user's district id (if any)
+				try {
+					const rawUser = localStorage.getItem('unite_user')
+					const u = rawUser ? JSON.parse(rawUser) : null
+					const uid = u?.District_ID || u?.DistrictId || u?.districtId || (u?.District && (u.District.District_ID || u.District.DistrictId)) || (info?.raw && (info.raw.District_ID || info.raw.DistrictId || info.raw.districtId)) || null
+					setUserDistrictId(uid || null)
+				} catch (e) { /* ignore */ }
 			} catch (e) { /* ignore */ }
 		}, [])
 
@@ -87,6 +98,7 @@ export default function StakeholderManagement() {
 							if (d.District_ID) map[String(d.District_ID)] = d
 						}
 						setDistrictsMap(map)
+						setDistrictsList(items)
 					} catch (e) {
 						// ignore district load errors
 					}
@@ -110,6 +122,24 @@ export default function StakeholderManagement() {
 	}
 
 
+	const handleCreateCode = async () => {
+		// Generate a simple stakeholder invite/code and copy to clipboard
+		const randomPart = Math.random().toString(36).replace(/[^a-z0-9]+/gi, '').substr(0, 6).toUpperCase()
+		const code = `STK-${randomPart}`
+		try {
+			if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+				await navigator.clipboard.writeText(code)
+				alert(`Code created and copied to clipboard: ${code}`)
+			} else {
+				// fallback: show prompt so user can copy
+				window.prompt('Copy this code', code)
+			}
+		} catch (e) {
+			try { window.prompt('Copy this code', code) } catch (_) { alert(`Code: ${code}`) }
+		}
+	}
+
+
 	const handleQuickFilter = () => {
 		setOpenQuickFilter(true)
 	}
@@ -121,6 +151,57 @@ export default function StakeholderManagement() {
 
 
 	const handleAddStakeholder = () => {
+		// Recompute user district id at the moment of opening the modal to ensure we capture
+		// the latest stored user shape (some sessions store different key names).
+		try {
+			let uid: any = null
+			let parsed: any = null
+			try {
+				const raw = localStorage.getItem('unite_user')
+				parsed = raw ? JSON.parse(raw) : null
+			} catch (e) { parsed = null }
+
+			// helper to check multiple likely locations
+			const searchPaths = [
+				parsed,
+				parsed?.user,
+				parsed?.data,
+				parsed?.staff,
+				parsed?.profile,
+				parsed?.User,
+				parsed?.result,
+				parsed?.userInfo,
+			]
+
+			for (const p of searchPaths) {
+				if (!p) continue
+				// Common variants: District_ID, DistrictId, districtId, district_id
+				if (p.District_ID) { uid = p.District_ID; break }
+				if (p.DistrictId) { uid = p.DistrictId; break }
+				if (p.districtId) { uid = p.districtId; break }
+				if (p.district_id) { uid = p.district_id; break }
+				if (p.District && (p.District.District_ID || p.District.DistrictId || p.District.districtId || p.District.district_id)) { uid = p.District.District_ID || p.District.DistrictId || p.District.districtId || p.District.district_id; break }
+				if (p.district && (p.district.District_ID || p.district.DistrictId || p.district.districtId || p.district.district_id)) { uid = p.district.District_ID || p.district.DistrictId || p.district.districtId || p.district.district_id; break }
+				// role_data is used in some payloads (see user's debug output)
+				if (p.role_data && (p.role_data.district_id || p.role_data.districtId || p.role_data.district)) { uid = p.role_data.district_id || p.role_data.districtId || p.role_data.district; break }
+				// some payloads include a nested user object
+				if (p.user && (p.user.District_ID || p.user.DistrictId || p.user.districtId || p.user.district_id)) { uid = p.user.District_ID || p.user.DistrictId || p.user.districtId || p.user.district_id; break }
+			}
+
+			// fallback to previously set userInfo raw
+			if (!uid && userInfo?.raw) {
+				const r = userInfo.raw
+				uid = r?.District_ID || r?.DistrictId || r?.districtId || (r?.District && (r.District.District_ID || r.District.DistrictId)) || null
+			}
+
+			setUserDistrictId(uid || null)
+			// eslint-disable-next-line no-console
+			console.log('[StakeholderManagement] handleAddStakeholder parsed user object:', parsed)
+			// eslint-disable-next-line no-console
+			console.log('[StakeholderManagement] handleAddStakeholder computed userDistrictId:', uid)
+		} catch (e) {
+			// ignore
+		}
 		setIsAddModalOpen(true)
 	}
 
@@ -130,65 +211,73 @@ export default function StakeholderManagement() {
 	}
 
 
+
 	const handleModalSubmit = async (data: any) => {
-		console.log("New stakeholder data:", data)
+		setModalError(null)
 		setIsCreating(true)
 		try {
 			const base = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
-			// get logged-in admin id and token
 			let rawUser = null
 			try { rawUser = localStorage.getItem('unite_user') } catch (e) { rawUser = null }
 			const user = rawUser ? JSON.parse(rawUser) : null
 			const token = (typeof window !== 'undefined') ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null
-			const adminId = user?.id || user?.ID || user?.Staff_ID || user?.StaffId || user?.Admin_ID || user?.adminId || null
-			if (!adminId) throw new Error('Logged-in admin id not found')
+			// Always post to the register endpoint per backend routes
+			const url = base ? `${base}/api/stakeholders/register` : `/api/stakeholders/register`
 
-			const url = base ? `${base}/api/admin/${encodeURIComponent(adminId)}/stakeholders` : `/api/admin/${encodeURIComponent(adminId)}/stakeholders`
-
-			// The backend expects stakeholder data in body (see stakeholder.service.register)
-			// Stakeholder creation payload - keep shape similar to backend stakeholder.register
-			const body = {
+			const payload: any = {
 				First_Name: data.firstName,
 				Middle_Name: data.middleName || null,
 				Last_Name: data.lastName,
 				Email: data.stakeholderEmail,
+				Organization_Institution: data.organization || null,
 				Phone_Number: data.contactNumber,
 				Password: data.password,
 				Province_Name: data.province,
-				District_ID: data.districtId || data.district,
-				createdByAdminId: adminId
+				District_ID: data.districtId || data.district || userDistrictId || null,
+				City_Municipality: data.cityMunicipality || null,
+			}
+
+			// If coordinator creating, include Coordinator_ID
+			if (!canManageStakeholders) {
+				let coordId = user?.id || user?.ID || null
+				try {
+					const raw = localStorage.getItem('unite_user')
+					const parsed = raw ? JSON.parse(raw) : null
+					coordId = coordId || parsed?.role_data?.coordinator_id || parsed?.coordinator_id || parsed?.id || coordId
+				} catch (e) { /* ignore */ }
+				if (coordId) payload.Coordinator_ID = coordId
 			}
 
 			const headers: any = { 'Content-Type': 'application/json' }
 			if (token) headers['Authorization'] = `Bearer ${token}`
 
-			const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
+			const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) })
 			const text = await res.text()
 			let json: any = null
 			try { json = text ? JSON.parse(text) : null } catch (err) { throw new Error(`Invalid JSON response when creating stakeholder: ${text.slice(0,200)}`) }
-			if (!res.ok) throw new Error(json?.message || `Failed to create stakeholder (status ${res.status})`)
+			if (!res.ok) {
+				const rawMsg = json?.message || text || `Failed to create stakeholder (status ${res.status})`
+				let pretty = String(rawMsg)
+				if (/email/i.test(pretty)) pretty = 'That email is already registered or invalid. Please use a different email.'
+				else if (/district/i.test(pretty)) pretty = 'Invalid district selected.'
+				else if (/password/i.test(pretty)) pretty = 'Password invalid. Please ensure it meets requirements.'
+				else { pretty = pretty.replace(/[_\-]/g, ' '); pretty = pretty.charAt(0).toUpperCase() + pretty.slice(1) }
+				setModalError(pretty)
+				throw new Error(pretty)
+			}
 
-			// success: refresh stakeholders list
-			await (async () => {
-				// reuse fetchStakeholders logic: crudely re-run the effect by calling internal fetch
-				setLoading(true)
-				setError(null)
-				try {
-					// refresh list of stakeholders using same fetch logic used elsewhere
-					await fetchStakeholders()
-				} catch (e) {
-					// ignore refresh errors
-				} finally { setLoading(false) }
-			})()
+			setLoading(true)
+			setError(null)
+			try { await fetchStakeholders() } catch (e) { /* ignore */ } finally { setLoading(false) }
 
 			setIsAddModalOpen(false)
 		} catch (err: any) {
-			alert(err?.message || 'Failed to create stakeholder')
+			if (!modalError) setModalError(err?.message || 'Failed to create stakeholder')
 			console.error(err)
 		} finally {
 			setIsCreating(false)
 		}
-	}
+		}
 
 
 	const handleSelectAll = (checked: boolean) => {
@@ -311,22 +400,45 @@ export default function StakeholderManagement() {
 	const useAdminEndpoint = !!(fetchIsSystemAdmin && fetchIsStaffAdmin && adminId)
 	// detect if the user is a coordinator so we limit results to their district
 	const fetchIsCoordinator = !!fetchStaffType && String(fetchStaffType).toLowerCase() === 'coordinator'
-	// attempt to read user's district id
-	const userDistrictId = user?.District_ID || user?.DistrictId || user?.districtId || (user?.District && (user.District.District_ID || user.District.District_Number)) || (userInfo?.raw && (userInfo.raw.District_ID || userInfo.raw.DistrictId || userInfo.raw.districtId)) || null
+	// attempt to read user's district id from several possible shapes (including role_data)
+	const userDistrictId =
+		user?.District_ID ||
+		user?.DistrictId ||
+		user?.districtId ||
+		(user?.role_data && (user.role_data.district_id || user.role_data.districtId || user.role_data.district)) ||
+		(user?.District && (user.District.District_ID || user.District.District_Number)) ||
+		(userInfo?.raw && (userInfo.raw.District_ID || userInfo.raw.DistrictId || userInfo.raw.districtId || (userInfo.raw.role_data && (userInfo.raw.role_data.district_id || userInfo.raw.role_data.districtId)))) ||
+		null
 
 			// attach filters as query params when present
 			const params = new URLSearchParams()
 			params.set('limit', '1000')
 			const af = appliedFilters || filters || {}
-			// If the logged-in user is a coordinator, restrict to their district unless an explicit filter is applied
-			if (af.districtId) params.set('districtId', String(af.districtId))
-			else if (fetchIsCoordinator && userDistrictId) params.set('districtId', String(userDistrictId))
+			// If the logged-in user is NOT a system admin (i.e., a coordinator), restrict to their district
+			// unless an explicit filter is applied. Use page-level canManageStakeholders flag which
+			// represents system admin capability.
+			if (af.districtId) params.set('district_id', String(af.districtId))
+			else if (!canManageStakeholders && userDistrictId) params.set('district_id', String(userDistrictId))
 			if (af.province) params.set('province', String(af.province))
 
 			const url = base
 				? (useAdminEndpoint ? `${base}/api/admin/${encodeURIComponent(adminId)}/stakeholders?${params.toString()}` : `${base}/api/stakeholders?${params.toString()}`)
 				: (useAdminEndpoint ? `/api/admin/${encodeURIComponent(adminId)}/stakeholders?${params.toString()}` : `/api/stakeholders?${params.toString()}`)
-
+			// Debug: log computed request details so we can verify coordinator filtering
+			try {
+				// eslint-disable-next-line no-console
+				console.log('[fetchStakeholders] request debug', {
+					userInfo: userInfo && Object.keys(userInfo).length ? { displayName: userInfo.displayName, role: userInfo.role, isAdmin: userInfo.isAdmin } : null,
+					storedUserPreview: user ? ({ id: user.id || user.ID || user.Stakeholder_ID || null, staffType: user.StaffType || user.staff_type || user.staffType || null, role_data: user.role_data || null }) : null,
+					canManageStakeholders,
+					fetchIsCoordinator,
+					userDistrictId,
+					params: params.toString(),
+					url,
+					tokenPresent: !!token,
+				})
+			} catch (e) { }
+			
 			const headers: any = {}
 			if (token) headers['Authorization'] = `Bearer ${token}`
 			const res = await fetch(url, { headers })
@@ -344,8 +456,15 @@ export default function StakeholderManagement() {
 
 			if (!res.ok) throw new Error(json?.message || `Failed to fetch stakeholders (status ${res.status})`)
 
-			// backend stakeholder list returns items with First_Name, Middle_Name, Last_Name, Email, Phone_Number, Province_Name, District_ID or District_Name
-			const items = json.data || json.stakeholders || []
+						// backend stakeholder list returns items with First_Name, Middle_Name, Last_Name, Email, Phone_Number, Province_Name, District_ID or District_Name
+						const items = json.data || json.stakeholders || []
+
+						// Debug: log which district IDs are present in the response
+						try {
+							const returnedDistricts = Array.from(new Set(items.map((it: any) => it.District_ID || it.district_id || it.DistrictId || it.districtId || it.District || it.District_Name || it.District_Name || ''))).filter(Boolean)
+							// eslint-disable-next-line no-console
+							console.log('[fetchStakeholders] response districts:', returnedDistricts, 'itemsCount:', items.length)
+						} catch (e) { /* ignore */ }
 			const mapped = items.map((s: any) => {
 				const fullName = [s.First_Name, s.Middle_Name, s.Last_Name].filter(Boolean).join(' ')
 				// Prefer a populated District object when available
@@ -376,10 +495,103 @@ export default function StakeholderManagement() {
 					name: fullName,
 					email: s.Email || '',
 					phone: s.Phone_Number || '',
-					organization: s.Organization_Institution || s.Organization || s.Organization_Institution || '',
+					// Resolve organization from multiple possible shapes, including nested objects
+					organization: ((): string => {
+						const tryValues = [
+							s.Organization_Institution,
+							s.Organization,
+							s.organization,
+							s.OrganizationName,
+							s.Organization_Name,
+							s.organization_institution,
+							s.Organisation,
+							s.organisation,
+							s.OrganizationInstitution,
+							s.data && s.data.Organization_Institution,
+							s.data && s.data.organization,
+							s.stakeholder && s.stakeholder.Organization_Institution,
+							s.stakeholder && s.stakeholder.organization,
+							s.result && s.result.Organization_Institution,
+							s.details && s.details.Organization_Institution,
+						]
+						for (const v of tryValues) {
+							if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+						}
+						// As a last resort, do a shallow scan for any key name that looks like organization/institution
+						for (const k of Object.keys(s || {})) {
+							const key = String(k).toLowerCase()
+							if (key.includes('organ') || key.includes('institut') || key.includes('organisation')) {
+								const v = s[k]
+								if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+							}
+						}
+						return ''
+					})(),
 					district: districtDisplay
 				}
 			})
+
+				// Debug: log detailed information for any items where organization resolved to empty
+				try {
+					const missingOrg = items.filter((s: any) => {
+						const org = (s.Organization_Institution || s.Organization || s.organization || s.OrganizationName || s.Organization_Name || s.organization_institution || s.Organisation || s.organisation || s.OrganizationInstitution) || ''
+						return !org || String(org).trim() === ''
+					})
+					if (missingOrg && missingOrg.length > 0) {
+						// Build a concise diagnostic for each missing-org item
+						const diag = missingOrg.slice(0, 10).map((s: any) => ({
+							id: s.Stakeholder_ID || s.id || '(no-id)',
+							name: [s.First_Name, s.Middle_Name, s.Last_Name].filter(Boolean).join(' ') || s.name || '(no-name)',
+							// candidate organization-like fields and their values
+							candidates: {
+								Organization_Institution: s.Organization_Institution,
+								Organization: s.Organization,
+								organization: s.organization,
+								OrganizationName: s.OrganizationName,
+								Organization_Name: s.Organization_Name,
+								organization_institution: s.organization_institution,
+								Organisation: s.Organisation,
+								organisation: s.organisation,
+								OrganizationInstitution: s.OrganizationInstitution,
+							},
+							keys: Object.keys(s || {}).slice(0, 20),
+							raw: s,
+						}))
+						// eslint-disable-next-line no-console
+						console.warn('[fetchStakeholders] stakeholders missing organization (diagnostics):', diag)
+					}
+					// Also log the first few mapped items for inspection
+					// eslint-disable-next-line no-console
+					console.log('[fetchStakeholders] mapped sample (first 5):', mapped.slice(0, 5))
+
+					// Fallback: if some mapped items still have empty organization, attempt to fetch
+					// full stakeholder details for those items (limited to first 10) — some list
+					// endpoints may omit certain fields while the detail endpoint returns them.
+					const needFix = mapped.filter((m: any) => (!m.organization || String(m.organization).trim() === '') && m.id).slice(0, 10)
+					if (needFix.length > 0) {
+						try {
+							await Promise.all(needFix.map(async (m: any) => {
+								const url2 = base
+									? `${base}/api/stakeholders/${encodeURIComponent(m.id)}`
+									: `/api/stakeholders/${encodeURIComponent(m.id)}`
+								const res2 = await fetch(url2, { headers })
+								if (!res2.ok) return
+								const t2 = await res2.text()
+								let j2: any = null
+								try { j2 = t2 ? JSON.parse(t2) : null } catch { return }
+								const s2 = j2?.data || j2?.stakeholder || j2 || null
+								if (!s2) return
+								const org2 = s2.Organization_Institution || s2.Organization || s2.organization || s2.OrganizationName || s2.Organization_Name || s2.organization_institution || null
+								if (org2 && String(org2).trim() !== '') {
+									const idx = mapped.findIndex((x: any) => x.id === m.id)
+									if (idx >= 0) mapped[idx].organization = String(org2).trim()
+								}
+							}))
+						} catch (e) {
+							// ignore fallback errors
+						}
+					}
+				} catch (e) { /* ignore debug errors */ }
 
 			setStakeholders(mapped)
 		} catch (err: any) {
@@ -423,6 +635,7 @@ export default function StakeholderManagement() {
 				onAdvancedFilter={handleAdvancedFilter}
 				onQuickFilter={handleQuickFilter}
 				onAddCoordinator={handleAddStakeholder}
+				onCreateCode={handleCreateCode}
 				onSearch={handleSearch}
 			/>
 
@@ -451,6 +664,12 @@ export default function StakeholderManagement() {
 				isOpen={isAddModalOpen}
 				onClose={handleModalClose}
 				onSubmit={handleModalSubmit}
+				isSysAdmin={canManageStakeholders}
+				userDistrictId={userDistrictId}
+				districtsProp={districtsList}
+				isSubmitting={isCreating}
+				modalError={modalError}
+				onClearError={() => setModalError(null)}
 			/>
 			<DeleteStakeholderModal
 				isOpen={isDeleteModalOpen}

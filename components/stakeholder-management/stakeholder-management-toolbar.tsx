@@ -9,7 +9,8 @@ import {
   Filter,
   SlidersHorizontal,
   Plus,
-  ChevronDown
+  ChevronDown,
+  Key
 } from "lucide-react"
 
 
@@ -18,6 +19,7 @@ interface StakeholderToolbarProps {
   onQuickFilter: () => void
   onAdvancedFilter: () => void
   onAddCoordinator: () => void
+  onCreateCode?: () => void
   onSearch?: (query: string) => void
 }
 
@@ -27,6 +29,7 @@ export default function StakeholderToolbar({
   onQuickFilter,
   onAdvancedFilter,
   onAddCoordinator,
+  onCreateCode,
   onSearch,
 }: StakeholderToolbarProps) {
   return (
@@ -93,6 +96,17 @@ export default function StakeholderToolbar({
 
 
           {/* Add Stakeholder Button */}
+          {/* Create Code Button (left of Add) */}
+          <Button
+            variant="bordered"
+            startContent={<Key className="w-4 h-4" />}
+            onPress={() => onCreateCode && onCreateCode()}
+            radius="md"
+            size="sm"
+            className="border-gray-200"
+          >
+            Create code
+          </Button>
           <Button
             color="default"
             startContent={<Plus className="w-4 h-4" />}
