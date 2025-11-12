@@ -19,7 +19,7 @@ export function getUserInfo(): UserInfo {
   const parsed = safeParse(raw)
   // small console debug to help during development
   // NOTE: this prints the parsed user object to the browser console for debugging only
-  try { console.debug('[getUserInfo] rawUser:', raw, 'parsedUser:', parsed) } catch (e) { /* ignore */ }
+  // debug logs removed
 
   // helper to search likely locations for a role field
   const searchPaths = [
@@ -64,7 +64,7 @@ export function getUserInfo(): UserInfo {
   }
 
   const role = foundRole ? String(foundRole).trim() : null
-  try { console.debug('[getUserInfo] roleCandidates:', candidates, 'roleChosen:', role, 'fromKey:', foundPath) } catch (e) {}
+  // debug logs removed
 
   // Treat only system-admin style roles as admin (e.g. 'sysadmin', 'system_admin', 'system admin')
   // This avoids matching other roles that happen to include 'admin' as a substring.

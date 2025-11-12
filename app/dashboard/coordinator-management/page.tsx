@@ -42,28 +42,32 @@ export default function CoordinatorManagement() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [deletingCoordinator, setDeletingCoordinator] = useState<{ id: string; name: string } | null>(null)
 
-  const userInfo = getUserInfo()
+  // Do not call getUserInfo() synchronously during render — read it on mount so
+  // server and client initial HTML remain identical and avoid hydration mismatches.
+  const [userInfo, setUserInfo] = useState<any | null>(null)
+  const [displayName, setDisplayName] = useState('Bicol Medical Center')
+  const [displayEmail, setDisplayEmail] = useState('bmc@gmail.com')
+  const [canManageCoordinators, setCanManageCoordinators] = useState(false)
 
-  // derive explicit staffType and system-admin flag; require BOTH to allow coordinator actions
-  const rawUser = userInfo?.raw || null
-  const staffType = rawUser?.StaffType || rawUser?.Staff_Type || rawUser?.staff_type || rawUser?.staffType || (rawUser?.user && (rawUser.user.StaffType || rawUser.user.staff_type || rawUser.user.staffType)) || null
-  const isStaffAdmin = !!staffType && String(staffType).toLowerCase() === 'admin'
-
-  // Resolve role string and compute system-admin flag similarly to Sidebar
-  const resolvedRole = userInfo?.role || null
-  const roleLower = resolvedRole ? String(resolvedRole).toLowerCase() : ''
-  const isSystemAdmin = !!userInfo?.isAdmin || (roleLower.includes('sys') && roleLower.includes('admin'))
-
-  // Allow management when user has StaffType='Admin' and either is a system admin OR has an 'admin' role
-  const canManageCoordinators = !!(isStaffAdmin && (isSystemAdmin || roleLower === 'admin'))
-
-  // derive display name and email for Topbar (match campaign page behavior)
-  const displayName = userInfo?.displayName || 'Bicol Medical Center'
-  const displayEmail = userInfo?.email || 'bmc@gmail.com'
+  useEffect(() => {
+    try {
+      const info = getUserInfo()
+      setUserInfo(info)
+      const rawUser = info?.raw || null
+      const staffType = rawUser?.StaffType || rawUser?.Staff_Type || rawUser?.staff_type || rawUser?.staffType || (rawUser?.user && (rawUser.user.StaffType || rawUser.user.staff_type || rawUser.user.staffType)) || null
+      const isStaffAdmin = !!staffType && String(staffType).toLowerCase() === 'admin'
+      const resolvedRole = info?.role || null
+      const roleLower = resolvedRole ? String(resolvedRole).toLowerCase() : ''
+      const isSystemAdmin = !!info?.isAdmin || (roleLower.includes('sys') && roleLower.includes('admin'))
+      setCanManageCoordinators(!!(isStaffAdmin && (isSystemAdmin || roleLower === 'admin')))
+      setDisplayName(info?.displayName || 'Bicol Medical Center')
+      setDisplayEmail(info?.email || 'bmc@gmail.com')
+    } catch (e) { /* ignore */ }
+  }, [])
 
   // Debug: surface permission flags so we can see why actions may be hidden
   try {
-    console.log('[CoordinatorPage] userInfo=', userInfo, 'staffType=', staffType, 'isSystemAdmin=', isSystemAdmin, 'isStaffAdmin=', isStaffAdmin, 'canManageCoordinators=', canManageCoordinators)
+    // debug logs removed
   } catch (e) { /* ignore */ }
 
 
@@ -217,7 +221,7 @@ export default function CoordinatorManagement() {
 
 
   const handleActionClick = (id: string) => {
-    console.log("Action clicked for coordinator:", id)
+    // action handler
   }
 
   const handleUpdateCoordinator = (id: string) => {

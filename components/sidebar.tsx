@@ -26,9 +26,11 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
     
-    // Determine role from prop or centralized helper
-    const info = getUserInfo()
-    try { console.debug('[Sidebar] getUserInfo:', info) } catch (e) {}
+    // Prefer the `userInfo` prop when provided (it may be passed from the layout/server)
+    // so both server and client render the same initial HTML and avoid hydration mismatches.
+    // Fall back to `getUserInfo()` only when no `userInfo` prop is present.
+    const info = userInfo && Object.keys(userInfo).length ? (userInfo as any) : getUserInfo()
+    // debug logs removed
 
     let resolvedRole = role || (info && info.role) || null
 
@@ -42,9 +44,7 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
         const staffType = raw?.StaffType || raw?.Staff_Type || raw?.staff_type || raw?.staffType || (raw?.user && (raw.user.StaffType || raw.user.staff_type || raw.user.staffType)) || null
         const isStaffAdmin = !!staffType && String(staffType).toLowerCase() === 'admin'
 
-        console.log('[Sidebar] resolvedRole=', resolvedRole, 'staffType=', staffType, 'isSystemAdmin=', isSystemAdmin, 'isStaffAdmin=', isStaffAdmin)
-        if (isSystemAdmin) console.log('[Sidebar] resolvedRole appears to be a system-admin role')
-        if (isStaffAdmin) console.log('[Sidebar] staffType indicates Admin — Coordinator link will be shown')
+    // debug logs removed
     } catch (e) { /* ignore logging errors */ }
 
     const links = [
@@ -52,12 +52,17 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
         { href: "/dashboard/calendar", icon: Calendar },
     ];
 
-    // Only show coordinator management link for users whose StaffType is explicitly 'Admin'
-    // This prevents other roles (including system-level roles) from accidentally seeing the coordinator page.
-    const raw = info?.raw || null
+    // Show coordinator management link only when the user is a system admin
+    // (explicit system admin flag or role that includes system+admin), OR when
+    // the user's StaffType is explicitly 'Admin'. This keeps coordinator access
+    // limited to true admins while allowing system-level admins to see it.
+    const raw = (info && (info.raw || info)) || null
     const staffType = raw?.StaffType || raw?.Staff_Type || raw?.staff_type || raw?.staffType || (raw?.user && (raw.user.StaffType || raw.user.staff_type || raw.user.staffType)) || null
-    const isStaffAdmin = !!staffType && String(staffType).toLowerCase() === 'admin'
-    if (isStaffAdmin) {
+    const roleFromResolved = resolvedRole ? String(resolvedRole).toLowerCase() : ''
+    const isSystemAdmin = !!(info && info.isAdmin) || (roleFromResolved.includes('sys') && roleFromResolved.includes('admin'))
+    const isStaffTypeAdmin = !!staffType && String(staffType).toLowerCase() === 'admin'
+    const showCoordinatorLink = isSystemAdmin || isStaffTypeAdmin
+    if (showCoordinatorLink) {
         links.push({ href: "/dashboard/coordinator-management", icon: UsersRound })
     }
 
