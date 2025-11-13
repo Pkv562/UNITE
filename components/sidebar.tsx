@@ -60,12 +60,28 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
     const serverRaw = (serverInfo && (serverInfo.raw || serverInfo)) || null;
     const serverStaffType = serverRaw?.StaffType || serverRaw?.Staff_Type || serverRaw?.staff_type || serverRaw?.staffType || (serverRaw?.user && (serverRaw.user.StaffType || serverRaw.user.staff_type || serverRaw.user.staffType)) || null;
     const serverRoleFromResolved = role || (serverInfo && serverInfo.role) ? String(role || serverInfo.role).toLowerCase() : '';
-    const serverIsSystemAdmin = !!(serverInfo && serverInfo.isAdmin) || (serverRoleFromResolved && serverRoleFromResolved.includes('sys') && serverRoleFromResolved.includes('admin'));
-    const serverIsStaffTypeAdmin = !!serverStaffType && String(serverStaffType).toLowerCase() === 'admin';
+    // Only treat as system admin when server explicitly marks isAdmin or role looks like a system admin.
+    // Coerce to a boolean to avoid accidental string values leaking through the || operator
+    // which can cause TypeScript to infer a union type (boolean | string).
+    const serverIsSystemAdmin = Boolean(
+        (serverInfo && serverInfo.isAdmin) ||
+        (serverRoleFromResolved && serverRoleFromResolved.includes('sys') && serverRoleFromResolved.includes('admin'))
+    );
+
+    // Detect if the server-provided user is a coordinator (staff-type or role)
+    const serverIsCoordinator = Boolean(
+        serverStaffType && String(serverStaffType).toLowerCase() === 'coordinator'
+    ) || (serverRoleFromResolved && serverRoleFromResolved.includes('coordinator'));
 
     // Determine initial coordinator visibility from server-provided data only.
-    const initialShowCoordinator = serverIsSystemAdmin || serverIsStaffTypeAdmin;
+    // IMPORTANT: only system admins should see the coordinator link. Do NOT
+    // grant visibility based on StaffType (staff-level Admin) to avoid
+    // non-system Admins seeing the coordinator management link.
+    const initialShowCoordinator = serverIsSystemAdmin;
     const [showCoordinatorLink, setShowCoordinatorLink] = useState<boolean>(initialShowCoordinator);
+    // Stakeholder page should be visible to both system admins and coordinators.
+    const initialShowStakeholder = Boolean(serverIsSystemAdmin || serverIsCoordinator);
+    const [showStakeholderLink, setShowStakeholderLink] = useState<boolean>(initialShowStakeholder);
 
     useEffect(() => {
         // Load client-only user info only when we don't have serverInfo.
@@ -76,15 +92,65 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
         if (!serverInfo) {
             try {
                 const loaded = getUserInfo();
+                // keep client-side info for display
                 if (loaded) setInfo(loaded as any);
 
+                // small development-only diagnostics + fallback checks. These
+                // do not run in production to avoid leaking sensitive info.
+                if (process.env.NODE_ENV !== 'production') {
+                    try {
+                        const rawLocal = typeof window !== 'undefined' ? window.localStorage.getItem('unite_user') : null;
+                        const rawSession = typeof window !== 'undefined' ? window.sessionStorage.getItem('unite_user') : null;
+                        const altUser = typeof window !== 'undefined' ? window.localStorage.getItem('user') : null;
+                        // eslint-disable-next-line no-console
+                        console.debug('[sidebar][debug] getUserInfo ->', loaded, '\n rawLocal ->', rawLocal, '\n rawSession ->', rawSession, '\n altUser ->', altUser);
+                    } catch (e) {
+                        // ignore dev logging errors
+                    }
+                }
+
                 if (!initialShowCoordinator) {
+                    // Only allow the client-loaded data to enable the coordinator
+                    // link if the loaded user is a system admin (isAdmin flag or
+                    // role that contains both 'sys'/'system' and 'admin').
                     const roleFromLoaded = loaded?.role ? String(loaded.role).toLowerCase() : '';
+                    let loadedIsSystemAdmin = !!(loaded && loaded.isAdmin) || (roleFromLoaded.includes('sys') && roleFromLoaded.includes('admin'));
+
+                    // Fallback: if getUserInfo didn't flag admin, try parsing
+                    // sessionStorage or an alternate `user` key. This helps in
+                    // cases where login wrote to sessionStorage (rememberMe off)
+                    // or where the UNITE client stores the user under a different
+                    // key. Only used as a resilient dev fallback.
+                    if (!loadedIsSystemAdmin) {
+                        try {
+                            const fallbackRaw = (typeof window !== 'undefined' && (window.localStorage.getItem('unite_user') || window.sessionStorage.getItem('unite_user') || window.localStorage.getItem('user'))) || null;
+                            if (fallbackRaw) {
+                                const parsedFallback = JSON.parse(fallbackRaw);
+                                const fbRole = parsedFallback?.role || parsedFallback?.StaffType || parsedFallback?.staff_type || parsedFallback?.staffType || null;
+                                const fbLower = fbRole ? String(fbRole).toLowerCase() : '';
+                                loadedIsSystemAdmin = loadedIsSystemAdmin || ((/sys|system/.test(fbLower) && /admin/.test(fbLower)) || !!parsedFallback?.isAdmin);
+                                if (process.env.NODE_ENV !== 'production') {
+                                    try { console.debug('[sidebar][debug] fallback parsed ->', parsedFallback, 'derivedIsAdmin ->', loadedIsSystemAdmin); } catch (e) {}
+                                }
+                            }
+                        } catch (e) {
+                            // ignore fallback parse errors
+                        }
+                    }
+
+                    if (loadedIsSystemAdmin) setShowCoordinatorLink(true);
+                }
+                // If the stakeholder link isn't already visible from server, allow
+                // the client-loaded info to enable it for coordinators or system admins.
+                if (!initialShowStakeholder) {
+                    const roleFromLoaded2 = loaded?.role ? String(loaded.role).toLowerCase() : '';
                     const rawLoaded = loaded?.raw || loaded || null;
                     const staffTypeLoaded = rawLoaded?.StaffType || rawLoaded?.Staff_Type || rawLoaded?.staff_type || rawLoaded?.staffType || (rawLoaded?.user && (rawLoaded.user.StaffType || rawLoaded.user.staff_type || rawLoaded.user.staffType)) || null;
-                    const loadedIsSystemAdmin = !!(loaded && loaded.isAdmin) || (roleFromLoaded.includes('sys') && roleFromLoaded.includes('admin'));
-                    const loadedIsStaffAdmin = !!staffTypeLoaded && String(staffTypeLoaded).toLowerCase() === 'admin';
-                    if (loadedIsSystemAdmin || loadedIsStaffAdmin) setShowCoordinatorLink(true);
+                    // Consider a user a coordinator if either their StaffType explicitly
+                    // equals 'Coordinator' or their role string contains 'coordinator'.
+                    const loadedIsCoordinator = (!!staffTypeLoaded && String(staffTypeLoaded).toLowerCase() === 'coordinator') || (roleFromLoaded2.includes('coordinator'));
+                    const loadedIsSystemAdmin2 = !!(loaded && loaded.isAdmin) || (roleFromLoaded2.includes('sys') && roleFromLoaded2.includes('admin'));
+                    if (loadedIsCoordinator || loadedIsSystemAdmin2) setShowStakeholderLink(true);
                 }
             } catch (e) {
                 // ignore client-only read errors
@@ -92,11 +158,36 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
         }
     }, [serverInfo]);
 
+    
+
+    // client-derived info (for display purposes) — we only need `info` for
+    // non-privileged UI pieces. Coordinator visibility is driven by
+    // `showCoordinatorLink` which used server-derived initial state and is
+    // updated only if client info proves system-admin status after
+    // hydration.
     const raw = (info && (info.raw || info)) || null;
-    const staffType = raw?.StaffType || raw?.Staff_Type || raw?.staff_type || raw?.staffType || (raw?.user && (raw.user.StaffType || raw.user.staff_type || raw.user.staffType)) || null;
     const roleFromResolved = resolvedRole ? String(resolvedRole).toLowerCase() : '';
     const isSystemAdmin = !!(info && info.isAdmin) || (roleFromResolved.includes('sys') && roleFromResolved.includes('admin'));
-    const isStaffTypeAdmin = !!staffType && String(staffType).toLowerCase() === 'admin';
+
+    // Mount-time debug snapshot to inspect server/client derived state.
+    // This runs only on the client and is safe for hydration.
+    useEffect(() => {
+        try {
+            const snapshot = {
+                serverInfo: serverInfo || null,
+                initialShowCoordinator,
+                showCoordinatorLink,
+                initialShowStakeholder,
+                showStakeholderLink,
+                resolvedRole: resolvedRole || null,
+                info: info || null,
+                isSystemAdmin: isSystemAdmin || false,
+            };
+            // client-only debug removed
+        } catch (e) {
+            // ignore snapshot errors
+        }
+    }, [serverInfo, info, showCoordinatorLink, showStakeholderLink, resolvedRole, isSystemAdmin, initialShowCoordinator, initialShowStakeholder]);
 
     // At render time, prefer the server-derived flags for the initial value of
     // `showCoordinatorLink`. `showCoordinatorLink` is a state variable that may
@@ -107,7 +198,8 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
     const links = [
         { href: "/dashboard/campaign", icon: Ticket, key: "campaign", visible: true },
         { href: "/dashboard/calendar", icon: Calendar, key: "calendar", visible: true },
-        { href: "/dashboard/stakeholder-management", icon: ContactRound, key: "stakeholder", visible: true },
+        // Only show stakeholder-management to system admins OR coordinators.
+        { href: "/dashboard/stakeholder-management", icon: ContactRound, key: "stakeholder", visible: showStakeholderLink },
         { href: "/dashboard/coordinator-management", icon: UsersRound, key: "coordinator", visible: showCoordinatorLink },
     ];
     
@@ -149,6 +241,12 @@ export default function Sidebar({ role, userInfo }: SidebarProps) {
         localStorage.removeItem("accessToken");
         localStorage.removeItem("user");
         localStorage.removeItem("hospitalId");
+            try {
+                // remove the non-HttpOnly cookie if present (development/compatibility)
+                if (typeof document !== 'undefined') {
+                    document.cookie = 'unite_user=; Max-Age=0; path=/';
+                }
+            } catch {}
         } catch {}
         router.push("/auth/login");
     };

@@ -68,8 +68,13 @@ export function getUserInfo(): UserInfo {
 
   // Treat only system-admin style roles as admin (e.g. 'sysadmin', 'system_admin', 'system admin')
   // This avoids matching other roles that happen to include 'admin' as a substring.
+  // Honor an explicit isAdmin flag if present in the stored object (backwards
+  // compatibility), otherwise derive from the role string requiring both
+  // 'sys'/'system' and 'admin' to avoid accidental matches.
   let isAdmin = false
-  if (role) {
+  if (parsed && (parsed.isAdmin === true || parsed.isAdmin === 'true')) {
+    isAdmin = true
+  } else if (role) {
     const lower = String(role).toLowerCase()
     // require both 'sys' (or 'system') and 'admin' to be present in the role string
     isAdmin = /sys|system/.test(lower) && /admin/.test(lower)

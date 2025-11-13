@@ -59,6 +59,27 @@ export default function SignIn() {
       if (token) storage.setItem("unite_token", token);
       if (data) storage.setItem("unite_user", JSON.stringify(data));
 
+      // Also write a sanitized legacy `unite_user` object to localStorage
+      // (development compatibility). This ensures the UNITE Sidebar's
+      // client-side getUserInfo() can reliably detect roles during
+      // hydration even when the app used sessionStorage or a different key.
+      try {
+        const legacy = {
+          role: data?.staff_type || data?.role || null,
+          isAdmin:
+            !!data?.isAdmin ||
+            String(data?.staff_type || "").toLowerCase().includes("admin") ||
+            (String(data?.role || "").toLowerCase().includes("sys") &&
+              String(data?.role || "").toLowerCase().includes("admin")),
+          First_Name: data?.First_Name || data?.first_name || null,
+          email: data?.Email || data?.email || null,
+          id: data?.id || data?.ID || null,
+        };
+        if (typeof window !== "undefined") localStorage.setItem("unite_user", JSON.stringify(legacy));
+      } catch (e) {
+        // swallow any client storage errors
+      }
+
       // Redirect to dashboard (single landing for all roles)
       router.push("/dashboard");
     } catch (err) {
