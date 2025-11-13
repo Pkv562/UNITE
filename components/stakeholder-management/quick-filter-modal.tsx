@@ -8,13 +8,16 @@ import { Input } from "@heroui/input"
 interface QuickFilterModalProps {
   isOpen: boolean
   onClose: () => void
-  onApply: (filters: { province?: string; districtId?: string }) => void
+  onApply: (filters: { province?: string; districtId?: string; organization?: string; type?: string; q?: string }) => void
 }
 
 export default function QuickFilterModal({ isOpen, onClose, onApply }: QuickFilterModalProps) {
   const [districts, setDistricts] = useState<any[]>([])
   const [selectedDistrictId, setSelectedDistrictId] = useState<string | null>(null)
   const [selectedProvince, setSelectedProvince] = useState<string | null>(null)
+  const [organization, setOrganization] = useState<string>("")
+  const [stakeholderType, setStakeholderType] = useState<string>("")
+  const [searchTerm, setSearchTerm] = useState<string>("")
 
   useEffect(() => {
     if (!isOpen) return
@@ -39,6 +42,21 @@ export default function QuickFilterModal({ isOpen, onClose, onApply }: QuickFilt
     if (pick) setSelectedProvince(pick.Province_Name || pick.province || '')
   }, [selectedDistrictId, districts])
 
+  // instant apply: whenever a filter field changes, call onApply
+  useEffect(() => {
+    // do not call if modal is closed
+    if (!isOpen) return
+    const payload: any = {
+      province: selectedProvince || undefined,
+      districtId: selectedDistrictId || undefined,
+      organization: organization || undefined,
+      type: stakeholderType || undefined,
+      q: searchTerm || undefined
+    }
+    // small debounce could be added later; for now call immediately
+    onApply(payload)
+  }, [selectedDistrictId, selectedProvince, organization, stakeholderType, searchTerm, isOpen])
+
   const handleApply = () => {
     onApply({ province: selectedProvince || undefined, districtId: selectedDistrictId || undefined })
     onClose()
@@ -61,9 +79,13 @@ export default function QuickFilterModal({ isOpen, onClose, onApply }: QuickFilt
             <div>
               <label className="text-sm font-medium">District</label>
               <Select selectedKeys={selectedDistrictId ? [String(selectedDistrictId)] : []} onSelectionChange={(keys: any) => setSelectedDistrictId(Array.from(keys)[0] as string)} placeholder="Select district">
-                {districts.map((d) => (
-                  <SelectItem key={d.District_ID || d.id || d._id}>{d.District_Name || d.District_Number || d.District_ID}</SelectItem>
-                ))}
+                <SelectItem key="">All districts</SelectItem>
+                {
+                  // build items in a const and cast to any to satisfy the Select children typing
+                  (districts.map((d) => (
+                    <SelectItem key={d.District_ID || d.id || d._id}>{d.District_Name || d.District_Number || d.District_ID}</SelectItem>
+                  )) as unknown as any)
+                }
               </Select>
             </div>
 
@@ -71,11 +93,26 @@ export default function QuickFilterModal({ isOpen, onClose, onApply }: QuickFilt
               <label className="text-sm font-medium">Province</label>
               <Input value={selectedProvince || ''} disabled variant="bordered" classNames={{ inputWrapper: 'h-10 bg-default-100' }} />
             </div>
+
+            <div>
+              <label className="text-sm font-medium">Organization</label>
+              <Input value={organization} onChange={(e) => setOrganization((e.target as HTMLInputElement).value)} placeholder="Organization name" variant="bordered" classNames={{ inputWrapper: 'h-10' }} />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Stakeholder type</label>
+              <Input value={stakeholderType} onChange={(e) => setStakeholderType((e.target as HTMLInputElement).value)} placeholder="Type (e.g. vendor, partner)" variant="bordered" classNames={{ inputWrapper: 'h-10' }} />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Search within results</label>
+              <Input value={searchTerm} onChange={(e) => setSearchTerm((e.target as HTMLInputElement).value)} placeholder="Search term" variant="bordered" classNames={{ inputWrapper: 'h-10' }} />
+            </div>
           </div>
         </ModalBody>
         <ModalFooter>
-          <Button variant="bordered" onPress={() => { handleClear() }}>Clear</Button>
-          <Button color="default" onPress={handleApply} className="bg-black text-white">Apply</Button>
+          <Button variant="bordered" onPress={() => { handleClear(); onApply({}); }}>Reset</Button>
+          <Button color="default" onPress={onClose} className="bg-black text-white">Close</Button>
         </ModalFooter>
       </ModalContent>
     </Modal>

@@ -7,8 +7,10 @@ import StakeholderToolbar from "@/components/stakeholder-management/stakeholder-
 import StakeholderTable from "@/components/stakeholder-management/stakeholder-management-table"
 import AddStakeholderModal from "@/components/stakeholder-management/add-stakeholder-modal"
 import QuickFilterModal from "@/components/stakeholder-management/quick-filter-modal"
+import AdvancedFilterModal from "@/components/stakeholder-management/advanced-filter-modal"
 import EditStakeholderModal from "@/components/stakeholder-management/stakeholder-edit-modal"
 import DeleteStakeholderModal from "@/components/stakeholder-management/delete-stakeholder-modal"
+import GenerateCodeModal from "@/components/stakeholder-management/generate-code-modal"
 import { getUserInfo } from '../../../utils/getUserInfo'
 
 
@@ -41,6 +43,7 @@ export default function StakeholderManagement() {
 	const [isEditModalOpen, setIsEditModalOpen] = useState(false)
 	const [filters, setFilters] = useState<{ province?: string; districtId?: string }>({})
 	const [openQuickFilter, setOpenQuickFilter] = useState(false)
+	const [openAdvancedFilter, setOpenAdvancedFilter] = useState(false)
 	const [editingStakeholder, setEditingStakeholder] = useState<any | null>(null)
 	const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
 	const [deletingStakeholder, setDeletingStakeholder] = useState<{ id: string; name: string } | null>(null)
@@ -123,20 +126,8 @@ export default function StakeholderManagement() {
 
 
 	const handleCreateCode = async () => {
-		// Generate a simple stakeholder invite/code and copy to clipboard
-		const randomPart = Math.random().toString(36).replace(/[^a-z0-9]+/gi, '').substr(0, 6).toUpperCase()
-		const code = `STK-${randomPart}`
-		try {
-			if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-				await navigator.clipboard.writeText(code)
-				alert(`Code created and copied to clipboard: ${code}`)
-			} else {
-				// fallback: show prompt so user can copy
-				window.prompt('Copy this code', code)
-			}
-		} catch (e) {
-			try { window.prompt('Copy this code', code) } catch (_) { alert(`Code: ${code}`) }
-		}
+		// open generate code modal
+		setIsGenerateCodeOpen(true)
 	}
 
 
@@ -146,7 +137,7 @@ export default function StakeholderManagement() {
 
 
 	const handleAdvancedFilter = () => {
-		console.log("Opening advanced filter...")
+		setOpenAdvancedFilter(true)
 	}
 
 
@@ -208,6 +199,14 @@ export default function StakeholderManagement() {
 
 	const handleModalClose = () => {
 		setIsAddModalOpen(false)
+	}
+
+	const [isGenerateCodeOpen, setIsGenerateCodeOpen] = useState(false)
+
+	const handleCodeCreated = (code: any) => {
+		// No page-level copy UI: the modal shows the generated code and copy success message.
+		// This callback is left for any page-level refresh hooks in the future.
+		// potential place to refresh lists if codes are shown in UI
 	}
 
 
@@ -589,7 +588,51 @@ export default function StakeholderManagement() {
 					}
 				} catch (e) { /* ignore debug errors */ }
 
-			setStakeholders(mapped)
+			// Apply client-side extra filters (if backend doesn't support them)
+			const extra: any = af || {}
+			let finalMapped = mapped
+			try {
+				if (extra.organization) {
+					finalMapped = finalMapped.filter((m: any) => (m.organization || '').toLowerCase().includes(String(extra.organization).toLowerCase()))
+				}
+				if (extra.type) {
+					finalMapped = finalMapped.filter((m: any) => (m.type || '').toLowerCase().includes(String(extra.type).toLowerCase()))
+				}
+				if (extra.q) {
+					const q = String(extra.q).toLowerCase()
+					finalMapped = finalMapped.filter((m: any) => (m.name || '').toLowerCase().includes(q) || (m.email || '').toLowerCase().includes(q) || (m.organization || '').toLowerCase().includes(q))
+				}
+				if (extra.name) {
+					const v = String(extra.name).toLowerCase()
+					finalMapped = finalMapped.filter((m: any) => (m.name || '').toLowerCase().includes(v))
+				}
+				if (extra.email) {
+					const v = String(extra.email).toLowerCase()
+					finalMapped = finalMapped.filter((m: any) => (m.email || '').toLowerCase().includes(v))
+				}
+				if (extra.phone) {
+					const v = String(extra.phone).toLowerCase()
+					finalMapped = finalMapped.filter((m: any) => (m.phone || '').toLowerCase().includes(v))
+				}
+				if (extra.date_from || extra.date_to) {
+					finalMapped = finalMapped.filter((m: any) => {
+						const created = m.created_at ? new Date(m.created_at) : null
+						if (!created) return true
+						if (extra.date_from) {
+							const from = new Date(extra.date_from)
+							if (created < from) return false
+						}
+						if (extra.date_to) {
+							const to = new Date(extra.date_to)
+							to.setHours(23,59,59,999)
+							if (created > to) return false
+						}
+						return true
+					})
+				}
+			} catch (e) { /* ignore filtering errors */ }
+
+			setStakeholders(finalMapped)
 		} catch (err: any) {
 			setError(err.message || 'Unknown error')
 		} finally {
@@ -605,6 +648,13 @@ export default function StakeholderManagement() {
 		        fetchStakeholders()
 		    }
 		}, [districtsMap])
+
+		// Integrate top-level search bar with current filters. Whenever searchQuery changes
+		// re-run fetch with combined filters so search and quick/advanced filters combine.
+		useEffect(() => {
+			// avoid running on first render where searchQuery is empty
+			fetchStakeholders({ ...(filters as any), q: searchQuery || undefined })
+		}, [searchQuery])
 
 		useEffect(() => { fetchStakeholders() }, [])
 
@@ -623,6 +673,7 @@ export default function StakeholderManagement() {
 				userEmail={displayEmail}
 				onUserClick={handleUserClick}
 			/>
+
 
 
 			{/* Toolbar with Search and Actions */}
@@ -689,9 +740,32 @@ export default function StakeholderManagement() {
 				onClose={() => setOpenQuickFilter(false)}
 				onApply={(f) => {
 					setFilters(f)
-					setOpenQuickFilter(false)
+					// quick filter is instant: refresh immediately; do not auto-close modal
 					fetchStakeholders(f)
 				}}
+			/>
+			<AdvancedFilterModal
+				isOpen={openAdvancedFilter}
+				onClose={() => setOpenAdvancedFilter(false)}
+				onApply={(f) => {
+					setFilters(f)
+					setOpenAdvancedFilter(false)
+					fetchStakeholders(f)
+				}}
+			/>
+			<GenerateCodeModal
+				isOpen={isGenerateCodeOpen}
+				onClose={() => setIsGenerateCodeOpen(false)}
+				isSysAdmin={canManageStakeholders}
+				userCoordinatorId={(() => {
+					try {
+						const raw = localStorage.getItem('unite_user')
+						const parsed = raw ? JSON.parse(raw) : null
+						return parsed?.id || parsed?.ID || parsed?.Coordinator_ID || parsed?.coordinator_id || null
+					} catch (e) { return null }
+				})()}
+				userDistrictId={userDistrictId}
+				onCreated={handleCodeCreated}
 			/>
 		</div>
 	)
