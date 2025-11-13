@@ -38,6 +38,7 @@ import EditEventModal from '@/components/calendar/event-edit-modal';
 import EventManageStaffModal from '@/components/calendar/event-manage-staff-modal';
 import EventRescheduleModal from '@/components/calendar/event-reschedule-modal';
 import CalendarToolbar from '@/components/calendar/calendar-toolbar';
+import { fetchWithAuth } from '@/utils/fetchWithAuth';
 
 export default function CalendarPage() {
   const [activeView, setActiveView] = useState("week");
@@ -695,16 +696,11 @@ export default function CalendarPage() {
 
   const handleCreateEvent = async (eventType: string, data: any) => {
     try {
-      const rawUser = localStorage.getItem('unite_user');
-      const user = rawUser ? JSON.parse(rawUser) : null;
-      const token = localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token');
-      const headers: any = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
+      // Build the normalized event payload (no actor ids here)
       const eventPayload: any = {
         Event_Title: data.eventTitle || data.eventDescription || `${eventType} event`,
         Location: data.location || '',
-        Event_Description: data.eventDescription || undefined,
+        Event_Description: data.eventDescription || data.Event_Description || undefined,
         Start_Date: data.startTime || (data.date ? new Date(data.date).toISOString() : undefined),
         End_Date: data.endTime || undefined,
         Email: data.email || undefined,
@@ -726,22 +722,50 @@ export default function CalendarPage() {
 
       if (data.coordinator) eventPayload.MadeByCoordinatorID = data.coordinator;
 
-      if (user && (user.staff_type === 'Admin' || user.staff_type === 'Coordinator')) {
-        const body = { creatorId: user.id, creatorRole: user.staff_type, ...eventPayload };
-        const res = await fetch(`${API_BASE}/api/events/direct`, { method: 'POST', headers, body: JSON.stringify(body) });
-        const resp = await res.json();
-        if (!res.ok) throw new Error(resp.message || 'Failed to create event');
-        await refreshCalendarData();
-        return resp;
+      // If an auth token exists, prefer server-side identity resolution and
+      // omit client-supplied actor ids. If no token is present (legacy), keep
+      // sending the provided actor identifiers for backwards compatibility.
+      const rawUser = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
+      const user = rawUser ? JSON.parse(rawUser) : null;
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+
+      if (token) {
+        // Token present: send only the event payload (server derives user/role)
+        if (user && (user.staff_type === 'Admin' || user.staff_type === 'Coordinator')) {
+          const res = await fetchWithAuth(`${API_BASE}/api/events/direct`, { method: 'POST', body: JSON.stringify(eventPayload) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create event');
+          await refreshCalendarData();
+          return resp;
+        } else {
+          if (!data.coordinator) throw new Error('Coordinator is required for requests');
+          const body = { coordinatorId: data.coordinator, ...eventPayload };
+          const res = await fetchWithAuth(`${API_BASE}/api/requests`, { method: 'POST', body: JSON.stringify(body) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create request');
+          await refreshCalendarData();
+          return resp;
+        }
       } else {
-        if (!data.coordinator) throw new Error('Coordinator is required for requests');
-        const stakeholderId = user?.Stakeholder_ID || user?.StakeholderId || user?.id || null;
-        const body = { coordinatorId: data.coordinator, MadeByStakeholderID: stakeholderId, ...eventPayload };
-        const res = await fetch(`${API_BASE}/api/requests`, { method: 'POST', headers, body: JSON.stringify(body) });
-        const resp = await res.json();
-        if (!res.ok) throw new Error(resp.message || 'Failed to create request');
-        await refreshCalendarData();
-        return resp;
+        // No token: legacy behavior - include actor ids if available
+        const headers: any = { 'Content-Type': 'application/json' };
+        if (user && (user.staff_type === 'Admin' || user.staff_type === 'Coordinator')) {
+          const body = { creatorId: user.id, creatorRole: user.staff_type, ...eventPayload };
+          const res = await fetch(`${API_BASE}/api/events/direct`, { method: 'POST', headers, body: JSON.stringify(body) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create event');
+          await refreshCalendarData();
+          return resp;
+        } else {
+          if (!data.coordinator) throw new Error('Coordinator is required for requests');
+          const stakeholderId = user?.Stakeholder_ID || user?.StakeholderId || user?.id || null;
+          const body = { coordinatorId: data.coordinator, MadeByStakeholderID: stakeholderId, ...eventPayload };
+          const res = await fetch(`${API_BASE}/api/requests`, { method: 'POST', headers, body: JSON.stringify(body) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create request');
+          await refreshCalendarData();
+          return resp;
+        }
       }
     } catch (err: any) {
       try { alert(err?.message || 'Failed to create event'); } catch { }

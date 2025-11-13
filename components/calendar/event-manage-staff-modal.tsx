@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useState } from 'react';
+import { fetchWithAuth } from '@/utils/fetchWithAuth';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from '@heroui/modal';
 import { Users } from 'lucide-react';
 import { Button } from '@heroui/button';
@@ -83,13 +84,18 @@ export default function EventManageStaffModal({ isOpen, onClose, eventId, onSave
       const headers: any = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const body: any = {
-        adminId: user?.id || user?.Admin_ID || null,
-        eventId: eventId || null,
-        staffMembers
-      };
+  // If token present, server will derive admin id from authentication.
+      const body: any = { eventId: eventId || null, staffMembers };
 
-      const res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/staff`, { method: 'POST', headers, body: JSON.stringify(body), credentials: 'include' });
+      let res;
+      if (token) {
+        res = await fetchWithAuth(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/staff`, { method: 'POST', body: JSON.stringify(body) });
+      } else {
+        // legacy: include adminId when no token available
+        const legacyBody = { adminId: user?.id || user?.Admin_ID || null, ...body };
+        res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/staff`, { method: 'POST', headers, body: JSON.stringify(legacyBody), credentials: 'include' });
+      }
+
       const resp = await res.json();
       if (!res.ok) throw new Error(resp.message || 'Failed to assign staff');
 

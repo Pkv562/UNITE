@@ -58,7 +58,15 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
         if (token) headers["Authorization"] = `Bearer ${token}`;
 
         const user = rawUser ? JSON.parse(rawUser) : null;
-        if (user && user.staff_type === "Admin") {
+        // robust admin detection (handle different property shapes/casing)
+        const isAdmin = !!(
+          user && (
+            (user.staff_type && String(user.staff_type).toLowerCase().includes('admin')) ||
+            (user.role && String(user.role).toLowerCase().includes('admin'))
+          )
+        );
+
+        if (user && isAdmin) {
           const res = await fetch(`${API_URL}/api/coordinators`, { headers });
           const body = await res.json();
           if (res.ok) {
@@ -76,30 +84,31 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
             setCoordinatorOptions(opts);
           }
         } else if (user) {
-          if (user.staff_type === "Coordinator") {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.id}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.id, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.id);
-            }
-          }
-          if (user.Coordinator_ID) {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.Coordinator_ID}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.Coordinator_ID, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.Coordinator_ID);
+          // For coordinators/stakeholders derive coordinator id from a number of possible user fields
+          // Preserve backwards compatibility by trying common fields in order
+          const candidateIds = [] as Array<string|number|undefined>;
+          // If user is explicitly a Coordinator, use their own id
+          if (user.staff_type && String(user.staff_type).toLowerCase().includes('coordinator')) candidateIds.push(user.id);
+          // Common fields where coordinator id may be stored
+          candidateIds.push(user.Coordinator_ID, user.CoordinatorId, user.CoordinatorID, user.role_data?.coordinator_id, user.MadeByCoordinatorID);
+          const coordId = candidateIds.find(Boolean) as string | undefined;
+
+          if (coordId) {
+            try {
+              const res = await fetch(`${API_URL}/api/coordinators/${coordId}`, { headers });
+              const body = await res.json();
+              if (res.ok && body.data) {
+                const coord = body.data.coordinator || body.data || body.coordinator || body;
+                const staff = coord?.Staff || null;
+                const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
+                const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
+                const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
+                setCoordinatorOptions([{ key: coord?.Coordinator_ID || coordId, label: name }]);
+                setCoordinator(coord?.Coordinator_ID || coordId);
+              }
+            } catch (e) {
+              // swallow individual fetch errors but keep trying other flows
+              console.error('Failed to fetch coordinator by id', coordId, e);
             }
           }
         }
@@ -237,7 +246,12 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
               {(() => {
                 const rawUser = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
                 const user = rawUser ? JSON.parse(rawUser) : null;
-                const isAdmin = user && user.staff_type === 'Admin';
+                const isAdmin = !!(
+                  user && (
+                    (user.staff_type && String(user.staff_type).toLowerCase().includes('admin')) ||
+                    (user.role && String(user.role).toLowerCase().includes('admin'))
+                  )
+                );
 
                 if (isAdmin) {
                   return (

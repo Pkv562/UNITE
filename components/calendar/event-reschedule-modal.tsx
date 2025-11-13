@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from '@heroui/modal';
 import { Clock } from 'lucide-react';
 import { DatePicker } from '@heroui/date-picker';
+import { fetchWithAuth } from '@/utils/fetchWithAuth';
 import { Button } from '@heroui/button';
 
 interface Props {
@@ -88,9 +89,15 @@ export default function EventRescheduleModal({ isOpen, onClose, eventId, onSaved
 
       const newDateISO = typeof rescheduledDate === 'string' ? new Date(rescheduledDate).toISOString() : (rescheduledDate instanceof Date ? rescheduledDate.toISOString() : new Date(rescheduledDate).toISOString());
 
-      const body: any = { adminId: user?.id || user?.Admin_ID || null, action: 'Rescheduled', note: note.trim(), rescheduledDate: newDateISO };
-
-      const res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`, { method: 'POST', headers, body: JSON.stringify(body), credentials: 'include' });
+      const body: any = { action: 'Rescheduled', note: note.trim(), rescheduledDate: newDateISO };
+  let res;
+      if (token) {
+        res = await fetchWithAuth(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`, { method: 'POST', body: JSON.stringify(body) });
+      } else {
+        // legacy fallback when token absent
+        const legacyBody = { adminId: user?.id || user?.Admin_ID || null, ...body };
+        res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`, { method: 'POST', headers, body: JSON.stringify(legacyBody), credentials: 'include' });
+      }
       const resp = await res.json();
       if (!res.ok) throw new Error(resp.message || 'Failed to reschedule request');
 

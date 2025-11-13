@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/modal";
+import { fetchWithAuth } from '@/utils/fetchWithAuth';
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
@@ -154,14 +155,17 @@ export default function EditEventModal({ isOpen, onClose, request, onSaved }: Ed
       }
 
       if (isAdminOrCoordinator) {
-        // call update endpoint with adminId or coordinatorId
-        const body = {
-          ...updateData,
-          // include coordinatorId or adminId depending on role
-          ...(user.staff_type === 'Admin' ? { adminId: user.id } : { coordinatorId: user.id })
-        };
-
-        const res = await fetch(`${API_URL}/api/requests/${requestId}`, { method: 'PUT', headers, body: JSON.stringify(body) });
+        // Token present on authenticated pages: prefer server-side actor resolution
+        const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+        let res;
+        if (token) {
+          // send only updateData; server will determine actor from token
+          res = await fetchWithAuth(`${API_URL}/api/requests/${requestId}`, { method: 'PUT', body: JSON.stringify(updateData) });
+        } else {
+          // legacy: include actor id in body
+          const legacyBody = { ...updateData, ...(user.staff_type === 'Admin' ? { adminId: user.id } : { coordinatorId: user.id }) };
+          res = await fetch(`${API_URL}/api/requests/${requestId}`, { method: 'PUT', headers, body: JSON.stringify(legacyBody) });
+        }
         const resp = await res.json();
         if (!res.ok) {
           if (resp && resp.errors && Array.isArray(resp.errors)) {
@@ -175,8 +179,10 @@ export default function EditEventModal({ isOpen, onClose, request, onSaved }: Ed
         onClose();
       } else {
         // Stakeholder: create a new change request instead (will be pending)
-        // Use existing coordinator if present
-        const coordinatorId =
+        // Use existing coordinator if present. If the modal was opened with a
+        // trimmed/partial event object that lacks coordinator info, try to
+        // fetch the full event details to derive the assigned coordinator.
+        let coordinatorId =
           request.coordinator?.Coordinator_ID ||
           request.coordinator?.CoordinatorId ||
           request.MadeByCoordinatorID ||
@@ -184,9 +190,52 @@ export default function EditEventModal({ isOpen, onClose, request, onSaved }: Ed
           request.event?.coordinator?.Coordinator_ID ||
           request.event?.coordinator?.id ||
           null;
+
         const stakeholderId = user?.Stakeholder_ID || user?.StakeholderId || user?.id || null;
+
+        // If coordinatorId is missing and we have an event id, fetch full event
+        // details from the API to try to obtain the coordinator information.
+        if (!coordinatorId) {
+          try {
+            const eventId = request?.event?.Event_ID || request?.event?.EventId || request?.Event_ID || request?.EventId || null;
+            if (eventId) {
+              const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
+              const tokenLocal = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+              const res = tokenLocal
+                ? await fetchWithAuth(`${API_URL}/api/events/${encodeURIComponent(eventId)}`, { method: 'GET' })
+                : await fetch(`${API_URL}/api/events/${encodeURIComponent(eventId)}`);
+              if (res && res.ok) {
+                const j = await res.json();
+                const data = j.data || j.event || j;
+                const evt = data && data.event ? data.event : data;
+                coordinatorId = evt?.MadeByCoordinatorID || evt?.coordinator?.Coordinator_ID || evt?.coordinator?.id || coordinatorId;
+              }
+            }
+          } catch (e) {
+            // ignore fetch errors; we'll validate below and show a friendly error
+          }
+        }
+
         if (!coordinatorId) {
           throw new Error('Coordinator is required to submit a change request.');
+        }
+
+        // Ensure Start_Date/End_Date are present for stakeholder change requests.
+        // The server validates these fields; when a stakeholder doesn't change
+        // the time we must include the original event datetimes in ISO form.
+        let payloadStartDate: string | undefined = undefined;
+        let payloadEndDate: string | undefined = undefined;
+        try {
+          if (updateData.Start_Date) payloadStartDate = updateData.Start_Date;
+          else if (request.event?.Start_Date) payloadStartDate = new Date(request.event.Start_Date).toISOString();
+        } catch (e) {
+          // leave undefined if parsing fails
+        }
+        try {
+          if (updateData.End_Date) payloadEndDate = updateData.End_Date;
+          else if (request.event?.End_Date) payloadEndDate = new Date(request.event.End_Date).toISOString();
+        } catch (e) {
+          // leave undefined if parsing fails
         }
 
         const body = {
@@ -203,12 +252,28 @@ export default function EditEventModal({ isOpen, onClose, request, onSaved }: Ed
           ...(updateData.Target_Donation ? { Target_Donation: updateData.Target_Donation } : {}),
           ...(updateData.TargetAudience ? { TargetAudience: updateData.TargetAudience } : {}),
           ...(updateData.ExpectedAudienceSize ? { ExpectedAudienceSize: updateData.ExpectedAudienceSize } : {}),
-          // include time updates (computed ISO strings) so stakeholder change request reflects new times
-          ...(updateData.Start_Date ? { Start_Date: updateData.Start_Date } : {}),
-          ...(updateData.End_Date ? { End_Date: updateData.End_Date } : {}),
+          // include times/date if present
+          ...(payloadStartDate ? { Start_Date: payloadStartDate } : {}),
+          ...(payloadEndDate ? { End_Date: payloadEndDate } : {}),
         };
 
-        const res = await fetch(`${API_URL}/api/requests`, { method: 'POST', headers, body: JSON.stringify(body) });
+        const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+        let res;
+        // Prefer updating the existing request (PUT) when we have a requestId
+        if (requestId) {
+          if (token) {
+            res = await fetchWithAuth(`${API_URL}/api/requests/${encodeURIComponent(requestId)}`, { method: 'PUT', body: JSON.stringify(body) });
+          } else {
+            res = await fetch(`${API_URL}/api/requests/${encodeURIComponent(requestId)}`, { method: 'PUT', headers, body: JSON.stringify(body) });
+          }
+        } else {
+          // No requestId: create a new request (POST)
+          if (token) {
+            res = await fetchWithAuth(`${API_URL}/api/requests`, { method: 'POST', body: JSON.stringify(body) });
+          } else {
+            res = await fetch(`${API_URL}/api/requests`, { method: 'POST', headers, body: JSON.stringify(body) });
+          }
+        }
         const resp = await res.json();
         if (!res.ok) {
           if (resp && resp.errors && Array.isArray(resp.errors)) {
