@@ -7,6 +7,8 @@ import { Textarea } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
 import { DatePicker } from "@heroui/date-picker";
 import { Users, Droplet, Megaphone } from "lucide-react";
+import { getUserInfo } from '@/utils/getUserInfo'
+import { decodeJwt } from '@/utils/decodeJwt'
 
 interface CreateTrainingEventModalProps {
   isOpen: boolean;
@@ -56,18 +58,20 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
         const token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token");
         const headers: any = { "Content-Type": "application/json" };
         if (token) headers["Authorization"] = `Bearer ${token}`;
-
         const user = rawUser ? JSON.parse(rawUser) : null;
+        const info = (() => { try { return getUserInfo() } catch (e) { return null } })()
         // robust admin detection (handle different property shapes/casing)
         const isAdmin = !!(
-          user && (
+          // central getUserInfo flag takes precedence
+          (info && info.isAdmin) ||
+          (user && (
             (user.staff_type && String(user.staff_type).toLowerCase().includes('admin')) ||
             (user.role && String(user.role).toLowerCase().includes('admin'))
-          )
+          ))
         );
 
         if (user && isAdmin) {
-          const res = await fetch(`${API_URL}/api/coordinators`, { headers });
+          const res = await fetch(`${API_URL}/api/coordinators`, { headers, credentials: 'include' });
           const body = await res.json();
           if (res.ok) {
             const list = body.data || body.coordinators || body;
@@ -87,15 +91,45 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
           // For coordinators/stakeholders derive coordinator id from a number of possible user fields
           // Preserve backwards compatibility by trying common fields in order
           const candidateIds = [] as Array<string|number|undefined>;
-          // If user is explicitly a Coordinator, use their own id
-          if (user.staff_type && String(user.staff_type).toLowerCase().includes('coordinator')) candidateIds.push(user.id);
+          // If user is explicitly a Coordinator (staff_type) or role indicates coordinator, use their own id
+          if ((user.staff_type && String(user.staff_type).toLowerCase().includes('coordinator')) || (info && String(info.role || '').toLowerCase().includes('coordinator'))) candidateIds.push(user.id || info?.raw?.id);
           // Common fields where coordinator id may be stored
-          candidateIds.push(user.Coordinator_ID, user.CoordinatorId, user.CoordinatorID, user.role_data?.coordinator_id, user.MadeByCoordinatorID);
-          const coordId = candidateIds.find(Boolean) as string | undefined;
+          candidateIds.push(user.Coordinator_ID, user.CoordinatorId, user.CoordinatorID, user.role_data?.coordinator_id, user.MadeByCoordinatorID, info?.raw?.Coordinator_ID, info?.raw?.CoordinatorId);
+          // Also accept IDs that look like COORD_... as the coordinator id
+          if (!candidateIds.some(Boolean) && (user && user.id && String(user.id).toLowerCase().startsWith('coord_'))) candidateIds.push(user.id);
+          let coordId = candidateIds.find(Boolean) as string | undefined;
+
+          // Fallback: inspect token payload for id/role/coordinator info
+          if (!coordId) {
+            try {
+              const t = token || (typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null)
+              const payload = decodeJwt(t)
+              if (payload) {
+                coordId = payload.id || payload.ID || payload.Coordinator_ID || payload.coordinator_id || coordId
+              }
+            } catch (e) { }
+          }
 
           if (coordId) {
             try {
-              const res = await fetch(`${API_URL}/api/coordinators/${coordId}`, { headers });
+              // If the resolved id looks like a stakeholder id (STKH_), fetch the stakeholder
+              // to obtain the actual Coordinator_ID, then fetch that coordinator.
+              let resolvedCoordId = String(coordId);
+              if (/^stkh_/i.test(resolvedCoordId)) {
+                try {
+                      const stRes = await fetch(`${API_URL}/api/stakeholders/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
+                  const stBody = await stRes.json();
+                  if (stRes.ok && stBody.data) {
+                    const stakeholder = stBody.data;
+                    resolvedCoordId = stakeholder.Coordinator_ID || stakeholder.CoordinatorId || stakeholder.coordinator_id || resolvedCoordId;
+                  }
+                } catch (e) {
+                  console.warn('Failed to fetch stakeholder to resolve coordinator id', resolvedCoordId, e);
+                }
+              }
+
+              // Try coordinators endpoint with the resolved coordinator id
+              const res = await fetch(`${API_URL}/api/coordinators/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
               const body = await res.json();
               if (res.ok && body.data) {
                 const coord = body.data.coordinator || body.data || body.coordinator || body;
@@ -103,8 +137,8 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
                 const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
                 const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
                 const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-                setCoordinatorOptions([{ key: coord?.Coordinator_ID || coordId, label: name }]);
-                setCoordinator(coord?.Coordinator_ID || coordId);
+                setCoordinatorOptions([{ key: coord?.Coordinator_ID || resolvedCoordId, label: name }]);
+                setCoordinator(coord?.Coordinator_ID || resolvedCoordId);
               }
             } catch (e) {
               // swallow individual fetch errors but keep trying other flows
@@ -117,7 +151,18 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
       }
     };
 
-    if (isOpen) fetchCoordinators();
+    // Diagnostics: print centralized user info and raw stored user when modal opens
+    if (isOpen) {
+      try {
+        const infoOuter = (() => { try { return getUserInfo() } catch (e) { return null } })()
+        // eslint-disable-next-line no-console
+        console.log('[CreateEventModal] getUserInfo():', infoOuter)
+        const rawUserOuter = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null
+        // eslint-disable-next-line no-console
+        console.log('[CreateEventModal] raw unite_user (truncated):', rawUserOuter ? String(rawUserOuter).slice(0, 300) : null)
+      } catch (e) { /* ignore */ }
+      fetchCoordinators();
+    }
   }, [isOpen]);
 
   const handleCreate = async () => {

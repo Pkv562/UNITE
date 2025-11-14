@@ -8,6 +8,8 @@ import { Textarea } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
 import { DatePicker } from "@heroui/date-picker";
 import { Users, Droplet, Megaphone } from "lucide-react";
+import { getUserInfo } from '@/utils/getUserInfo'
+import { decodeJwt } from '@/utils/decodeJwt'
 
 interface CreateTrainingEventModalProps {
   isOpen: boolean;
@@ -53,7 +55,6 @@ export const CreateTrainingEventModal: React.FC<CreateTrainingEventModalProps> =
   const [location, setLocation] = useState("");
   const [email, setEmail] = useState("");
   const [contactNumber, setContactNumber] = useState("");
-
   const coordinators = [
     // placeholder - will be replaced by fetched coordinators when modal opens
     { key: "john", label: "John Doe" },
@@ -61,40 +62,36 @@ export const CreateTrainingEventModal: React.FC<CreateTrainingEventModalProps> =
     { key: "bob", label: "Bob Johnson" },
   ];
 
-  // dynamic coordinators list fetched from backend
   const [coordinatorOptions, setCoordinatorOptions] = useState<{ key: string; label: string }[]>([]);
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-  const rawUser3 = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
-  const userObj3 = rawUser3 ? JSON.parse(rawUser3) : null;
-  const isAdminUser3 = !!(userObj3 && userObj3.staff_type === 'Admin');
-  const rawUser2 = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
-  const userObj2 = rawUser2 ? JSON.parse(rawUser2) : null;
-  const isAdminUser2 = !!(userObj2 && userObj2.staff_type === 'Admin');
-  // detect admin user for coordinator selection logic
-  const rawUser = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
-  const userObj = rawUser ? JSON.parse(rawUser) : null;
-  const isAdminUser = !!(userObj && userObj.staff_type === 'Admin');
 
   useEffect(() => {
-    // fetch coordinators when modal opens
+    // fetch coordinators when modal opens - robust handling for admin/coordinator/stakeholder
     const fetchCoordinators = async () => {
       try {
         const rawUser = localStorage.getItem("unite_user");
         const token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token");
         const headers: any = { "Content-Type": "application/json" };
         if (token) headers["Authorization"] = `Bearer ${token}`;
-
-        // Only fetch list for admins; otherwise we'll fetch a single coordinator name if needed
         const user = rawUser ? JSON.parse(rawUser) : null;
-            if (user && user.staff_type === "Admin") {
-          const res = await fetch(`${API_URL}/api/coordinators`, { headers });
+        const info = (() => { try { return getUserInfo() } catch (e) { return null } })()
+
+        const isAdmin = !!(
+          (info && info.isAdmin) ||
+          (user && (
+            (user.staff_type && String(user.staff_type).toLowerCase().includes('admin')) ||
+            (user.role && String(user.role).toLowerCase().includes('admin'))
+          ))
+        );
+
+        if (user && isAdmin) {
+          const res = await fetch(`${API_URL}/api/coordinators`, { headers, credentials: 'include' });
           const body = await res.json();
           if (res.ok) {
-            // coordinator service returns { success, data: coordinators? } or { success, coordinators }
             const list = body.data || body.coordinators || body;
             const opts = (Array.isArray(list) ? list : []).map((c: any) => {
-              const staff = c.Staff || c.Staff || c.staff || null;
-              const district = c.District || c.District || c.district || null;
+              const staff = c.Staff || c.staff || null;
+              const district = c.District || c.district || null;
               const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : (c.StaffName || c.label || '');
               const districtLabel = district?.District_Number ? `District ${district.District_Number}` : (district?.District_Name || '');
               return {
@@ -103,34 +100,72 @@ export const CreateTrainingEventModal: React.FC<CreateTrainingEventModalProps> =
               };
             });
             setCoordinatorOptions(opts);
+            return;
           }
-        } else if (user) {
-          // If user is a coordinator, fetch their coordinator record to get their full name
-          if (user.staff_type === "Coordinator") {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.id}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.id, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.id);
-            }
+        }
+
+        // non-admin flows: try to derive coordinator id from user or token
+        if (user) {
+          const candidateIds: Array<string|number|undefined> = [];
+          if ((user.staff_type && String(user.staff_type).toLowerCase().includes('coordinator')) || (info && String(info.role || '').toLowerCase().includes('coordinator'))) candidateIds.push(user.id || info?.raw?.id);
+          candidateIds.push(user.Coordinator_ID, user.CoordinatorId, user.CoordinatorID, user.role_data?.coordinator_id, user.MadeByCoordinatorID, info?.raw?.Coordinator_ID, info?.raw?.CoordinatorId);
+
+          let coordId = candidateIds.find(Boolean) as string | undefined;
+
+          if (!coordId) {
+            try {
+              const t = token || (typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null)
+              const payload = decodeJwt(t)
+              if (payload) {
+                coordId = payload.id || payload.ID || payload.Coordinator_ID || payload.coordinator_id || coordId
+              }
+            } catch (e) { /* ignore */ }
           }
-          // If user is stakeholder, they may have Coordinator_ID
-          if (user.Coordinator_ID) {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.Coordinator_ID}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.Coordinator_ID, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.Coordinator_ID);
+
+          if (coordId) {
+            try {
+              let resolvedCoordId = String(coordId);
+              if (/^stkh_/i.test(resolvedCoordId)) {
+                // try to resolve stakeholder -> coordinator id; if that fails, fall back to any Coordinator_ID present
+                let resolvedFromStakeholder = false;
+                try {
+                  const stRes = await fetch(`${API_URL}/api/stakeholders/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
+                  const stBody = await stRes.json();
+                  if (stRes.ok && stBody.data) {
+                    const stakeholder = stBody.data;
+                    resolvedCoordId = stakeholder.Coordinator_ID || stakeholder.CoordinatorId || stakeholder.coordinator_id || resolvedCoordId;
+                    resolvedFromStakeholder = !!(stakeholder.Coordinator_ID || stakeholder.CoordinatorId || stakeholder.coordinator_id);
+                  }
+                } catch (e) {
+                  console.warn('Failed to fetch stakeholder to resolve coordinator id', resolvedCoordId, e);
+                }
+
+                if (!resolvedFromStakeholder) {
+                  // try local user fields and token payload for coordinator id
+                  const fallback = user?.Coordinator_ID || user?.CoordinatorId || user?.CoordinatorId || info?.raw?.Coordinator_ID || info?.raw?.CoordinatorId;
+                  if (fallback) {
+                    resolvedCoordId = fallback;
+                  } else {
+                    // nothing to resolve - bail out early
+                    return;
+                  }
+                }
+              }
+
+              const res = await fetch(`${API_URL}/api/coordinators/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
+              const body = await res.json();
+              if (res.ok && body.data) {
+                const coord = body.data.coordinator || body.data || body.coordinator || body;
+                const staff = coord?.Staff || null;
+                const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
+                const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
+                const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
+                setCoordinatorOptions([{ key: coord?.Coordinator_ID || resolvedCoordId, label: name }]);
+                setCoordinator(coord?.Coordinator_ID || resolvedCoordId);
+                return;
+              }
+            } catch (e) {
+              console.error('Failed to fetch coordinator by id', coordId, e);
             }
           }
         }
@@ -139,8 +174,22 @@ export const CreateTrainingEventModal: React.FC<CreateTrainingEventModalProps> =
       }
     };
 
-    if (isOpen) fetchCoordinators();
+    // Diagnostics: print centralized user info and raw stored user when modal opens
+    if (isOpen) {
+      try {
+        const infoOuter = (() => { try { return getUserInfo() } catch (e) { return null } })()
+        // eslint-disable-next-line no-console
+        console.log('[CampaignCreateEventModal] getUserInfo():', infoOuter)
+        const rawUserOuter = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null
+        // eslint-disable-next-line no-console
+        console.log('[CampaignCreateEventModal] raw unite_user (truncated):', rawUserOuter ? String(rawUserOuter).slice(0, 300) : null)
+      } catch (e) { /* ignore */ }
+      fetchCoordinators();
+    }
   }, [isOpen]);
+    
+
+
 
   const handleCreate = () => {
     // Prevent selecting a past date
@@ -490,15 +539,18 @@ export const CreateBloodDriveEventModal: React.FC<CreateBloodDriveEventModalProp
         const headers: any = { "Content-Type": "application/json" };
         if (token) headers["Authorization"] = `Bearer ${token}`;
         const user = rawUser ? JSON.parse(rawUser) : null;
+        const info = (() => { try { return getUserInfo() } catch (e) { return null } })()
+
         const isAdmin = !!(
-          user && (
+          (info && info.isAdmin) ||
+          (user && (
             (user.staff_type && String(user.staff_type).toLowerCase().includes('admin')) ||
             (user.role && String(user.role).toLowerCase().includes('admin'))
-          )
+          ))
         );
 
-        if (isAdmin) {
-          const res = await fetch(`${API_URL}/api/coordinators`, { headers });
+        if (user && isAdmin) {
+          const res = await fetch(`${API_URL}/api/coordinators`, { headers, credentials: 'include' });
           const body = await res.json();
           if (res.ok) {
             const list = body.data || body.coordinators || body;
@@ -513,38 +565,69 @@ export const CreateBloodDriveEventModal: React.FC<CreateBloodDriveEventModalProp
               };
             });
             setCoordinatorOptions(opts);
-          }
-        } else if (user) {
-          if (user.staff_type === "Coordinator") {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.id}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.id, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.id);
-            }
-          }
-          if (user.Coordinator_ID) {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.Coordinator_ID}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.Coordinator_ID, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.Coordinator_ID);
-            }
+            return;
           }
         }
-      } catch (err) {
-        console.error('Failed to fetch coordinators', err);
-      }
+
+        if (user) {
+          const candidateIds: Array<string|number|undefined> = [];
+          if ((user.staff_type && String(user.staff_type).toLowerCase().includes('coordinator')) || (info && String(info.role || '').toLowerCase().includes('coordinator'))) candidateIds.push(user.id || info?.raw?.id);
+          candidateIds.push(user.Coordinator_ID, user.CoordinatorId, user.CoordinatorID, user.role_data?.coordinator_id, user.MadeByCoordinatorID, info?.raw?.Coordinator_ID, info?.raw?.CoordinatorId);
+
+          let coordId = candidateIds.find(Boolean) as string | undefined;
+          if (!coordId) {
+            try {
+              const t = token || (typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null)
+              const payload = decodeJwt(t)
+              if (payload) coordId = payload.id || payload.ID || payload.Coordinator_ID || payload.coordinator_id || coordId
+            } catch (e) { }
+          }
+
+          if (coordId) {
+            try {
+              let resolvedCoordId = String(coordId);
+              if (/^stkh_/i.test(resolvedCoordId)) {
+                // try to resolve stakeholder -> coordinator id; if that fails, fall back to any Coordinator_ID present
+                let resolvedFromStakeholder = false;
+                try {
+                  const stRes = await fetch(`${API_URL}/api/stakeholders/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
+                  const stBody = await stRes.json();
+                  if (stRes.ok && stBody.data) {
+                    const stakeholder = stBody.data;
+                    resolvedCoordId = stakeholder.Coordinator_ID || stakeholder.CoordinatorId || stakeholder.coordinator_id || resolvedCoordId;
+                    resolvedFromStakeholder = !!(stakeholder.Coordinator_ID || stakeholder.CoordinatorId || stakeholder.coordinator_id);
+                  }
+                } catch (e) {
+                  console.warn('Failed to fetch stakeholder to resolve coordinator id', resolvedCoordId, e);
+                }
+
+                if (!resolvedFromStakeholder) {
+                  // try local user fields and token payload for coordinator id
+                  const fallback = user?.Coordinator_ID || user?.CoordinatorId || user?.CoordinatorID || info?.raw?.Coordinator_ID || info?.raw?.CoordinatorId;
+                  if (fallback) {
+                    resolvedCoordId = fallback;
+                  } else {
+                    // nothing to resolve - bail out early
+                    return;
+                  }
+                }
+              }
+
+              const res = await fetch(`${API_URL}/api/coordinators/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
+              const body = await res.json();
+              if (res.ok && body.data) {
+                const coord = body.data.coordinator || body.data || body.coordinator || body;
+                const staff = coord?.Staff || null;
+                const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
+                const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
+                const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
+                setCoordinatorOptions([{ key: coord?.Coordinator_ID || resolvedCoordId, label: name }]);
+                setCoordinator(coord?.Coordinator_ID || resolvedCoordId);
+              }
+            } catch (e) { console.error('Failed to fetch coordinator by id', coordId, e); }
+          }
+        }
+      } catch (err) { console.error('Failed to fetch coordinators', err); }
     };
 
     if (isOpen) fetchCoordinators();
@@ -845,15 +928,18 @@ export const CreateAdvocacyEventModal: React.FC<CreateAdvocacyEventModalProps> =
         const headers: any = { "Content-Type": "application/json" };
         if (token) headers["Authorization"] = `Bearer ${token}`;
         const user = rawUser ? JSON.parse(rawUser) : null;
+        const info = (() => { try { return getUserInfo() } catch (e) { return null } })()
+
         const isAdmin = !!(
-          user && (
+          (info && info.isAdmin) ||
+          (user && (
             (user.staff_type && String(user.staff_type).toLowerCase().includes('admin')) ||
             (user.role && String(user.role).toLowerCase().includes('admin'))
-          )
+          ))
         );
 
-        if (isAdmin) {
-          const res = await fetch(`${API_URL}/api/coordinators`, { headers });
+        if (user && isAdmin) {
+          const res = await fetch(`${API_URL}/api/coordinators`, { headers, credentials: 'include' });
           const body = await res.json();
           if (res.ok) {
             const list = body.data || body.coordinators || body;
@@ -868,38 +954,69 @@ export const CreateAdvocacyEventModal: React.FC<CreateAdvocacyEventModalProps> =
               };
             });
             setCoordinatorOptions(opts);
-          }
-        } else if (user) {
-          if (user.staff_type === "Coordinator") {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.id}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.id, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.id);
-            }
-          }
-          if (user.Coordinator_ID) {
-            const res = await fetch(`${API_URL}/api/coordinators/${user.Coordinator_ID}`, { headers });
-            const body = await res.json();
-            if (res.ok && body.data) {
-              const coord = body.data.coordinator || body.data || body.coordinator || body;
-              const staff = coord?.Staff || null;
-              const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
-              const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
-              const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
-              setCoordinatorOptions([{ key: coord?.Coordinator_ID || user.Coordinator_ID, label: name }]);
-              setCoordinator(coord?.Coordinator_ID || user.Coordinator_ID);
-            }
+            return;
           }
         }
-      } catch (err) {
-        console.error('Failed to fetch coordinators', err);
-      }
+
+        if (user) {
+          const candidateIds: Array<string|number|undefined> = [];
+          if ((user.staff_type && String(user.staff_type).toLowerCase().includes('coordinator')) || (info && String(info.role || '').toLowerCase().includes('coordinator'))) candidateIds.push(user.id || info?.raw?.id);
+          candidateIds.push(user.Coordinator_ID, user.CoordinatorId, user.CoordinatorID, user.role_data?.coordinator_id, user.MadeByCoordinatorID, info?.raw?.Coordinator_ID, info?.raw?.CoordinatorId);
+
+          let coordId = candidateIds.find(Boolean) as string | undefined;
+          if (!coordId) {
+            try {
+              const t = token || (typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null)
+              const payload = decodeJwt(t)
+              if (payload) coordId = payload.id || payload.ID || payload.Coordinator_ID || payload.coordinator_id || coordId
+            } catch (e) { }
+          }
+
+          if (coordId) {
+            try {
+              let resolvedCoordId = String(coordId);
+              if (/^stkh_/i.test(resolvedCoordId)) {
+                // try to resolve stakeholder -> coordinator id; if that fails, fall back to any Coordinator_ID present
+                let resolvedFromStakeholder = false;
+                try {
+                  const stRes = await fetch(`${API_URL}/api/stakeholders/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
+                  const stBody = await stRes.json();
+                  if (stRes.ok && stBody.data) {
+                    const stakeholder = stBody.data;
+                    resolvedCoordId = stakeholder.Coordinator_ID || stakeholder.CoordinatorId || stakeholder.coordinator_id || resolvedCoordId;
+                    resolvedFromStakeholder = !!(stakeholder.Coordinator_ID || stakeholder.CoordinatorId || stakeholder.coordinator_id);
+                  }
+                } catch (e) {
+                  console.warn('Failed to fetch stakeholder to resolve coordinator id', resolvedCoordId, e);
+                }
+
+                if (!resolvedFromStakeholder) {
+                  // try local user fields and token payload for coordinator id
+                  const fallback = user?.Coordinator_ID || user?.CoordinatorId || user?.CoordinatorID || info?.raw?.Coordinator_ID || info?.raw?.CoordinatorId;
+                  if (fallback) {
+                    resolvedCoordId = fallback;
+                  } else {
+                    // nothing to resolve - bail out early
+                    return;
+                  }
+                }
+              }
+
+              const res = await fetch(`${API_URL}/api/coordinators/${encodeURIComponent(resolvedCoordId)}`, { headers, credentials: 'include' });
+              const body = await res.json();
+              if (res.ok && body.data) {
+                const coord = body.data.coordinator || body.data || body.coordinator || body;
+                const staff = coord?.Staff || null;
+                const fullName = staff ? [staff.First_Name, staff.Middle_Name, staff.Last_Name].filter(Boolean).join(' ').trim() : '';
+                const districtLabel = coord?.District?.District_Number ? `District ${coord.District.District_Number}` : (coord?.District?.District_Name || '');
+                const name = `${fullName}${districtLabel ? ' - ' + districtLabel : ''}`;
+                setCoordinatorOptions([{ key: coord?.Coordinator_ID || resolvedCoordId, label: name }]);
+                setCoordinator(coord?.Coordinator_ID || resolvedCoordId);
+              }
+            } catch (e) { console.error('Failed to fetch coordinator by id', coordId, e); }
+          }
+        }
+      } catch (err) { console.error('Failed to fetch coordinators', err); }
     };
 
     if (isOpen) fetchCoordinators();
