@@ -150,6 +150,25 @@ export default function CampaignPage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, selectedTab, searchQuery, quickFilterCategory, JSON.stringify(advancedFilter)]);
+
+  // Listen for cross-component request updates and refresh the list
+  useEffect(() => {
+    const handler = (evt: any) => {
+      try {
+        debug('[Campaign] unite:requests-changed received, refreshing requests', evt?.detail);
+      } catch (e) {}
+      // Re-fetch current list to reflect updates made elsewhere
+      try { fetchRequests(); } catch (e) {}
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('unite:requests-changed', handler as EventListener);
+    }
+    return () => {
+      try { window.removeEventListener('unite:requests-changed', handler as EventListener); } catch (e) {}
+    };
+    // Intentionally run once on mount to register the listener
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Sample event data
   const events = [
