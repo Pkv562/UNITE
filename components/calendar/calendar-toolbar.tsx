@@ -13,9 +13,10 @@ interface CalendarToolbarProps {
   onQuickFilter?: (filter?: any) => void;
   onAdvancedFilter?: (filter?: any) => void;
   onCreateEvent?: (eventType: string, eventData: any) => void;
+  showCreate?: boolean;
 }
 
-export default function CalendarToolbar({ onExport, onQuickFilter, onAdvancedFilter, onCreateEvent }: CalendarToolbarProps) {
+export default function CalendarToolbar({ onExport, onQuickFilter, onAdvancedFilter, onCreateEvent, showCreate = true }: CalendarToolbarProps) {
   const [selectedEventType, setSelectedEventType] = useState(new Set(["blood-drive"]));
   const [selectedQuick, setSelectedQuick] = useState<string | undefined>(undefined);
   const [isTrainingModalOpen, setIsTrainingModalOpen] = useState(false);
@@ -111,24 +112,28 @@ export default function CalendarToolbar({ onExport, onQuickFilter, onAdvancedFil
 
       <Button variant="faded" startContent={<SlidersHorizontal className="w-4 h-4" />} endContent={<ChevronDown className="w-4 h-4" />} onPress={() => setIsAdvancedModalOpen(true)} radius="md" size="sm">Advanced Filter</Button>
 
-      <ButtonGroup variant="solid" radius="md" size="sm">
-        <Button onPress={handleCreateEventClick} color="primary" startContent={<Ticket className="w-4 h-4" />}>{currentEventLabel}</Button>
-        <Dropdown placement="bottom-end">
-          <DropdownTrigger>
-            <Button isIconOnly color="primary"><ChevronDown className="w-4 h-4" /></Button>
-          </DropdownTrigger>
-          <DropdownMenu disallowEmptySelection aria-label="Event type options" className="max-w-2xl" selectedKeys={selectedEventType} selectionMode="single" onSelectionChange={(keys: any) => { try { const arr = Array.from(keys as Iterable<any>); setSelectedEventType(new Set(arr.map(String))); } catch { setSelectedEventType(new Set()); } }}>
-            <DropdownItem key="blood-drive" description={eventDescriptionsMap["blood-drive"]}>{eventLabelsMap["blood-drive"]}</DropdownItem>
-            <DropdownItem key="training" description={eventDescriptionsMap["training"]}>{eventLabelsMap["training"]}</DropdownItem>
-            <DropdownItem key="advocacy" description={eventDescriptionsMap["advocacy"]}>{eventLabelsMap["advocacy"]}</DropdownItem>
-          </DropdownMenu>
-        </Dropdown>
-      </ButtonGroup>
+      {showCreate && (
+        <>
+          <ButtonGroup variant="solid" radius="md" size="sm">
+            <Button onPress={handleCreateEventClick} color="primary" startContent={<Ticket className="w-4 h-4" />}>{currentEventLabel}</Button>
+            <Dropdown placement="bottom-end">
+              <DropdownTrigger>
+                <Button isIconOnly color="primary"><ChevronDown className="w-4 h-4" /></Button>
+              </DropdownTrigger>
+              <DropdownMenu disallowEmptySelection aria-label="Event type options" className="max-w-2xl" selectedKeys={selectedEventType} selectionMode="single" onSelectionChange={(keys: any) => { try { const arr = Array.from(keys as Iterable<any>); setSelectedEventType(new Set(arr.map(String))); } catch { setSelectedEventType(new Set()); } }}>
+                <DropdownItem key="blood-drive" description={eventDescriptionsMap["blood-drive"]}>{eventLabelsMap["blood-drive"]}</DropdownItem>
+                <DropdownItem key="training" description={eventDescriptionsMap["training"]}>{eventLabelsMap["training"]}</DropdownItem>
+                <DropdownItem key="advocacy" description={eventDescriptionsMap["advocacy"]}>{eventLabelsMap["advocacy"]}</DropdownItem>
+              </DropdownMenu>
+            </Dropdown>
+          </ButtonGroup>
 
-      {/* Creation modals */}
-      <CreateTrainingEventModal isOpen={isTrainingModalOpen} onClose={() => { setIsTrainingModalOpen(false); setTrainingError(null); }} onConfirm={handleTrainingEventConfirm} isSubmitting={isTrainingSubmitting} error={trainingError} />
-      <CreateBloodDriveEventModal isOpen={isBloodDriveModalOpen} onClose={() => { setIsBloodDriveModalOpen(false); setBloodDriveError(null); }} onConfirm={handleBloodDriveEventConfirm} isSubmitting={isBloodSubmitting} error={bloodDriveError} />
-      <CreateAdvocacyEventModal isOpen={isAdvocacyModalOpen} onClose={() => { setIsAdvocacyModalOpen(false); setAdvocacyError(null); }} onConfirm={handleAdvocacyEventConfirm} isSubmitting={isAdvocacySubmitting} error={advocacyError} />
+          {/* Creation modals */}
+          <CreateTrainingEventModal isOpen={isTrainingModalOpen} onClose={() => { setIsTrainingModalOpen(false); setTrainingError(null); }} onConfirm={handleTrainingEventConfirm} isSubmitting={isTrainingSubmitting} error={trainingError} />
+          <CreateBloodDriveEventModal isOpen={isBloodDriveModalOpen} onClose={() => { setIsBloodDriveModalOpen(false); setBloodDriveError(null); }} onConfirm={handleBloodDriveEventConfirm} isSubmitting={isBloodSubmitting} error={bloodDriveError} />
+          <CreateAdvocacyEventModal isOpen={isAdvocacyModalOpen} onClose={() => { setIsAdvocacyModalOpen(false); setAdvocacyError(null); }} onConfirm={handleAdvocacyEventConfirm} isSubmitting={isAdvocacySubmitting} error={advocacyError} />
+        </>
+      )}
 
       {/* Advanced Filter Modal (matches Campaign Toolbar) */}
       <Modal isOpen={isAdvancedModalOpen} onClose={() => setIsAdvancedModalOpen(false)} size="md" placement="center">

@@ -51,13 +51,17 @@ export const Navbar = () => {
         </NavbarBrand>
         <ul className="hidden lg:flex gap-4 justify-start ml-2">
           {siteConfig.navItems.map((item) => (
-            <NavbarItem key={item.href}>
-              <NextLink
-                className="text-sm text-default-800 hover:bg-black hover:text-white px-3 py-2 rounded-lg transition-colors"
-                href={item.href}
-              >
-                {item.label}
-              </NextLink>
+            <NavbarItem key={item.href || item.label}>
+              {item.href ? (
+                <NextLink
+                  className="text-sm text-default-800 hover:bg-black hover:text-white px-3 py-2 rounded-lg transition-colors"
+                  href={item.href}
+                >
+                  {item.label}
+                </NextLink>
+              ) : (
+                <span className="text-sm text-default-800 px-3 py-2 rounded-lg">{item.label}</span>
+              )}
             </NavbarItem>
           ))}
         </ul>

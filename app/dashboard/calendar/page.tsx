@@ -40,7 +40,7 @@ import EventRescheduleModal from '@/components/calendar/event-reschedule-modal';
 import CalendarToolbar from '@/components/calendar/calendar-toolbar';
 import { fetchWithAuth } from '@/utils/fetchWithAuth';
 
-export default function CalendarPage() {
+export default function CalendarPage({ allowCreate = true }: { allowCreate?: boolean }) {
   const [activeView, setActiveView] = useState("week");
   const today = new Date();
   const [selectedDate, setSelectedDate] = useState(today.getDate());
@@ -1182,7 +1182,8 @@ export default function CalendarPage() {
               onExport={handleExport}
               onQuickFilter={handleQuickFilter}
               onAdvancedFilter={handleAdvancedFilter}
-              onCreateEvent={handleCreateEvent}
+              onCreateEvent={allowCreate ? handleCreateEvent : undefined}
+              showCreate={allowCreate}
             />
           </div>
         </div>

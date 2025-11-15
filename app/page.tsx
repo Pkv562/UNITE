@@ -30,7 +30,7 @@ export default function Home() {
             >
                 Sign up
             </Button>
-            <Button as={Link} href="/learn-more" variant="bordered" size="md">
+            <Button variant="bordered" size="md">
                 Learn more
             </Button>
             </div>
