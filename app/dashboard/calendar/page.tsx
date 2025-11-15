@@ -76,7 +76,7 @@ export default function CalendarPage() {
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const [quickFilterCategory, setQuickFilterCategory] = useState<string | undefined>(undefined);
-  const [advancedFilter, setAdvancedFilter] = useState<{ start?: string; coordinator?: string }>({});
+  const [advancedFilter, setAdvancedFilter] = useState<{ start?: string; coordinator?: string; title?: string; requester?: string }>({});
   const router = useRouter();
   // Action modal states keyed by Event_ID
   const [rescheduleOpenId, setRescheduleOpenId] = useState<string | null>(null);
@@ -567,10 +567,20 @@ export default function CalendarPage() {
         const coordinatorName = (ev.coordinator?.name || ev.StakeholderName || ev.MadeByCoordinatorName || ev.coordinatorName || ev.Email || '').toString().toLowerCase();
         if (!coordinatorName.includes(coordQ)) return false;
       }
+      if (advancedFilter.title && advancedFilter.title.trim()) {
+        const titleQ = advancedFilter.title.trim().toLowerCase();
+        const evtTitle = (ev.Event_Title || ev.title || ev.EventTitle || ev.eventTitle || '').toString().toLowerCase();
+        if (!evtTitle.includes(titleQ)) return false;
+      }
+      if (advancedFilter.requester && advancedFilter.requester.trim()) {
+        const reqQ = advancedFilter.requester.trim().toLowerCase();
+        const requesterName = (ev.createdByName || ev.raw?.createdByName || ev.MadeByStakeholderName || ev.StakeholderName || ev.coordinator?.name || ev.coordinatorName || ev.Email || '').toString().toLowerCase();
+        if (!requesterName.includes(reqQ)) return false;
+      }
       return true;
     });
 
-  return afterQuick.map((e: any) => {
+    return afterQuick.map((e: any) => {
       // Start date may come in different shapes (ISO, number, or mongo export object)
       let start: Date | null = null;
       if (e.Start_Date) {
@@ -588,7 +598,23 @@ export default function CalendarPage() {
         }
       }
 
-  const time = start ? start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  const startTime = start ? start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  // End time (if provided)
+  let end: Date | null = null;
+  if (e.End_Date) {
+    try {
+      if (typeof e.End_Date === 'object' && e.End_Date.$date) {
+        const d = e.End_Date.$date;
+        if (typeof d === 'object' && d.$numberLong) end = new Date(Number(d.$numberLong));
+        else end = new Date(d as any);
+      } else {
+        end = new Date(e.End_Date as any);
+      }
+    } catch (err) {
+      end = null;
+    }
+  }
+  const endTime = end ? end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
 
       // Coordinator / stakeholder name — prefer createdByName from backend (stakeholder),
       // then fall back to other fields used previously.
@@ -635,8 +661,8 @@ export default function CalendarPage() {
       }
 
       const baseTitle = e.Event_Title || e.title || 'Lifesavers Blood Drive';
-      // For month view, include the start time after the title
-      const displayTitle = activeView === 'month' ? `${baseTitle}${time ? ` - ${time}` : ''}` : baseTitle;
+      // For month view we keep the title as the event title only; tooltip will show times
+      const displayTitle = baseTitle;
       // color codes: blood-drive -> red, advocacy -> yellow, training -> blue
       let color = '#3b82f6'; // default blue (training)
       if (typeKey === 'blood-drive') color = '#ef4444';
@@ -644,7 +670,9 @@ export default function CalendarPage() {
 
       return {
         title: displayTitle,
-        time,
+        startTime,
+        endTime,
+        time: startTime,
         type: typeKey,
         district: districtDisplay,
         location: e.Location || e.location || 'Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippine',
@@ -684,8 +712,8 @@ export default function CalendarPage() {
     else setQuickFilterCategory(undefined);
   };
 
-  const handleAdvancedFilter = (f?: { start?: string; end?: string; coordinator?: string }) => {
-    if (f) setAdvancedFilter({ start: f.start, coordinator: f.coordinator });
+  const handleAdvancedFilter = (f?: { start?: string; end?: string; coordinator?: string; title?: string; requester?: string }) => {
+    if (f) setAdvancedFilter({ start: f.start, coordinator: f.coordinator, title: f.title, requester: f.requester });
     else setAdvancedFilter({});
   };
 
@@ -911,16 +939,41 @@ export default function CalendarPage() {
     const statusRaw = event.raw?.Status || event.raw?.status || '';
     const status = (statusRaw || '').toString().toLowerCase().includes('approve') ? 'Approved' : ((statusRaw || '').toString().toLowerCase().includes('reject') ? 'Rejected' : 'Pending');
 
-    // Helper: derive boolean flag from either explicit boolean (e.g., canEdit)
-    // or fallback to allowedActions list (e.g., 'edit').
+    // Helper: derive boolean flag for an action. Rules:
+    // - If the client is unauthenticated (no token), only allow 'view'.
+    // - If explicit boolean flag present on event or event.raw, use it.
+    // - Otherwise, if allowedActions array exists on event or event.raw, use that.
+    // - As a final fallback, allow admins/coordinators (detected from local user)
+    //   to perform admin actions.
     const flagFor = (flagName: string, actionName?: string) => {
       try {
+        // if no auth token, restrict to view-only
+        const token = (typeof window !== 'undefined') ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+        const isAuthenticated = !!token;
+        if (!isAuthenticated) {
+          return actionName === 'view';
+        }
+
         // event may have top-level flags (e.g., event.canEdit) or raw flags (event.raw.canEdit)
         const explicit = (event && (event as any)[flagName]) ?? (event && event.raw && event.raw[flagName]);
         if (explicit !== undefined && explicit !== null) return Boolean(explicit);
+
         // fallback to allowedActions array
-        const allowed = (event && event.allowedActions) || (event && event.raw && event.raw.allowedActions) || (event && event.raw && event.raw.allowedActions) || null;
+        const allowed = (event && event.allowedActions) || (event && event.raw && event.raw.allowedActions) || null;
         if (Array.isArray(allowed) && actionName) return allowed.includes(actionName);
+
+        // As a last resort, allow admins/coordinators broader access based on local user info
+        try {
+          const raw = (typeof window !== 'undefined') ? localStorage.getItem('unite_user') : null;
+          const u = raw ? JSON.parse(raw as string) : null;
+          const roleStr = String(u?.staff_type || u?.role || u?.staffRole || '').toLowerCase();
+          const isAdmin = roleStr.includes('admin');
+          const isCoordinator = roleStr.includes('coordinator');
+          if (isAdmin || isCoordinator) return true;
+        } catch (e) {
+          // ignore
+        }
+
         return false;
       } catch (e) {
         return false;
@@ -1282,11 +1335,18 @@ export default function CalendarPage() {
                         {day.events.map((event, eventIndex) => (
                           <div
                             key={eventIndex}
-                            className="text-xs p-1 rounded font-medium truncate cursor-pointer transition-colors"
-                            title={`${event.time} - ${event.title}`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => handleOpenViewEvent(event.raw)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { handleOpenViewEvent(event.raw); } }}
+                            className="text-xs p-1 rounded font-medium truncate cursor-pointer transition-colors hover:shadow-sm"
+                            title={`${eventLabelsMap[event.type as EventType]} : ${event.startTime || ''}${event.endTime ? ` - ${event.endTime}` : ''}`}
                             style={{ backgroundColor: `${event.color}22`, color: event.color }}
                           >
-                            {event.title}
+                            <div className="flex items-center gap-2">
+                              <span className="truncate block">{event.title}</span>
+                              {event.startTime ? <span className="text-xs font-semibold ml-1">{event.startTime}</span> : null}
+                            </div>
                           </div>
                         ))}
                       </div>

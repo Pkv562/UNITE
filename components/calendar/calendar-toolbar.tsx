@@ -1,6 +1,9 @@
 "use client";
 import React, { useState } from "react";
 import { Button, ButtonGroup } from "@heroui/button";
+import { Input } from "@heroui/input";
+import { DatePicker } from "@heroui/date-picker";
+import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/modal";
 import { Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, DropdownSection } from "@heroui/dropdown";
 import { Download, Filter, SlidersHorizontal, Ticket, ChevronDown } from "lucide-react";
 import { CreateTrainingEventModal, CreateBloodDriveEventModal, CreateAdvocacyEventModal } from '@/components/calendar/event-creation-modal';
@@ -26,7 +29,8 @@ export default function CalendarToolbar({ onExport, onQuickFilter, onAdvancedFil
   const [bloodDriveError, setBloodDriveError] = useState<string | null>(null);
   const [advocacyError, setAdvocacyError] = useState<string | null>(null);
   const [advStart, setAdvStart] = useState<any>(null);
-  const [advCoordinator, setAdvCoordinator] = useState("");
+  const [advTitle, setAdvTitle] = useState("");
+  const [advRequester, setAdvRequester] = useState("");
 
   const eventLabelsMap: any = { "blood-drive": "Blood Drive", "training": "Training", "advocacy": "Advocacy" };
   const eventDescriptionsMap: any = { "blood-drive": "Organize a blood donation event", "training": "Schedule a training session", "advocacy": "Create an advocacy campaign" };
@@ -126,35 +130,45 @@ export default function CalendarToolbar({ onExport, onQuickFilter, onAdvancedFil
       <CreateBloodDriveEventModal isOpen={isBloodDriveModalOpen} onClose={() => { setIsBloodDriveModalOpen(false); setBloodDriveError(null); }} onConfirm={handleBloodDriveEventConfirm} isSubmitting={isBloodSubmitting} error={bloodDriveError} />
       <CreateAdvocacyEventModal isOpen={isAdvocacyModalOpen} onClose={() => { setIsAdvocacyModalOpen(false); setAdvocacyError(null); }} onConfirm={handleAdvocacyEventConfirm} isSubmitting={isAdvocacySubmitting} error={advocacyError} />
 
-      {/* Advanced Filter Modal (simple inline form) */}
-      {isAdvancedModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-lg shadow-lg p-4 w-96">
+      {/* Advanced Filter Modal (matches Campaign Toolbar) */}
+      <Modal isOpen={isAdvancedModalOpen} onClose={() => setIsAdvancedModalOpen(false)} size="md" placement="center">
+        <ModalContent>
+          <ModalHeader>
             <h3 className="text-lg font-semibold">Advanced Filter</h3>
-            <div className="space-y-3 mt-3">
+          </ModalHeader>
+          <ModalBody>
+            <div className="space-y-3">
               <div className="flex items-center gap-3">
-                <label className="w-20 text-sm">Date</label>
+                <label className="w-20 text-sm">Date (After)</label>
                 <div className="w-full">
-                  <DateInput value={advStart} onChange={setAdvStart} />
+                  <DatePicker
+                    value={advStart}
+                    onChange={setAdvStart}
+                    granularity="day"
+                    hideTimeZone
+                    variant="bordered"
+                    classNames={{ base: "w-full", inputWrapper: "border-default-200 hover:border-default-400 h-10", input: "text-sm" }}
+                  />
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <label className="w-20 text-sm">Coordinator</label>
-                <input className="border p-2 w-full text-sm" value={advCoordinator} onChange={(e) => setAdvCoordinator(e.target.value)} />
+                <label className="w-20 text-sm">Title</label>
+                <Input placeholder="Event title" value={advTitle} onChange={(e) => setAdvTitle((e.target as HTMLInputElement).value)} />
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="w-20 text-sm">Requester</label>
+                <Input placeholder="Requester name" value={advRequester} onChange={(e) => setAdvRequester((e.target as HTMLInputElement).value)} />
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <Button variant="bordered" onPress={() => setIsAdvancedModalOpen(false)}>Cancel</Button>
-              <Button color="primary" onPress={() => { onAdvancedFilter?.({ start: advStart ? (new Date(advStart)).toISOString() : undefined, coordinator: advCoordinator || undefined }); setIsAdvancedModalOpen(false); }}>Apply</Button>
-            </div>
-          </div>
-        </div>
-      )}
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="bordered" onPress={() => { setIsAdvancedModalOpen(false); }}>Cancel</Button>
+            <Button variant="bordered" onPress={() => { setAdvStart(null); setAdvTitle(''); setAdvRequester(''); onAdvancedFilter?.(); }} className="ml-2">Clear</Button>
+            <Button color="primary" onPress={() => { onAdvancedFilter?.({ start: advStart ? (new Date(advStart)).toISOString() : undefined, title: advTitle || undefined, requester: advRequester || undefined }); setIsAdvancedModalOpen(false); }} className="ml-2">Apply</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </div>
   );
 }
 
-// tiny DateInput helper used above to avoid depending on DatePicker in this file
-function DateInput({ value, onChange }: { value: any; onChange: (v: any) => void }) {
-  return <input type="date" className="border p-2 text-sm w-full" value={value ? new Date(value).toISOString().split('T')[0] : ''} onChange={(e) => onChange(e.target.value ? new Date(e.target.value).toISOString() : null)} />;
-}
