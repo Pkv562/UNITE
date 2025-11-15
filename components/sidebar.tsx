@@ -84,11 +84,15 @@ export default function Sidebar({
     role || (serverInfo && serverInfo.role)
       ? String(role || serverInfo.role).toLowerCase()
       : "";
-  // Only treat as system admin when server explicitly marks isAdmin or role looks like a system admin.
+  const serverStaffTypeLower = serverStaffType ? String(serverStaffType).toLowerCase() : "";
+  // Only treat as system admin when server explicitly marks isAdmin, StaffType === 'Admin', 
+  // role === 'Admin', or role looks like a system admin.
   // Coerce to a boolean to avoid accidental string values leaking through the || operator
   // which can cause TypeScript to infer a union type (boolean | string).
   const serverIsSystemAdmin = Boolean(
     (serverInfo && serverInfo.isAdmin) ||
+      (serverStaffTypeLower === 'admin') ||
+      (serverRoleFromResolved === 'admin') ||
       (serverRoleFromResolved &&
         serverRoleFromResolved.includes("sys") &&
         serverRoleFromResolved.includes("admin")),
@@ -155,8 +159,13 @@ export default function Sidebar({
               rawLoaded.user.staff_type ||
               rawLoaded.user.staffType)) ||
           null;
+        const staffTypeLower = staffTypeLoaded ? String(staffTypeLoaded).toLowerCase() : "";
+        // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin', 
+        // role === 'Admin', or system admin variant
         const loadedIsSystemAdmin =
           !!(loaded && loaded.isAdmin) ||
+          (staffTypeLower === 'admin') ||
+          (roleFromLoaded === 'admin') ||
           (roleFromLoaded.includes("sys") && roleFromLoaded.includes("admin"));
         const loadedIsCoordinator =
           (!!staffTypeLoaded &&
@@ -224,13 +233,20 @@ export default function Sidebar({
         // server supplied a value, treat it as authoritative.
         if (typeof initialShowCoordinator === "undefined") {
           // Only allow the client-loaded data to enable the coordinator
-          // link if the loaded user is a system admin (isAdmin flag or
-          // role that contains both 'sys'/'system' and 'admin').
+          // link if the loaded user is a system admin (isAdmin flag, StaffType === 'Admin',
+          // role === 'Admin', or role that contains both 'sys'/'system' and 'admin').
           const roleFromLoaded = loaded?.role
             ? String(loaded.role).toLowerCase()
             : "";
+          const rawLoaded = loaded?.raw || loaded || null;
+          const staffTypeFromLoaded = rawLoaded?.StaffType || rawLoaded?.Staff_Type || rawLoaded?.staff_type || rawLoaded?.staffType || roleFromLoaded;
+          const staffTypeLower = staffTypeFromLoaded ? String(staffTypeFromLoaded).toLowerCase() : "";
+          // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin', 
+          // role === 'Admin', or system admin variant
           let loadedIsSystemAdmin =
             !!(loaded && loaded.isAdmin) ||
+            (staffTypeLower === 'admin') ||
+            (roleFromLoaded === 'admin') ||
             (roleFromLoaded.includes("sys") &&
               roleFromLoaded.includes("admin"));
 
@@ -257,9 +273,13 @@ export default function Sidebar({
                   parsedFallback?.staffType ||
                   null;
                 const fbLower = fbRole ? String(fbRole).toLowerCase() : "";
+                const fbStaffType = parsedFallback?.StaffType || parsedFallback?.staff_type || fbRole;
+                const fbStaffTypeLower = fbStaffType ? String(fbStaffType).toLowerCase() : "";
 
                 loadedIsSystemAdmin =
                   loadedIsSystemAdmin ||
+                  (fbStaffTypeLower === 'admin') ||
+                  (fbLower === 'admin') ||
                   (/sys|system/.test(fbLower) && /admin/.test(fbLower)) ||
                   !!parsedFallback?.isAdmin;
                 // dev-only debug removed
@@ -296,8 +316,13 @@ export default function Sidebar({
             (!!staffTypeLoaded &&
               String(staffTypeLoaded).toLowerCase() === "coordinator") ||
             roleFromLoaded2.includes("coordinator");
+          const staffTypeLower2 = staffTypeLoaded ? String(staffTypeLoaded).toLowerCase() : "";
+          // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin', 
+          // role === 'Admin', or system admin variant
           const loadedIsSystemAdmin2 =
             !!(loaded && loaded.isAdmin) ||
+            (staffTypeLower2 === 'admin') ||
+            (roleFromLoaded2 === 'admin') ||
             (roleFromLoaded2.includes("sys") &&
               roleFromLoaded2.includes("admin"));
 

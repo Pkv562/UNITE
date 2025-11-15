@@ -43,15 +43,20 @@ export default async function SysAdminDashboardLayout({
   // Compute server-side visibility flags for the sidebar. These are
   // preferred by the client Sidebar to avoid hydration mismatches.
   const roleLower = String(userInfoProp?.role || "").toLowerCase();
-  const serverIsSystemAdmin = Boolean(
-    userInfoProp?.isAdmin ||
-      (roleLower.includes("sys") && roleLower.includes("admin")),
-  );
   const staffType =
     userInfoProp?.raw?.StaffType ||
     userInfoProp?.raw?.staff_type ||
     userInfoProp?.raw?.staffType ||
     null;
+  const staffTypeLower = staffType ? String(staffType).toLowerCase() : "";
+  // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin', 
+  // role === 'Admin', or system admin variant (contains both 'sys' and 'admin')
+  const serverIsSystemAdmin = Boolean(
+    userInfoProp?.isAdmin ||
+      (staffTypeLower === 'admin') ||
+      (roleLower === 'admin') ||
+      (roleLower.includes("sys") && roleLower.includes("admin")),
+  );
   const serverIsCoordinator = Boolean(
     (staffType && String(staffType).toLowerCase() === "coordinator") ||
       roleLower.includes("coordinator"),
