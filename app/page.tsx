@@ -15,7 +15,7 @@ export default function Home() {
                 possibilities
             </h1>
             <p className="text-lg text-default-800 mt-4">
-                It's not another health tech platform. It's a movement.
+                It&apos;s not another health tech platform. It&apos;s a movement.
             </p>
             </div>
     

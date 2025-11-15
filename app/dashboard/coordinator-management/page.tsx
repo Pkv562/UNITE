@@ -82,12 +82,12 @@ export default function CoordinatorManagement() {
 
 
   const handleUserClick = () => {
-    console.log("User profile clicked")
+    // User profile clicked
   }
 
 
   const handleExport = () => {
-    console.log("Exporting data...")
+    // Exporting data...
   }
 
 
@@ -97,7 +97,7 @@ export default function CoordinatorManagement() {
 
 
   const handleAdvancedFilter = () => {
-    console.log("Opening advanced filter...")
+    // Opening advanced filter...
   }
 
 
@@ -112,7 +112,6 @@ export default function CoordinatorManagement() {
 
 
   const handleModalSubmit = async (data: CoordinatorFormData) => {
-    console.log("New coordinator data:", data)
     setIsCreating(true)
     try {
       const base = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')

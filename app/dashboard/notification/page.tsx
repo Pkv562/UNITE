@@ -93,11 +93,20 @@ export default function NotificationPage() {
         );
       })();
       const recipientType = getRecipientType();
-      console.groupCollapsed('NotificationPage: debugUser');
-      console.log('raw stored user:', parsed);
-      console.log('detected recipientId:', recipientId);
-      console.log('detected recipientType:', recipientType);
-      console.groupEnd();
+      // Debug user info (only when ?debugUser=1 is in URL)
+      // eslint-disable-next-line no-console
+      if (showUserDebug) {
+        // eslint-disable-next-line no-console
+        console.groupCollapsed('NotificationPage: debugUser');
+        // eslint-disable-next-line no-console
+        console.log('raw stored user:', parsed);
+        // eslint-disable-next-line no-console
+        console.log('detected recipientId:', recipientId);
+        // eslint-disable-next-line no-console
+        console.log('detected recipientType:', recipientType);
+        // eslint-disable-next-line no-console
+        console.groupEnd();
+      }
     } catch (e) {
       console.error('Failed to compute debug user info', e);
     }

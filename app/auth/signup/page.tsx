@@ -203,24 +203,24 @@ export default function SignUp() {
             <div className={`absolute inset-0 ${step === 0 ? 'block' : 'hidden'}`}>
               <div className="space-y-3 pb-20">
                 <div>
-                  <label className="text-sm font-medium block mb-1">First name <span className="text-danger-500">*</span></label>
-                  <input value={formData.First_Name} onChange={(e) => update({ First_Name: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="first-name" className="text-sm font-medium block mb-1">First name <span className="text-danger-500">*</span></label>
+                  <input id="first-name" value={formData.First_Name} onChange={(e) => update({ First_Name: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
                 <div>
-                  <label className="text-sm font-medium block mb-1">Middle name</label>
-                  <input value={formData.Middle_Name} onChange={(e) => update({ Middle_Name: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="middle-name" className="text-sm font-medium block mb-1">Middle name</label>
+                  <input id="middle-name" value={formData.Middle_Name} onChange={(e) => update({ Middle_Name: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
                 <div>
-                  <label className="text-sm font-medium block mb-1">Last name <span className="text-danger-500">*</span></label>
-                  <input value={formData.Last_Name} onChange={(e) => update({ Last_Name: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="last-name" className="text-sm font-medium block mb-1">Last name <span className="text-danger-500">*</span></label>
+                  <input id="last-name" value={formData.Last_Name} onChange={(e) => update({ Last_Name: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
                 <div>
-                  <label className="text-sm font-medium block mb-1">Email <span className="text-danger-500">*</span></label>
-                  <input type="email" value={formData.Email} onChange={(e) => update({ Email: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="email" className="text-sm font-medium block mb-1">Email <span className="text-danger-500">*</span></label>
+                  <input id="email" type="email" value={formData.Email} onChange={(e) => update({ Email: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
                 <div>
-                  <label className="text-sm font-medium block mb-1">Phone number <span className="text-danger-500">*</span></label>
-                  <input value={formData.Phone_Number} onChange={(e) => update({ Phone_Number: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="phone-number" className="text-sm font-medium block mb-1">Phone number <span className="text-danger-500">*</span></label>
+                  <input id="phone-number" value={formData.Phone_Number} onChange={(e) => update({ Phone_Number: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
               </div>
             </div>
@@ -229,20 +229,20 @@ export default function SignUp() {
             <div className={`absolute inset-0 ${step === 1 ? 'block' : 'hidden'}`}>
               <div className="space-y-3 pb-20">
                 <div>
-                  <label className="text-sm font-medium block mb-1">Password <span className="text-danger-500">*</span></label>
+                  <label htmlFor="password" className="text-sm font-medium block mb-1">Password <span className="text-danger-500">*</span></label>
                   <div className="relative">
-                    <input type={showPassword ? 'text' : 'password'} value={formData.Password} onChange={(e) => update({ Password: e.target.value })} className={`${inputClass} w-full pr-10`} />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500">
+                    <input id="password" type={showPassword ? 'text' : 'password'} value={formData.Password} onChange={(e) => update({ Password: e.target.value })} className={`${inputClass} w-full pr-10`} />
+                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500" aria-label={showPassword ? "Hide password" : "Show password"}>
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                   <p className="text-xs text-default-500 mt-1">Must be at least 8 characters</p>
                 </div>
                 <div>
-                  <label className="text-sm font-medium block mb-1">Confirm password <span className="text-danger-500">*</span></label>
+                  <label htmlFor="confirm-password" className="text-sm font-medium block mb-1">Confirm password <span className="text-danger-500">*</span></label>
                   <div className="relative">
-                    <input type={showConfirmPassword ? 'text' : 'password'} value={formData.ConfirmPassword} onChange={(e) => update({ ConfirmPassword: e.target.value })} className={`${inputClass} w-full pr-10`} />
-                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500">
+                    <input id="confirm-password" type={showConfirmPassword ? 'text' : 'password'} value={formData.ConfirmPassword} onChange={(e) => update({ ConfirmPassword: e.target.value })} className={`${inputClass} w-full pr-10`} />
+                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500" aria-label={showConfirmPassword ? "Hide password" : "Show password"}>
                       {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
@@ -255,16 +255,16 @@ export default function SignUp() {
               <div className="space-y-3 pb-20">
                 {/* Province is determined by registration code (no UI input) */}
                 <div>
-                  <label className="text-sm font-medium block mb-1">City / Municipality <span className="text-danger-500">*</span></label>
-                  <input value={formData.City_Municipality} onChange={(e) => update({ City_Municipality: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="city-municipality" className="text-sm font-medium block mb-1">City / Municipality <span className="text-danger-500">*</span></label>
+                  <input id="city-municipality" value={formData.City_Municipality} onChange={(e) => update({ City_Municipality: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
                 <div>
-                  <label className="text-sm font-medium block mb-1">Organization / Institution</label>
-                  <input value={formData.Organization_Institution} onChange={(e) => update({ Organization_Institution: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="organization" className="text-sm font-medium block mb-1">Organization / Institution</label>
+                  <input id="organization" value={formData.Organization_Institution} onChange={(e) => update({ Organization_Institution: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
                 <div>
-                  <label className="text-sm font-medium block mb-1">Field</label>
-                  <input value={formData.Field} onChange={(e) => update({ Field: e.target.value })} className={`${inputClass} w-full`} />
+                  <label htmlFor="field" className="text-sm font-medium block mb-1">Field</label>
+                  <input id="field" value={formData.Field} onChange={(e) => update({ Field: e.target.value })} className={`${inputClass} w-full`} />
                 </div>
               </div>
             </div>
@@ -272,9 +272,9 @@ export default function SignUp() {
             {/* Step 4 - Registration Code */}
             <div className={`absolute inset-0 ${step === 3 ? 'block' : 'hidden'}`}>
               <div className="pb-20">
-                <label className="text-sm font-medium block mb-1">Registration code</label>
+                <label htmlFor="registration-code" className="text-sm font-medium block mb-1">Registration code</label>
                 <div className="flex items-center gap-2">
-                  <input value={formData.Registration_Code} onChange={(e) => { update({ Registration_Code: e.target.value }); setCodeValidated(false); setValidatedData(null); setRegistrationError(null); }} className={`${inputClass} w-full`} />
+                  <input id="registration-code" value={formData.Registration_Code} onChange={(e) => { update({ Registration_Code: e.target.value }); setCodeValidated(false); setValidatedData(null); setRegistrationError(null); }} className={`${inputClass} w-full`} />
                   <div className="flex items-center gap-2">
                     {validatingCode ? (
                       <span className="inline-flex items-center gap-2"><span className="w-4 h-4 rounded-full border-2 border-t-transparent border-gray-300 animate-spin"/>Checking</span>
@@ -318,7 +318,7 @@ export default function SignUp() {
         </form>
 
       <div className="mt-6 text-center text-sm text-gray-600">
-        Already have an account?{' '}
+        Already have an account?{" "}
         <Link href="/auth/signin" className="text-danger-600 hover:underline font-medium">
           Sign in
         </Link>
