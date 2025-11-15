@@ -1,9 +1,8 @@
 "use client";
 import BdriveModal, { BloodDriveData } from "@/components/bdrive-modal";
 import React, { useState, useRef, useEffect } from "react";
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from "framer-motion";
-import { Tabs, Tab } from "@heroui/tabs";
-import { Button, ButtonGroup } from "@heroui/button";
 import { 
     Dropdown,
     DropdownTrigger,
@@ -26,13 +25,58 @@ import {
     SlidersHorizontal,
     Filter
 } from "lucide-react";
+import {
+  Dropdown,
+  DropdownTrigger,
+  DropdownMenu,
+  DropdownSection,
+  DropdownItem
+} from '@heroui/dropdown';
+import { Button } from '@heroui/button';
+import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from '@heroui/modal';
+import { DatePicker } from '@heroui/date-picker';
+import { User } from '@heroui/user';
+import EventViewModal from '@/components/calendar/event-view-modal';
+import EditEventModal from '@/components/calendar/event-edit-modal';
+import EventManageStaffModal from '@/components/calendar/event-manage-staff-modal';
+import EventRescheduleModal from '@/components/calendar/event-reschedule-modal';
+import CalendarToolbar from '@/components/calendar/calendar-toolbar';
+import { fetchWithAuth } from '@/utils/fetchWithAuth';
+import { usePathname } from 'next/navigation';
 
 export default function CalendarPage() {
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const pathname = usePathname();
+  // Allow create on dashboard calendar, but not on public calendar route
+  const allowCreate = pathname === '/calendar' ? false : true;
   const [activeView, setActiveView] = useState("week");
-  const [selectedDate, setSelectedDate] = useState(26);
-  const [selectedEventType, setSelectedEventType] = useState<Set<string> | null>(null);
-  const [currentDate, setCurrentDate] = useState(new Date(2025, 9, 26)); // October 26, 2025
+  const today = new Date();
+  const [selectedDate, setSelectedDate] = useState(today.getDate());
+  const [currentDate, setCurrentDate] = useState<Date>(today);
+  const [weekEventsByDate, setWeekEventsByDate] = useState<Record<string, any[]>>({});
+  const [monthEventsByDate, setMonthEventsByDate] = useState<Record<string, any[]>>({});
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState<string>('Bicol Medical Center');
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>('bmc@gmail.com');
+  // Initialize displayed user name/email from localStorage (match campaign page logic)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('unite_user');
+      if (raw) {
+        const u = JSON.parse(raw);
+        const first = u.First_Name || u.FirstName || u.first_name || u.firstName || u.First || '';
+        const middle = u.Middle_Name || u.MiddleName || u.middle_name || u.middleName || u.Middle || '';
+        const last = u.Last_Name || u.LastName || u.last_name || u.lastName || u.Last || '';
+        const parts = [first, middle, last].map((p: any) => (p || '').toString().trim()).filter(Boolean);
+        const full = parts.join(' ');
+        const email = u.Email || u.email || u.Email_Address || u.emailAddress || '';
+        if (full) setCurrentUserName(full);
+        else if (u.name) setCurrentUserName(u.name);
+        if (email) setCurrentUserEmail(email);
+      }
+    } catch (err) {
+      // ignore malformed localStorage entry
+    }
+  }, []);
   const [isDateTransitioning, setIsDateTransitioning] = useState(false);
   const [isViewTransitioning, setIsViewTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('right');
@@ -40,11 +84,15 @@ export default function CalendarPage() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [isBdriveModalOpen, setIsBdriveModalOpen] = useState(false);
 
-  // Close dropdown when clicking outside
+  // Manage staff simple state
+  const [staffMap, setStaffMap] = useState<Record<string, Array<{ FullName: string; Role: string }>>>({});
+  const [staffLoading, setStaffLoading] = useState(false);
+
+  // Close create menu when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
+      if (createMenuRef.current && !createMenuRef.current.contains(event.target as Node)) {
+        setIsCreateMenuOpen(false);
       }
     }
 
@@ -53,15 +101,151 @@ export default function CalendarPage() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+  // API base (allow override via NEXT_PUBLIC_API_URL)
+  const API_BASE = (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_API_URL) ? process.env.NEXT_PUBLIC_API_URL : 'http://localhost:3000';
 
-  // Set initial event type in useEffect to ensure it only runs on the client
-  useEffect(() => {
-    setSelectedEventType(new Set(["blood-drive"]));
-  }, []);
+  // Helpers to normalize date keys (use local date YYYY-MM-DD)
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const dateToLocalKey = (d: Date) => {
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
 
-  const handleLogout = () => {
-    console.log('User logged out');
-    setIsDropdownOpen(false);
+  // Parse server-provided dates robustly.
+  // If backend sends a date-only string like '2025-11-17' treat it as local date
+  // to avoid timezone shifts from UTC parsing.
+  const parseServerDate = (raw: any): Date | null => {
+    if (!raw && raw !== 0) return null;
+    try {
+      if (typeof raw === 'string') {
+        const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) {
+          const y = Number(m[1]);
+          const mo = Number(m[2]) - 1;
+          const d = Number(m[3]);
+          return new Date(y, mo, d);
+        }
+        return new Date(raw);
+      }
+      if (typeof raw === 'object' && raw.$date) {
+        const d = raw.$date;
+        if (typeof d === 'object' && d.$numberLong) return new Date(Number(d.$numberLong));
+        return new Date(d as any);
+      }
+      return new Date(raw as any);
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const normalizeEventsMap = (input: Record<string, any> | undefined): Record<string, any[]> => {
+    const out: Record<string, any[]> = {};
+    if (!input) return out;
+    try {
+      // Helper: recursively search an object for the first array of event-like objects
+      const findArrayInObject = (val: any, depth = 0): any[] | null => {
+        if (!val || depth > 6) return null; // limit depth
+        if (Array.isArray(val)) return val;
+        if (typeof val !== 'object') return null;
+        const commonKeys = ['events', 'data', 'eventsByDate', 'weekDays'];
+        for (const k of commonKeys) {
+          if (Array.isArray(val[k])) return val[k];
+        }
+        for (const k of Object.keys(val)) {
+          try {
+            const found = findArrayInObject(val[k], depth + 1);
+            if (found && Array.isArray(found)) return found;
+          } catch (e) {
+            // ignore
+          }
+        }
+        return null;
+      };
+
+      Object.keys(input).forEach((rawKey) => {
+        // Attempt to parse rawKey into a Date. If parsing fails, keep as-is.
+        const parsed = new Date(rawKey);
+        let localKey = rawKey;
+        if (!isNaN(parsed.getTime())) {
+          localKey = dateToLocalKey(parsed);
+        }
+
+        const rawVal = input[rawKey];
+        let vals: any[] = [];
+
+        const found = findArrayInObject(rawVal);
+        if (found && Array.isArray(found)) vals = found;
+        else if (Array.isArray(rawVal)) vals = rawVal;
+        else if (rawVal && typeof rawVal === 'object') vals = [rawVal];
+        else if (rawVal !== undefined && rawVal !== null) vals = [rawVal];
+
+        if (!out[localKey]) out[localKey] = [];
+        out[localKey] = out[localKey].concat(vals);
+      });
+
+      // Deduplicate events per date (prefer Event_ID / EventId when available)
+      Object.keys(out).forEach((k) => {
+        const seen = new Set<string>();
+        out[k] = out[k].filter((ev) => {
+          const id = (ev && (ev.Event_ID || ev.EventId || ev.id)) ? String(ev.Event_ID ?? ev.EventId ?? ev.id) : JSON.stringify(ev);
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        });
+      });
+    } catch (e) {
+      return input as Record<string, any[]>;
+    }
+    return out;
+  };
+
+  // Merge month multi-day events into a week map for the given currentDate
+  const mergeWeekWithMonth = (normalizedWeek: Record<string, any[]>, normalizedMonth: Record<string, any[]>, currentDateParam: Date) => {
+    try {
+      const wkStart = new Date(currentDateParam);
+      const dayOfWeek = wkStart.getDay();
+      wkStart.setDate(wkStart.getDate() - dayOfWeek);
+      wkStart.setHours(0,0,0,0);
+      const wkEnd = new Date(wkStart);
+      wkEnd.setDate(wkStart.getDate() + 6);
+
+      const merged: Record<string, any[]> = {};
+      Object.keys(normalizedWeek || {}).forEach(k => { merged[k] = Array.isArray(normalizedWeek[k]) ? [...normalizedWeek[k]] : []; });
+
+      const addEventToDate = (localKey: string, ev: any) => {
+        if (!merged[localKey]) merged[localKey] = [];
+        const id = ev?.Event_ID ?? ev?.EventId ?? ev?._id ?? JSON.stringify(ev);
+        if (!merged[localKey].some(x => (x?.Event_ID ?? x?.EventId ?? x?._id ?? JSON.stringify(x)) === id)) {
+          merged[localKey].push(ev);
+        }
+      };
+
+      Object.keys(normalizedMonth || {}).forEach(k => {
+        const arr = normalizedMonth[k] || [];
+        for (const ev of arr) {
+          let start: Date | null = null;
+          let end: Date | null = null;
+          try { if (ev.Start_Date) start = parseServerDate(ev.Start_Date); } catch (e) { start = null; }
+          try { if (ev.End_Date) end = parseServerDate(ev.End_Date); } catch (e) { end = null; }
+
+          if (!start) continue;
+          if (!end) end = start;
+
+          const cur = new Date(start);
+          cur.setHours(0,0,0,0);
+          while (cur <= end) {
+            if (cur >= wkStart && cur <= wkEnd) {
+              const localKey = dateToLocalKey(new Date(cur));
+              addEventToDate(localKey, ev);
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+        }
+      });
+
+      return merged;
+    } catch (e) {
+      return normalizedWeek || {};
+    }
   };
 
   // Enhanced date navigation with transitions
@@ -150,9 +334,9 @@ export default function CalendarPage() {
     const year = startOfWeek.getFullYear();
     
     if (startMonth === endMonth) {
-      return `${startMonth} ${startOfWeek.getDate()} - ${endOfWeek.getDate()}, ${year}`;
+      return `${startMonth} ${startOfWeek.getDate()} - ${endOfWeek.getDate()} ${year}`;
     } else {
-      return `${startMonth} ${startOfWeek.getDate()} - ${endMonth} ${endOfWeek.getDate()}, ${year}`;
+      return `${startMonth} ${startOfWeek.getDate()} - ${endMonth} ${endOfWeek.getDate()} ${year}`;
     }
   };
 
@@ -160,7 +344,6 @@ export default function CalendarPage() {
     return date.toLocaleString('default', { month: 'long', year: 'numeric' });
   };
 
-  // Generate days for the current week
   const getDaysForWeek = (date: Date) => {
     const days = [];
     const startOfWeek = new Date(date);
@@ -182,21 +365,16 @@ export default function CalendarPage() {
     return days;
   };
 
-  // Helper functions for month view
   const generateMonthDays = (date: Date) => {
     const year = date.getFullYear();
     const month = date.getMonth();
     
-    // First day of the month
     const firstDay = new Date(year, month, 1);
-    // Last day of the month
     const lastDay = new Date(year, month + 1, 0);
     
-    // Start from the first Sunday of the week that contains the first day
     const startDate = new Date(firstDay);
     startDate.setDate(firstDay.getDate() - firstDay.getDay());
     
-    // End at the last Saturday of the week that contains the last day
     const endDate = new Date(lastDay);
     endDate.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
     
@@ -216,48 +394,389 @@ export default function CalendarPage() {
     return days;
   };
 
-  const getEventsForDate = (date: Date) => {
-    const events = [];
-    const day = date.getDate();
-    const month = date.getMonth();
-    const year = date.getFullYear();
+  const makeOrdinal = (n: number | string) => {
+    const num = parseInt(String(n), 10);
+    if (isNaN(num)) return String(n);
+    const suffixes = ['th', 'st', 'nd', 'rd'];
+    const v = num % 100;
+    const suffix = (v >= 11 && v <= 13) ? 'th' : (suffixes[num % 10] || 'th');
+    return `${num}${suffix}`;
+  };
 
-    // Sample events data based on the provided image
-    if (month === 9 && year === 2025) { // October 2025
-      if (day === 26) {
-        events.push({ 
-          title: "Lifesavers Blood Drive", 
-          time: "8:50 AM",
-          type: "training",
-          district: "1st District",
-          location: "Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippines",
-          countType: "Audience Count",
-          count: "205 no."
-        });
-      } else if (day === 27) {
-        events.push({ 
-          title: "Lifesavers Blood Drive", 
-          time: "8:50 AM",
-          type: "blood-drive",
-          district: "1st District",
-          location: "Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippines",
-          countType: "Goal Count",
-          count: "205 u."
-        });
-      } else if (day === 28) {
-        events.push({ 
-          title: "Lifesavers Blood Drive", 
-          time: "8:50 AM",
-          type: "advocacy",
-          district: "1st District",
-          location: "Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippines",
-          countType: "Audience Count",
-          count: "205 no."
-        });
-      }
+  const getEventsForDate = (date: Date) => {
+    const key = dateToLocalKey(date);
+    const source = activeView === 'month' ? monthEventsByDate : weekEventsByDate;
+    // Prefer normalized local key; fallback to ISO UTC key or raw date string if present
+    const isoKey = date.toISOString().split('T')[0];
+    let raw: any = source[key] || source[isoKey] || source[date.toString()] || [];
+
+    // If backend returned a container object for this date, try to extract the array
+    if (raw && !Array.isArray(raw) && typeof raw === 'object') {
+      if (Array.isArray(raw.events)) raw = raw.events;
+      else if (Array.isArray(raw.data)) raw = raw.data;
+      else raw = [raw];
     }
 
-    return events;
+    raw = Array.isArray(raw) ? raw : [];
+
+    // Only include events that are explicitly approved
+    const approved = raw.filter((e: any) => {
+      const status = (e && (e.Status ?? e.status ?? '')).toString ? (e.Status ?? e.status ?? '').toString() : '';
+      return status.toLowerCase() === 'approved';
+    });
+
+    // Deduplicate approved list just in case
+    const deduped: any[] = [];
+    const seenIds = new Set<string>();
+    for (const e of approved) {
+      const id = e?.Event_ID ?? e?.EventId ?? JSON.stringify(e);
+      const sid = String(id);
+      if (seenIds.has(sid)) continue;
+      seenIds.add(sid);
+      deduped.push(e);
+    }
+
+    // For month view, avoid showing multi-day events on every day: only show on the event Start_Date
+    const filterByStartDateForMonth = (ev: any) => {
+      if (activeView !== 'month') return true;
+      let start: Date | null = null;
+      try { if (ev.Start_Date) start = parseServerDate(ev.Start_Date); } catch (err) { start = null; }
+      if (!start) return false;
+      return dateToLocalKey(start) === key;
+    };
+
+    const finalList = deduped.filter(filterByStartDateForMonth);
+
+    // Apply quick / advanced filters
+    const afterQuick = finalList.filter((ev: any) => {
+      if (!quickFilterCategory) return true;
+      const rawCat = ((ev.Category ?? ev.category ?? '')).toString().toLowerCase();
+      let categoryLabel = 'Event';
+      if (rawCat.includes('blood')) categoryLabel = 'Blood Drive';
+      else if (rawCat.includes('training')) categoryLabel = 'Training';
+      else if (rawCat.includes('advocacy')) categoryLabel = 'Advocacy';
+      return quickFilterCategory === '' || quickFilterCategory === undefined || quickFilterCategory === categoryLabel;
+    }).filter((ev: any) => {
+      // advanced filter: start date (only events on or after)
+      if (advancedFilter.start) {
+        let start: Date | null = null;
+        try {
+          if (ev.Start_Date) start = (typeof ev.Start_Date === 'string') ? new Date(ev.Start_Date) : (ev.Start_Date.$date ? new Date(ev.Start_Date.$date) : new Date(ev.Start_Date));
+        } catch (err) { start = null; }
+        if (start) {
+          const s = new Date(advancedFilter.start);
+          if (start < s) return false;
+        }
+      }
+      if (advancedFilter.coordinator && advancedFilter.coordinator.trim()) {
+        const coordQ = advancedFilter.coordinator.trim().toLowerCase();
+        const coordinatorName = (ev.coordinator?.name || ev.StakeholderName || ev.MadeByCoordinatorName || ev.coordinatorName || ev.Email || '').toString().toLowerCase();
+        if (!coordinatorName.includes(coordQ)) return false;
+      }
+      if (advancedFilter.title && advancedFilter.title.trim()) {
+        const titleQ = advancedFilter.title.trim().toLowerCase();
+        const evtTitle = (ev.Event_Title || ev.title || ev.EventTitle || ev.eventTitle || '').toString().toLowerCase();
+        if (!evtTitle.includes(titleQ)) return false;
+      }
+      if (advancedFilter.requester && advancedFilter.requester.trim()) {
+        const reqQ = advancedFilter.requester.trim().toLowerCase();
+        const requesterName = (ev.createdByName || ev.raw?.createdByName || ev.MadeByStakeholderName || ev.StakeholderName || ev.coordinator?.name || ev.coordinatorName || ev.Email || '').toString().toLowerCase();
+        if (!requesterName.includes(reqQ)) return false;
+      }
+      return true;
+    });
+
+    return afterQuick.map((e: any) => {
+      // Start date may come in different shapes (ISO, number, or mongo export object)
+      let start: Date | null = null;
+      if (e.Start_Date) {
+        try {
+          if (typeof e.Start_Date === 'object' && e.Start_Date.$date) {
+            // mongo export shape: { $date: { $numberLong: '...' } } or { $date: 12345 }
+            const d = e.Start_Date.$date;
+            if (typeof d === 'object' && d.$numberLong) start = new Date(Number(d.$numberLong));
+            else start = new Date(d as any);
+          } else {
+            start = new Date(e.Start_Date as any);
+          }
+        } catch (err) {
+          start = null;
+        }
+      }
+
+  const startTime = start ? start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  // End time (if provided)
+  let end: Date | null = null;
+  if (e.End_Date) {
+    try {
+      if (typeof e.End_Date === 'object' && e.End_Date.$date) {
+        const d = e.End_Date.$date;
+        if (typeof d === 'object' && d.$numberLong) end = new Date(Number(d.$numberLong));
+        else end = new Date(d as any);
+      } else {
+        end = new Date(e.End_Date as any);
+      }
+    } catch (err) {
+      end = null;
+    }
+  }
+  const endTime = end ? end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+
+      // Coordinator / stakeholder name — prefer createdByName from backend (stakeholder),
+      // then fall back to other fields used previously.
+      const coordinatorName = (e.createdByName || e.raw?.createdByName) || e.coordinator?.name || e.StakeholderName || e.MadeByCoordinatorName || e.coordinatorName || e.Email || 'Local Government Unit';
+
+      // District number — prefer coordinator nested value but accept other shapes
+      const districtNumber = e.coordinator?.district_number ?? e.district_number ?? e.DistrictNumber ?? e.district;
+      const districtDisplay = districtNumber ? `${makeOrdinal(districtNumber)} District` : '1st District';
+
+      // Determine category (case-insensitive, check both Category and category)
+      const rawCat = ((e.Category ?? e.category ?? '')).toString().toLowerCase();
+      let typeKey: string = 'event';
+      if (rawCat.includes('blood')) typeKey = 'blood-drive';
+      else if (rawCat.includes('train')) typeKey = 'training';
+      else if (rawCat.includes('advoc')) typeKey = 'advocacy';
+
+      // Helper to find count values across shapes (main event or categoryData)
+      const getVal = (keys: string[]) => {
+        for (const k of keys) {
+          if (e[k] !== undefined && e[k] !== null) return e[k];
+          if (e.categoryData && (e.categoryData[k] !== undefined && e.categoryData[k] !== null)) return e.categoryData[k];
+        }
+        return undefined;
+      };
+
+      let countType = '';
+      let count = '';
+      const targetDonation = getVal(['Target_Donation', 'TargetDonation', 'Target_Donations']);
+      const maxParticipants = getVal(['MaxParticipants', 'Max_Participants', 'MaxParticipant']);
+      const expectedAudience = getVal(['ExpectedAudienceSize', 'Expected_AudienceSize', 'ExpectedAudience']);
+
+      if (typeKey === 'blood-drive' && targetDonation !== undefined) {
+        countType = 'Goal Count';
+        count = `${targetDonation} u.`;
+      } else if (typeKey === 'training' && maxParticipants !== undefined) {
+        countType = 'Participant Count';
+        count = `${maxParticipants} no.`;
+      } else if (typeKey === 'advocacy' && expectedAudience !== undefined) {
+        countType = 'Audience Count';
+        count = `${expectedAudience} no.`;
+      } else {
+        countType = 'Audience Count';
+        count = '205 no.';
+      }
+
+      const baseTitle = e.Event_Title || e.title || 'Lifesavers Blood Drive';
+      // For month view we keep the title as the event title only; tooltip will show times
+      const displayTitle = baseTitle;
+      // color codes: blood-drive -> red, advocacy -> yellow, training -> blue
+      let color = '#3b82f6'; // default blue (training)
+      if (typeKey === 'blood-drive') color = '#ef4444';
+      else if (typeKey === 'advocacy') color = '#f59e0b';
+
+      return {
+        title: displayTitle,
+        startTime,
+        endTime,
+        time: startTime,
+        type: typeKey,
+        district: districtDisplay,
+        location: e.Location || e.location || 'Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippine',
+        countType,
+        count,
+        coordinatorName,
+        raw: e,
+        color
+      };
+    });
+  };
+
+  // Handlers for toolbar actions
+  const handleExport = async () => {
+    try {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth() + 1;
+      const url = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
+      const res = await fetch(url, { credentials: 'include' });
+      const body = await res.json();
+      const blob = new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' });
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `calendar-${year}-${month}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+    } catch (e) {
+      // ignore export failures silently
+    }
+  };
+
+  const handleQuickFilter = (f?: any) => {
+    if (f && Object.prototype.hasOwnProperty.call(f, 'category')) setQuickFilterCategory(f.category);
+    else setQuickFilterCategory(undefined);
+  };
+
+  const handleAdvancedFilter = (f?: { start?: string; end?: string; coordinator?: string; title?: string; requester?: string }) => {
+    if (f) setAdvancedFilter({ start: f.start, coordinator: f.coordinator, title: f.title, requester: f.requester });
+    else setAdvancedFilter({});
+  };
+
+  const refreshCalendarData = async () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth() + 1;
+    try {
+      const weekUrl = `${API_BASE}/api/calendar/week?date=${encodeURIComponent(currentDate.toISOString())}&status=Approved`;
+      const w = await fetch(weekUrl, { credentials: 'include' });
+      const wj = await w.json();
+      const normalizedWeek = normalizeEventsMap(wj?.data?.weekDays || {});
+
+      const monthUrl = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
+      const m = await fetch(monthUrl, { credentials: 'include' });
+      const mj = await m.json();
+      const normalizedMonth = normalizeEventsMap(mj?.data?.eventsByDate || {});
+
+      setMonthEventsByDate(normalizedMonth);
+      setWeekEventsByDate(mergeWeekWithMonth(normalizedWeek, normalizedMonth, currentDate));
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  // Perform an admin action (Accepted/Rejected/Rescheduled) given an Event_ID.
+  // This will fetch the event to determine the linked request id, then call
+  // the admin-action endpoint on the request.
+  const performAdminActionByEventId = async (eventId: string, action: string, note?: string, rescheduledDate?: string) => {
+    if (!eventId) throw new Error('Missing event id');
+    // fetch event details to find request id
+    const headers: any = { 'Content-Type': 'application/json' };
+    const rawUser = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
+    const user = rawUser ? JSON.parse(rawUser as string) : null;
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    // load event to resolve request id
+    const evRes = await fetch(`${API_BASE}/api/events/${encodeURIComponent(eventId)}`, token ? { headers } : { headers, credentials: 'include' });
+    const evBody = await evRes.json();
+    if (!evRes.ok) throw new Error(evBody.message || 'Failed to fetch event details');
+    const evData = evBody.data || evBody.event || evBody;
+    const requestId = evData?.request?.Request_ID || evData?.Request_ID || evData?.requestId || evData?.request?.RequestId || null;
+    if (!requestId) throw new Error('Unable to determine request id for action');
+
+    const body: any = { action, note: note ? note.trim() : undefined };
+    if (rescheduledDate) body.rescheduledDate = rescheduledDate;
+
+    let res;
+    if (token) {
+      res = await fetchWithAuth(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`, { method: 'POST', body: JSON.stringify(body) });
+    } else {
+      const legacyBody = { adminId: user?.id || user?.Admin_ID || null, ...body };
+      res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`, { method: 'POST', headers, body: JSON.stringify(legacyBody), credentials: 'include' });
+    }
+    const resp = await res.json();
+    if (!res.ok) throw new Error(resp.message || 'Failed to perform admin action');
+    return resp;
+  };
+
+  const handleCreateEvent = async (eventType: string, data: any) => {
+    try {
+      // Build the normalized event payload (no actor ids here)
+      const eventPayload: any = {
+        Event_Title: data.eventTitle || data.eventDescription || `${eventType} event`,
+        Location: data.location || '',
+        Event_Description: data.eventDescription || data.Event_Description || undefined,
+        Start_Date: data.startTime || (data.date ? new Date(data.date).toISOString() : undefined),
+        End_Date: data.endTime || undefined,
+        Email: data.email || undefined,
+        Phone_Number: data.contactNumber || undefined,
+        categoryType: eventType === 'blood-drive' ? 'BloodDrive' : (eventType === 'training' ? 'Training' : 'Advocacy')
+      };
+
+      if (eventPayload.categoryType === 'Training') {
+        eventPayload.MaxParticipants = data.numberOfParticipants ? parseInt(data.numberOfParticipants, 10) : undefined;
+        eventPayload.TrainingType = data.trainingType || undefined;
+      } else if (eventPayload.categoryType === 'BloodDrive') {
+        eventPayload.Target_Donation = data.goalCount ? parseInt(data.goalCount, 10) : undefined;
+        eventPayload.VenueType = data.venueType || undefined;
+      } else if (eventPayload.categoryType === 'Advocacy') {
+        eventPayload.TargetAudience = data.audienceType || data.targetAudience || undefined;
+        eventPayload.Topic = data.topic || undefined;
+        eventPayload.ExpectedAudienceSize = data.numberOfParticipants ? parseInt(data.numberOfParticipants, 10) : undefined;
+      }
+
+      if (data.coordinator) eventPayload.MadeByCoordinatorID = data.coordinator;
+
+      // If an auth token exists, prefer server-side identity resolution and
+      // omit client-supplied actor ids. If no token is present (legacy), keep
+      // sending the provided actor identifiers for backwards compatibility.
+      const rawUser = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
+      const user = rawUser ? JSON.parse(rawUser) : null;
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+
+      if (token) {
+        // Token present: send only the event payload (server derives user/role)
+        if (user && (user.staff_type === 'Admin' || user.staff_type === 'Coordinator')) {
+          const res = await fetchWithAuth(`${API_BASE}/api/events/direct`, { method: 'POST', body: JSON.stringify(eventPayload) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create event');
+          await refreshCalendarData();
+          return resp;
+        } else {
+          if (!data.coordinator) throw new Error('Coordinator is required for requests');
+          const body = { coordinatorId: data.coordinator, ...eventPayload };
+          const res = await fetchWithAuth(`${API_BASE}/api/requests`, { method: 'POST', body: JSON.stringify(body) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create request');
+          await refreshCalendarData();
+          return resp;
+        }
+      } else {
+        // No token: legacy behavior - include actor ids if available
+        const headers: any = { 'Content-Type': 'application/json' };
+        if (user && (user.staff_type === 'Admin' || user.staff_type === 'Coordinator')) {
+          const body = { creatorId: user.id, creatorRole: user.staff_type, ...eventPayload };
+          const res = await fetch(`${API_BASE}/api/events/direct`, { method: 'POST', headers, body: JSON.stringify(body) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create event');
+          await refreshCalendarData();
+          return resp;
+        } else {
+          if (!data.coordinator) throw new Error('Coordinator is required for requests');
+          const stakeholderId = user?.Stakeholder_ID || user?.StakeholderId || user?.id || null;
+          const body = { coordinatorId: data.coordinator, MadeByStakeholderID: stakeholderId, ...eventPayload };
+          const res = await fetch(`${API_BASE}/api/requests`, { method: 'POST', headers, body: JSON.stringify(body) });
+          const resp = await res.json();
+          if (!res.ok) throw new Error(resp.message || 'Failed to create request');
+          await refreshCalendarData();
+          return resp;
+        }
+      }
+    } catch (err: any) {
+      // Do not log to console; propagate error to caller so the toolbar
+      // can set the modal error and render it without producing console warnings.
+      throw err;
+    }
+  };
+
+  // Profile helpers: initial and deterministic color per user
+  const getProfileInitial = (name?: string) => {
+    if (!name) return 'U';
+    const trimmed = String(name).trim();
+    return trimmed.length > 0 ? trimmed.charAt(0).toUpperCase() : 'U';
+  };
+
+  const getProfileColor = (name?: string) => {
+    const s = (name || 'unknown').toString();
+    // simple hash to hue
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) {
+      hash = s.charCodeAt(i) + ((hash << 5) - hash);
+      hash = hash & hash; // keep in 32-bit int
+    }
+    const hue = Math.abs(hash) % 360;
+    // return an HSL color string; use moderate saturation/lightness for good contrast
+    return `hsl(${hue}deg 65% 40%)`;
   };
 
   const isToday = (date: Date) => {
@@ -287,10 +806,9 @@ export default function CalendarPage() {
     setTimeout(() => {
       setActiveView(view);
       setIsViewTransitioning(false);
-    }, 500); // Slower transition (500ms)
+    }, 500);
   };
 
-  // View transition styles
   const getViewTransitionStyle = (view: string) => {
     const isActive = activeView === view;
     const isTransitioning = isViewTransitioning;
@@ -298,19 +816,16 @@ export default function CalendarPage() {
     if (isActive && !isTransitioning) {
       return 'opacity-100 scale-100 translate-y-0';
     } else if (isActive && isTransitioning) {
-      return view === 'week' 
-        ? 'opacity-100 scale-100 translate-y-0' // Current view stays visible during transition
-        : 'opacity-100 scale-100 translate-y-0'; // Current view stays visible during transition
+      return 'opacity-100 scale-100 translate-y-0';
     } else if (!isActive && isTransitioning) {
       return view === 'week' 
-        ? 'opacity-0 scale-95 -translate-y-4 absolute inset-0 pointer-events-none' // Week fades out and moves up
-        : 'opacity-0 scale-95 translate-y-4 absolute inset-0 pointer-events-none'; // Month fades out and moves down
+        ? 'opacity-0 scale-95 -translate-y-4 absolute inset-0 pointer-events-none'
+        : 'opacity-0 scale-95 translate-y-4 absolute inset-0 pointer-events-none';
     } else {
-      return 'opacity-0 scale-95 absolute inset-0 pointer-events-none'; // Hidden state
+      return 'opacity-0 scale-95 absolute inset-0 pointer-events-none';
     }
   };
 
-  // Slide animation variants for week navigation
   const slideVariants = {
     enter: (direction: 'left' | 'right') => ({
       x: direction === 'left' ? 100 : -100,
@@ -347,7 +862,7 @@ export default function CalendarPage() {
   }, []);
 
   return (
-    <div className="flex-1 flex flex-col overflow-visible bg-white relative">
+    <div className="flex-1 flex flex-col overflow-visible bg-white">
       {/* Header */}
       <header className="relative z-10">
         <div className="px-8 py-7">
@@ -568,7 +1083,6 @@ export default function CalendarPage() {
                   </ButtonGroup>
                 </div>
               </div>
-            </div>
 
             {/* Views Container - Both views remain in DOM during transitions */}
             <div className="mt-8 relative min-h-[900px] flex flex-col">
@@ -618,13 +1132,8 @@ export default function CalendarPage() {
                                     {day.date}
                                   </div>
                                 </div>
+                                <span className="text-xs text-gray-600">{event.coordinatorName}</span>
                               </div>
-                            </div>
-                          ))}
-                        </motion.div>
-                      </AnimatePresence>
-                    </div>
-                  </div>
 
                   {/* Event Cards with fade transition */}
                   <div className={`transition-all duration-500 ease-in-out flex-1 ${
@@ -749,12 +1258,27 @@ export default function CalendarPage() {
                                 ))
                               )}
                             </div>
-                          </div>
-                        );
-                      })}
+                          ))}
+                        </div>
+                      )}
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Month View */}
+          <div className={`transition-all duration-500 ease-in-out ${getViewTransitionStyle('month')}`}>
+            <div>
+              {/* Days of Week Header */}
+              <div className="grid grid-cols-7 gap-4 mb-4">
+                {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => (
+                  <div key={day} className="text-center">
+                    <div className="text-sm font-medium text-gray-500 mb-2">{day}</div>
+                    <div className="h-10"></div>
                   </div>
-                </div>
+                ))}
               </div>
 
               {/* Month View */}
@@ -865,7 +1389,7 @@ export default function CalendarPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>

@@ -51,13 +51,17 @@ export const Navbar = () => {
         </NavbarBrand>
         <ul className="hidden lg:flex gap-4 justify-start ml-2">
           {siteConfig.navItems.map((item) => (
-            <NavbarItem key={item.href}>
-              <NextLink
-                className="text-sm text-default-800 hover:bg-black hover:text-white px-3 py-2 rounded-lg transition-colors"
-                href={item.href}
-              >
-                {item.label}
-              </NextLink>
+            <NavbarItem key={item.href || item.label}>
+              {item.href ? (
+                <NextLink
+                  className="text-sm text-default-800 hover:bg-black hover:text-white px-3 py-2 rounded-lg transition-colors"
+                  href={item.href}
+                >
+                  {item.label}
+                </NextLink>
+              ) : (
+                <span className="text-sm text-default-800 px-3 py-2 rounded-lg">{item.label}</span>
+              )}
             </NavbarItem>
           ))}
         </ul>
@@ -69,10 +73,9 @@ export const Navbar = () => {
       >
         <NavbarItem className="hidden md:flex">
           <Button
-            isExternal
             as={Link}
             color="primary"
-            href={siteConfig.links.sponsor}
+            href="/auth/signin"
             variant="faded"
           >
             Sign In
@@ -80,11 +83,10 @@ export const Navbar = () => {
         </NavbarItem>
         <NavbarItem className="hidden md:flex">
           <Button
-            isExternal
             as={Link}
             className="text-white"
             color="danger"
-            href={siteConfig.links.sponsor}
+            href="/auth/signup"
             variant="solid"
           >
             Sign Up
@@ -109,7 +111,7 @@ export const Navbar = () => {
 
           <Button
             as={Link}
-            href={siteConfig.links.sponsor}
+            href="/auth/signup"
             color="danger"
             variant="solid"
             className="text-white"

@@ -1,5 +1,7 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { fetchWithAuth } from '@/utils/fetchWithAuth';
+import { DatePicker } from "@heroui/date-picker";
 import { Card, CardHeader, CardBody, CardFooter } from "@heroui/card";
 import { Chip } from "@heroui/chip";
 import { Avatar } from "@heroui/avatar";
@@ -12,7 +14,9 @@ import {
 } from "@heroui/dropdown";
 import { Button } from "@heroui/button";
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@heroui/modal";
-import { MoreVertical, Eye, Edit, Clock, Trash2, Check, X } from "lucide-react";
+import { MoreVertical, Eye, Edit, Clock, Trash2, Check, X, Users, FileText } from "lucide-react";
+import { Spinner } from '@heroui/spinner';
+import ManageStaffModal from '../manage-staff-modal';
 
 interface EventCardProps {
   title: string;
@@ -25,10 +29,15 @@ interface EventCardProps {
   date: string;
   onViewEvent?: () => void;
   onEditEvent?: () => void;
-  onRescheduleEvent?: (startDate: string, endDate: string) => void;
+  // currentDate: the existing event date (display only)
+  // rescheduledDate: the new chosen date (ISO string or date-only)
+  // note: reason for reschedule
+  onRescheduleEvent?: (currentDate: string, rescheduledDate: string, note: string) => void;
+  onManageStaff?: () => void;
+  request?: any;
   onCancelEvent?: () => void;
-  onAcceptEvent?: () => void;
-  onRejectEvent?: () => void;
+  onAcceptEvent?: (note?: string) => void;
+  onRejectEvent?: (note?: string) => void;
 }
 
 /**
@@ -47,6 +56,8 @@ const EventCard: React.FC<EventCardProps> = ({
   onViewEvent,
   onEditEvent,
   onRescheduleEvent,
+  onManageStaff,
+  request,
   onCancelEvent,
   onAcceptEvent,
   onRejectEvent,
@@ -56,18 +67,68 @@ const EventCard: React.FC<EventCardProps> = ({
   const [cancelOpen, setCancelOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [acceptOpen, setAcceptOpen] = useState(false);
+  const [manageStaffOpen, setManageStaffOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [fullRequest, setFullRequest] = useState<any>(null);
+
+  // Manage staff state
+  // Manage staff modal is handled by the shared ManageStaffModal component
 
   // Reschedule dialog state
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [rescheduledDate, setRescheduledDate] = useState<any>(null);
+  const [note, setNote] = useState("");
+  const [rejectNote, setRejectNote] = useState("");
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleReschedule = () => {
-    if (startDate && endDate && onRescheduleEvent) {
-      onRescheduleEvent(startDate, endDate);
-      setRescheduleOpen(false);
-      setStartDate("");
-      setEndDate("");
+    setValidationError(null);
+    if (!rescheduledDate) {
+      setValidationError('Please choose a new date');
+      return;
     }
+    // Ensure rescheduled date is not before today
+    try {
+      const rs = new Date(rescheduledDate);
+      rs.setHours(0,0,0,0);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      if (rs.getTime() < today.getTime()) {
+        setValidationError('Rescheduled date cannot be before today');
+        return;
+      }
+    } catch (e) {
+      setValidationError('Invalid date selected');
+      return;
+    }
+
+    if (!note || note.trim().length === 0) {
+      setValidationError('Please provide a reason for rescheduling');
+      return;
+    }
+
+    // pass current displayed date and new date (as ISO date string)
+    const current = date || '';
+    const newDateISO = typeof rescheduledDate === 'string' ? new Date(rescheduledDate).toISOString() : (rescheduledDate instanceof Date ? rescheduledDate.toISOString() : new Date(rescheduledDate).toISOString());
+    if (onRescheduleEvent) {
+      onRescheduleEvent(current, newDateISO, note.trim());
+    } else {
+      // fallback: perform admin action directly
+      (async () => {
+        try {
+          const r = request || (request && (request as any).event) || {};
+          const requestId = r?.Request_ID || r?.RequestId || r?.requestId || r?.RequestId || null;
+          if (requestId) {
+            await performAdminAction(requestId, 'Rescheduled', note.trim(), newDateISO);
+          }
+        } catch (e) {}
+      })();
+    }
+
+    // reset modal state
+    setRescheduleOpen(false);
+    setRescheduledDate(null);
+    setNote("");
+    setValidationError(null);
   };
 
   const handleCancel = () => {
@@ -78,60 +139,91 @@ const EventCard: React.FC<EventCardProps> = ({
   };
 
   const handleReject = () => {
+    // legacy: call without note
     if (onRejectEvent) {
-      onRejectEvent();
+      try { onRejectEvent(); } catch (e) {}
     }
     setRejectOpen(false);
   };
 
-  const handleAccept = () => {
-    if (onAcceptEvent) {
-      onAcceptEvent();
-    }
-    setAcceptOpen(false);
+  const handleAccept = (note?: string) => {
+    (async () => {
+      try {
+        const r = request || (request && (request as any).event) || {};
+        const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null;
+        if (requestId) {
+          await performAdminAction(requestId, 'Accepted', note || '');
+        } else if (onAcceptEvent) {
+          try { onAcceptEvent(note); } catch (e) {}
+        }
+      } catch (e) {
+        // ignore
+      } finally {
+        setAcceptOpen(false);
+      }
+    })();
+  };
+
+  // New: handle reject with admin note
+  const handleRejectWithNote = (note?: string) => {
+    (async () => {
+      try {
+        const r = request || (request && (request as any).event) || {};
+        const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null;
+        if (requestId) {
+          await performAdminAction(requestId, 'Rejected', note || '');
+        } else if (onRejectEvent) {
+          try { onRejectEvent(note); } catch (e) {}
+        }
+      } catch (e) {
+        // ignore
+      } finally {
+        setRejectOpen(false);
+      }
+    })();
   };
 
   // Menu for Approved status
+  // Helper to derive flags from request/event or fallback to allowedActions
+  const flagFor = (flagName: string, actionName?: string) => {
+    try {
+      const r = request || {};
+      const explicit = (r && (r as any)[flagName]) ?? (r && r.event && r.event[flagName]);
+      if (explicit !== undefined && explicit !== null) return Boolean(explicit);
+      const allowed = (r && r.allowedActions) || (r && r.event && r.event.allowedActions) || null;
+      if (Array.isArray(allowed) && actionName) return allowed.includes(actionName);
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
+ 
+
   const approvedMenu = (
     <DropdownMenu aria-label="Event actions menu" variant="faded">
       <DropdownSection showDivider title="Actions">
-        <DropdownItem
-          key="view"
-          description="View this event"
-          startContent={<Eye />}
-          onPress={onViewEvent}
-        >
-          View Event
-        </DropdownItem>
-        <DropdownItem
-          key="edit"
-          description="Edit an event"
-          startContent={<Edit />}
-          onPress={onEditEvent}
-        >
-          Edit Event
-        </DropdownItem>
-        <DropdownItem
-          key="reschedule"
-          description="Reschedule this event"
-          startContent={<Clock />}
-          onPress={() => setRescheduleOpen(true)}
-        >
-          Reschedule Event
-        </DropdownItem>
+        {flagFor('canView', 'view') ? (
+          <DropdownItem key="view-event" description="View event details" startContent={<Eye />} onPress={onViewEvent}>View Event</DropdownItem>
+        ) : null}
+        {flagFor('canView', 'view') ? (
+          <DropdownItem key="view-request" description="View request details" startContent={<FileText />} onPress={async () => { await openViewRequest(); }}>
+            View Request
+          </DropdownItem>
+        ) : null}
+        {flagFor('canEdit', 'edit') ? (
+          <DropdownItem key="edit" description="Edit an event" startContent={<Edit />} onPress={onEditEvent}>Edit Event</DropdownItem>
+        ) : null}
+        {flagFor('canManageStaff', 'manage-staff') ? (
+          <DropdownItem key="manage-staff" description="Manage staff for this event" startContent={<Users />} onPress={() => { setManageStaffOpen(true); if (typeof onManageStaff === 'function') onManageStaff(); }}>Manage Staff</DropdownItem>
+        ) : null}
+        {flagFor('canReschedule', 'resched') ? (
+          <DropdownItem key="reschedule" description="Reschedule this event" startContent={<Clock />} onPress={() => setRescheduleOpen(true)}>Reschedule Event</DropdownItem>
+        ) : null}
       </DropdownSection>
       <DropdownSection title="Danger zone">
-        <DropdownItem
-          key="cancel"
-          className="text-danger"
-          color="danger"
-          description="Cancel an event"
-          shortcut="⌘ D"
-          startContent={<Trash2 className="text-xl text-danger pointer-events-none shrink-0" />}
-          onPress={() => setCancelOpen(true)}
-        >
-          Cancel
-        </DropdownItem>
+        {flagFor('canAdminAction', 'cancel') ? (
+          <DropdownItem key="cancel" className="text-danger" color="danger" description="Cancel an event" startContent={<Trash2 className="text-xl text-danger pointer-events-none shrink-0" />} onPress={() => setCancelOpen(true)}>Cancel</DropdownItem>
+        ) : null}
       </DropdownSection>
     </DropdownMenu>
   );
@@ -140,38 +232,12 @@ const EventCard: React.FC<EventCardProps> = ({
   const pendingMenu = (
     <DropdownMenu aria-label="Event actions menu" variant="faded">
       <DropdownSection title="Actions">
-        <DropdownItem
-          key="view"
-          description="View this event"
-          startContent={<Eye />}
-          onPress={onViewEvent}
-        >
-          View Event
-        </DropdownItem>
-        <DropdownItem
-          key="accept"
-          description="Accept this event"
-          startContent={<Check />}
-          onPress={() => setAcceptOpen(true)}
-        >
-          Accept Event
-        </DropdownItem>
-        <DropdownItem
-          key="reject"
-          description="Reject this event"
-          startContent={<X />}
-          onPress={() => setRejectOpen(true)}
-        >
-          Reject Event
-        </DropdownItem>
-        <DropdownItem
-          key="reschedule"
-          description="Reschedule this event"
-          startContent={<Clock />}
-          onPress={() => setRescheduleOpen(true)}
-        >
-          Reschedule Event
-        </DropdownItem>
+        {flagFor('canView', 'view') ? <DropdownItem key="view-event" description="View event details" startContent={<Eye />} onPress={onViewEvent}>View Event</DropdownItem> : null}
+        {flagFor('canView', 'view') ? <DropdownItem key="view-request" description="View request details" startContent={<FileText />} onPress={async () => { await openViewRequest(); }}>View Request</DropdownItem> : null}
+        {/* Accept/Reject/Reschedule are intentionally removed from the dropdown
+            and surfaced inside the View Request modal to avoid accidental clicks
+            and to provide clearer context. */}
+        {flagFor('canManageStaff', 'manage-staff') ? <DropdownItem key="manage-staff" description="Manage staff for this event" startContent={<Users />} onPress={() => { setManageStaffOpen(true); if (typeof onManageStaff === 'function') onManageStaff(); }}>Manage Staff</DropdownItem> : null}
       </DropdownSection>
     </DropdownMenu>
   );
@@ -181,26 +247,309 @@ const EventCard: React.FC<EventCardProps> = ({
     <DropdownMenu aria-label="Event actions menu" variant="faded">
       <DropdownSection title="Actions">
         <DropdownItem
-          key="view"
-          description="View this event"
+          key="view-event"
+          description="View event details"
           startContent={<Eye />}
           onPress={onViewEvent}
         >
           View Event
         </DropdownItem>
+        <DropdownItem
+          key="view-request"
+          description="View request details"
+          startContent={<FileText />}
+          onPress={async () => { await openViewRequest(); }}
+        >
+          View Request
+        </DropdownItem>
       </DropdownSection>
     </DropdownMenu>
   );
 
+  // Helper: derive viewer info from legacy storage
+  const getViewer = () => {
+    try {
+      if (typeof window === 'undefined') return { id: null, role: null, isAdmin: false };
+      const raw = localStorage.getItem('unite_user') || sessionStorage.getItem('unite_user');
+      if (!raw) return { id: null, role: null, isAdmin: false };
+      const parsed = JSON.parse(raw);
+      const id = parsed?.id || parsed?.ID || parsed?._id || parsed?.Stakeholder_ID || parsed?.StakeholderId || parsed?.stakeholder_id || parsed?.user_id || null;
+      const role = parsed?.role || parsed?.staff_type || null;
+      const isAdmin = !!parsed?.isAdmin || String(parsed?.staff_type || '').toLowerCase().includes('admin') || (String(parsed?.role || '').toLowerCase().includes('sys') && String(parsed?.role || '').toLowerCase().includes('admin'));
+      return { id, role, isAdmin };
+    } catch (e) {
+      return { id: null, role: null, isAdmin: false };
+    }
+  };
+
+  const API_BASE = (typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_API_URL) ? process.env.NEXT_PUBLIC_API_URL : 'http://localhost:3000';
+
+  // Perform admin action via backend API (Accept / Reject / Rescheduled)
+  const performAdminAction = async (requestId: string, action: 'Accepted' | 'Rejected' | 'Rescheduled', note?: string, rescheduledDate?: string | null) => {
+    try {
+      const rawUser = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
+      const user = rawUser ? JSON.parse(rawUser as string) : null;
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const body: any = { action, note: note || '' };
+      if (rescheduledDate) body.rescheduledDate = rescheduledDate;
+
+      let res;
+      if (token) {
+        res = await fetchWithAuth(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`, { method: 'POST', body: JSON.stringify(body) });
+      } else {
+        const legacyBody = { adminId: user?.id || user?.Admin_ID || null, ...body };
+        res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`, { method: 'POST', headers, body: JSON.stringify(legacyBody), credentials: 'include' });
+      }
+      const resp = await res.json();
+      if (!res.ok) throw new Error(resp.message || 'Failed to perform admin action');
+      // notify other parts of the app to refresh lists
+      try { window.dispatchEvent(new CustomEvent('unite:requests-changed', { detail: { requestId } })); } catch (e) {}
+      return resp;
+    } catch (e) {
+      throw e;
+    }
+  };
+
+  // Open local view modal, fetching full request details when necessary
+  const openViewRequest = async () => {
+    try {
+      const r = request || (request && (request as any).event) || {};
+      const requestId = r?.Request_ID || r?.RequestId || r?._id || r?.requestId || null;
+      
+      // If there's no id, just open with the provided object
+      if (!requestId) {
+        setFullRequest(r);
+        setViewOpen(true);
+        return;
+      }
+
+      // If the passed request already contains event category subdocuments (BloodDrive/Training/Advocacy)
+      // then we can avoid fetching; do NOT treat admin/stakeholder action fields as "has nested".
+      const hasNested = !!(
+        r?.event?.categoryData ||
+        r?.event?.BloodDrive || r?.event?.bloodDrive ||
+        r?.event?.Training || r?.event?.training ||
+        r?.event?.Advocacy || r?.event?.advocacy ||
+        r?.BloodDrive || r?.bloodDrive || r?.Training || r?.training || r?.Advocacy || r?.advocacy
+      );
+      if (hasNested) {
+        setFullRequest(r);
+        setViewOpen(true);
+        return;
+      }
+
+      // Otherwise fetch fresh details from API
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const url = `${API_BASE}/api/requests/${encodeURIComponent(requestId)}`;
+      let res;
+      if (token) {
+        // try fetchWithAuth if available
+        try {
+          res = await fetchWithAuth(url, { method: 'GET' });
+        } catch (e) {
+          
+          res = await fetch(url, { headers });
+        }
+      } else {
+        res = await fetch(url, { headers, credentials: 'include' });
+      }
+      const body = await res.json().catch(() => ({}));
+      
+      const data = body?.data || body?.request || body;
+      // If the returned request contains an event reference but not the full
+      // event (with category subdocument like BloodDrive), fetch the event
+      // and merge so the View modal can display specific details.
+      let finalRequest = data || r;
+      try {
+        const eventRef = finalRequest?.event || finalRequest;
+        const eventId = eventRef?.Event_ID || eventRef?.EventId || eventRef?.EventId || eventRef?.Event_ID || finalRequest?.Event_ID || finalRequest?.EventId || null;
+        if (eventId) {
+          // fetch full event details
+          const evUrl = `${API_BASE}/api/events/${encodeURIComponent(eventId)}`;
+          let evRes;
+          try {
+            if (token) {
+              try { evRes = await fetchWithAuth(evUrl, { method: 'GET' }); } catch (e) { evRes = await fetch(evUrl, { headers }); }
+            } else {
+              evRes = await fetch(evUrl, { headers, credentials: 'include' });
+            }
+          } catch (fetchErr) {
+            evRes = null;
+          }
+
+          const evBody = evRes ? await evRes.json().catch(() => ({})) : null;
+          let evData = evBody?.data || evBody?.event || evBody;
+
+          // If fetched event did not include categoryData, try the dedicated category endpoint
+          if (evData && !evData.categoryData) {
+            try {
+              const catUrl = `${API_BASE}/api/events/${encodeURIComponent(eventId)}/category`;
+              let catRes;
+              if (token) {
+                try { catRes = await fetchWithAuth(catUrl, { method: 'GET' }); } catch (e) { catRes = await fetch(catUrl, { headers }); }
+              } else {
+                catRes = await fetch(catUrl, { headers, credentials: 'include' });
+              }
+              const catBody = await catRes.json().catch(() => null);
+              
+              const catData = catBody?.data || catBody?.category || catBody;
+              if (catData) evData = { ...(evData || {}), categoryData: catData };
+              } catch (e) {
+            }
+          }
+
+          // Merge strategy: prefer fetched evData, but keep any request-level event fallback fields
+          const mergedEvent = { ...(evData || {}), ...(finalRequest?.event || {}) };
+          finalRequest = { ...(finalRequest || {}), event: mergedEvent };
+
+          // Preserve requester/request-level fallback fields from the original passed-in object `r`
+          // if the freshly fetched request is missing them (keeps createdByName, email, dates, etc.)
+          try {
+            const fallbackKeys = [
+              'createdByName', 'RequesterName', 'First_Name', 'first_name',
+              'Email', 'email', 'RequestedDate', 'Date', 'StartTime', 'Start', 'EndTime', 'End'
+            ];
+            fallbackKeys.forEach((k) => {
+              try {
+                if ((finalRequest[k] === undefined || finalRequest[k] === null || finalRequest[k] === '') && r && (r as any)[k]) {
+                  finalRequest[k] = (r as any)[k];
+                }
+              } catch (e) {}
+            });
+          } catch (e) {}
+        }
+      } catch (e) {
+        // ignore event fetch failures and proceed with request data
+      }
+
+      setFullRequest(finalRequest || r);
+      setViewOpen(true);
+    } catch (e) {
+      // fallback to provided request
+      setFullRequest(request || (request && (request as any).event) || null);
+      setViewOpen(true);
+    }
+  };
+
+  // Stakeholder confirm action (calls stakeholder-confirm endpoint)
+  const performStakeholderConfirm = async (requestId: string, action: 'Accepted' | 'Rejected') => {
+    try {
+      const rawUser = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
+      const parsedUser = rawUser ? JSON.parse(rawUser as string) : null;
+      const stakeholderId = parsedUser?.id || parsedUser?.Stakeholder_ID || parsedUser?.StakeholderId || parsedUser?.ID || null;
+      if (!stakeholderId) throw new Error('Unable to determine stakeholder id');
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token')) : null;
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const body: any = { stakeholderId, action };
+      let res;
+      if (token) {
+        res = await fetchWithAuth(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/stakeholder-confirm`, { method: 'POST', body: JSON.stringify(body) });
+      } else {
+        res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/stakeholder-confirm`, { method: 'POST', headers, body: JSON.stringify(body), credentials: 'include' });
+      }
+      const resp = await res.json();
+      if (!res.ok) throw new Error(resp.message || 'Failed to record stakeholder confirmation');
+      try { window.dispatchEvent(new CustomEvent('unite:requests-changed', { detail: { requestId } })); } catch (e) {}
+      return resp;
+    } catch (e) {
+      throw e;
+    }
+  };
+
   // Determine which menu to show based on status
   const getMenuByStatus = () => {
-    if (status === "Approved") {
-      return approvedMenu;
-    } else if (status === "Pending") {
-      return pendingMenu;
+    try {
+      const r = request || (request && (request as any).event) || {};
+
+      // Compute whether this request is waiting for stakeholder confirmation
+      const adminAction = (r as any).AdminAction ?? (r as any).adminAction ?? null;
+      const stakeholderAction = (r as any).StakeholderFinalAction ?? (r as any).stakeholderFinalAction ?? null;
+      const isWaitingForStakeholder = !!adminAction && !stakeholderAction;
+
+      // Derive viewer id from legacy storage (safe to call here)
+      let viewerId: string | null = null;
+      try {
+        if (typeof window !== 'undefined') {
+          const raw = localStorage.getItem('unite_user') || sessionStorage.getItem('unite_user');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            viewerId = parsed?.id || parsed?.ID || parsed?._id || parsed?.Stakeholder_ID || parsed?.StakeholderId || parsed?.stakeholder_id || parsed?.user_id || null;
+          }
+        }
+      } catch (e) {
+        viewerId = null;
+      }
+
+      const madeByStakeholder = r?.MadeByStakeholderID || r?.Stakeholder_ID || r?.stakeholder_id || r?.StakeholderId || null;
+      const viewerIsStakeholder = viewerId && madeByStakeholder && String(viewerId) === String(madeByStakeholder);
+
+      // If it's waiting for stakeholder confirmation and the current viewer
+      // is NOT the stakeholder, show only the default (view-only) menu.
+      if (isWaitingForStakeholder && !viewerIsStakeholder) {
+        return defaultMenu;
+      }
+
+      if (status === "Approved") {
+        return approvedMenu;
+      } else if (status === "Pending") {
+        return pendingMenu;
+      }
+      return defaultMenu;
+    } catch (e) {
+      return defaultMenu;
     }
-    return defaultMenu;
   };
+
+  // Determine a human-friendly pending-stage label for Pending requests
+  const getPendingStageLabel = (): string | null => {
+    if (status !== "Pending") return null;
+    const r = request || (request && (request as any).event) || {};
+    const adminAction = (r as any).AdminAction ?? (r as any).adminAction ?? null;
+    const stakeholderAction = (r as any).StakeholderFinalAction ?? (r as any).stakeholderFinalAction ?? null;
+    const coordinatorAction = (r as any).CoordinatorFinalAction ?? (r as any).coordinatorFinalAction ?? null;
+
+    if (!adminAction) return 'Waiting for admin review';
+    if (!stakeholderAction) return 'Waiting for stakeholder confirmation';
+    if (!coordinatorAction) return 'Waiting for coordinator confirmation';
+    return null;
+  };
+
+  // Try to derive the current viewer id from legacy storage
+  const getViewerId = (): string | null => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const raw = localStorage.getItem('unite_user') || sessionStorage.getItem('unite_user');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return (
+        parsed?.id || parsed?.ID || parsed?._id || parsed?.Stakeholder_ID || parsed?.StakeholderId || parsed?.stakeholder_id || parsed?.user_id || null
+      );
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const viewerId = getViewerId();
+
+  const isWaitingForStakeholder = getPendingStageLabel() === 'Waiting for stakeholder confirmation';
+
+  const isViewerStakeholder = (() => {
+    try {
+      const r = request || (request && (request as any).event) || {};
+      const madeByStakeholder = r?.MadeByStakeholderID || r?.Stakeholder_ID || r?.stakeholder_id || r?.StakeholderId || null;
+      if (!madeByStakeholder) return false;
+      if (!viewerId) return false;
+      return String(viewerId) === String(madeByStakeholder);
+    } catch (e) {
+      return false;
+    }
+  })();
 
   return (
     <>
@@ -210,8 +559,12 @@ const EventCard: React.FC<EventCardProps> = ({
           <div className="flex items-center gap-3">
             <Avatar />
             <div>
-              <h3 className="text-sm font-semibold">{title}</h3>
-              <p className="text-xs text-default-800">{organizationType}</p>
+                <h3 className="text-sm font-semibold">{title}</h3>
+                {/* Show stakeholder full name when available; fall back to organization/coordinator */}
+                <p className="text-xs text-default-800">{(request && (request.createdByName || (request.event && request.event.createdByName))) || organization || organizationType}</p>
+                {getPendingStageLabel() ? (
+                  <p className="text-xs text-default-500 mt-1">{getPendingStageLabel()}</p>
+                ) : null}
             </div>
           </div>
           <Dropdown>
@@ -262,8 +615,242 @@ const EventCard: React.FC<EventCardProps> = ({
             <span className="">Date</span>
             <span className="text-default-800">{date}</span>
           </div>
+          {/* Primary action: View Request (replaces direct accept/reject on card) */}
+          
         </CardFooter>
       </Card>
+
+      {/* View Request Modal (unified request details + role/stage-specific actions) */}
+      <Modal isOpen={viewOpen} onClose={() => { setViewOpen(false); setFullRequest(null); }} size="lg" placement="center">
+        <ModalContent>
+          <ModalHeader>
+            <span className="text-lg font-semibold">Request Details</span>
+          </ModalHeader>
+          <ModalBody>
+            {/* Basic requester info */}
+            {(() => {
+              const r = fullRequest || request || (request && (request as any).event) || {};
+              const requesterName = r?.createdByName || r?.RequesterName || r?.First_Name || r?.first_name || null;
+              const requesterEmail = r?.Email || r?.email || r?.requesterEmail || null;
+              const requestedDate = r?.RequestedDate || r?.Date || date || null;
+              const startTime = r?.StartTime || r?.start_time || r?.Start || null;
+              const endTime = r?.EndTime || r?.end_time || r?.End || null;
+              const eventType =
+                r?.Event_Type || r?.eventType || r?.Category || r?.category ||
+                r?.event?.Category || r?.event?.category || r?.event?.categoryData?.type || category || null;
+
+              const adminAction = (r as any).AdminAction ?? (r as any).adminAction ?? null;
+              const stakeholderAction = (r as any).StakeholderFinalAction ?? (r as any).stakeholderFinalAction ?? null;
+
+              return (
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-sm font-medium">Requester</h4>
+                    <p className="text-xs text-default-800">{requesterName || '—'}</p>
+                    <p className="text-xs text-default-600">{requesterEmail || '—'}</p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium">Requested Date & Time</h4>
+                    <p className="text-xs text-default-800">{requestedDate || '—'}</p>
+                    {startTime || endTime ? <p className="text-xs text-default-600">{startTime || '—'} — {endTime || '—'}</p> : null}
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium">Event Type</h4>
+                    <p className="text-xs text-default-800">{eventType || '—'}</p>
+                  </div>
+
+                  {/* Event-type specific details */}
+                  {eventType && String(eventType).toLowerCase().includes('blood') ? (
+                    <div>
+                      <h4 className="text-sm font-medium">Blood Drive Details</h4>
+                      {(() => {
+                        // try many possible locations for the blood drive target/count
+                        const candidates = [
+                          // request-level variants
+                          r?.blood_count,
+                          r?.Blood_Count,
+                          r?.bloodCount,
+                          r?.Target_Donation,
+                          r?.TargetDonation,
+                          r?.target_donation,
+                          r?.targetDonation,
+                          // direct nested BloodDrive documents
+                          r?.BloodDrive?.Target_Donation,
+                          r?.bloodDrive?.Target_Donation,
+                          // event-level fields
+                          r?.event?.Target_Donation,
+                          r?.event?.TargetDonation,
+                          r?.event?.Target_Donation_Count,
+                          // event.BloodDrive nested
+                          r?.event?.BloodDrive?.Target_Donation,
+                          r?.event?.bloodDrive?.Target_Donation,
+                          // canonical eventDetails service shape
+                          r?.event?.categoryData?.Target_Donation,
+                          r?.event?.categoryData?.TargetDonation,
+                          r?.event?.categoryData?.Target_Donation_Count,
+                          // alternative top-level category wrappers
+                          r?.categoryData?.Target_Donation,
+                          r?.categoryData?.TargetDonation,
+                          r?.category?.data?.Target_Donation,
+                          r?.category?.data?.TargetDonation
+                        ];
+
+                        const found = candidates.find((v) => v !== undefined && v !== null && v !== '');
+                        const display = found !== undefined && found !== null ? String(found) : '—';
+                        return <p className="text-xs text-default-800">Target donation / Blood count: {display}</p>;
+                      })()}
+                    </div>
+                  ) : null}
+
+                  {eventType && String(eventType).toLowerCase().includes('training') ? (
+                    <div>
+                      <h4 className="text-sm font-medium">Training Details</h4>
+                      {(() => {
+                        const trainingType =
+                          r?.training_type || r?.TrainingType ||
+                          r?.event?.categoryData?.TrainingType || r?.event?.categoryData?.trainingType ||
+                          r?.category?.TrainingType || r?.categoryData?.TrainingType || null;
+                        const maxParticipants =
+                          r?.max_participants || r?.MaxParticipants ||
+                          r?.event?.categoryData?.MaxParticipants || r?.event?.categoryData?.maxParticipants ||
+                          r?.category?.MaxParticipants || r?.categoryData?.MaxParticipants || null;
+                        return (
+                          <>
+                            <p className="text-xs text-default-800">Training Type: {trainingType ?? '—'}</p>
+                            <p className="text-xs text-default-800">Max participants: {maxParticipants ?? '—'}</p>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+
+                  {eventType && String(eventType).toLowerCase().includes('advocacy') ? (
+                    <div>
+                      <h4 className="text-sm font-medium">Advocacy Details</h4>
+                      {(() => {
+                        const targetAudience =
+                          r?.event?.categoryData?.TargetAudience || r?.TargetAudience || r?.category?.TargetAudience ||
+                          r?.categoryData?.TargetAudience || r?.target_audience || r?.targetAudience || null;
+                        const expectedSize =
+                          r?.event?.categoryData?.ExpectedAudienceSize || r?.ExpectedAudienceSize || r?.category?.ExpectedAudienceSize ||
+                          r?.categoryData?.ExpectedAudienceSize || r?.expected_audience_size || r?.ExpectedAudienceSize || null;
+                        return (
+                          <>
+                            <p className="text-xs text-default-800">Target audience: {targetAudience ?? '—'}</p>
+                            <p className="text-xs text-default-800">Expected audience size: {expectedSize ?? '—'}</p>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+
+                  {/* Admin decision summary (if any) with color cues */}
+                  {adminAction ? (
+                    <div className="mt-2 p-3 border rounded">
+                      {/* Colored badge + label */}
+                      <div className="flex items-center gap-3">
+                        {(() => {
+                          const a = String(adminAction || '').toLowerCase();
+                          if (a.includes('accept')) {
+                            return <div className="px-2 py-1 rounded-full bg-success-50 text-success-700 text-xs font-semibold">Accepted</div>;
+                          }
+                          if (a.includes('resched')) {
+                            return <div className="px-2 py-1 rounded-full bg-warning-50 text-warning-700 text-xs font-semibold">Rescheduled</div>;
+                          }
+                          if (a.includes('reject')) {
+                            return <div className="px-2 py-1 rounded-full bg-danger-50 text-danger-700 text-xs font-semibold">Rejected</div>;
+                          }
+                          return <div className="px-2 py-1 rounded-full bg-default-50 text-default-700 text-xs font-semibold">{String(adminAction)}</div>;
+                        })()}
+                        <p className="text-sm font-medium">Admin action: {String(adminAction)}</p>
+                      </div>
+
+                      {adminAction === 'Rescheduled' || adminAction === 'rescheduled' ? (
+                        <div className="text-xs text-default-800 mt-2">
+                          <p>New date/time: {r?.RescheduledDate || r?.Rescheduled_Date || r?.rescheduledDate || '—'}</p>
+                        </div>
+                      ) : null}
+
+                      {r?.AdminNote ? <p className="text-xs text-default-600 mt-2">Note: {r.AdminNote}</p> : null}
+                    </div>
+                  ) : null}
+
+                  {/* Stakeholder confirmation summary (if any) with color cue */}
+                  {stakeholderAction ? (
+                    <div className="mt-2 p-2 border border-default-200 rounded">
+                      {(() => {
+                        const s = String(stakeholderAction || '').toLowerCase();
+                        if (s.includes('accept')) return <div className="px-2 py-1 rounded-full bg-success-50 text-success-700 text-xs font-semibold inline-block">Stakeholder: Accepted</div>;
+                        if (s.includes('reject')) return <div className="px-2 py-1 rounded-full bg-danger-50 text-danger-700 text-xs font-semibold inline-block">Stakeholder: Rejected</div>;
+                        return <div className="px-2 py-1 rounded-full bg-default-50 text-default-700 text-xs font-semibold inline-block">Stakeholder: {String(stakeholderAction)}</div>;
+                      })()}
+                    </div>
+                  ) : null}
+
+                  
+                </div>
+              );
+            })()}
+          </ModalBody>
+          <ModalFooter>
+            {/* Role & stage-specific actions */}
+            {(() => {
+              const r = fullRequest || request || (request && (request as any).event) || {};
+              const adminAction = (r as any).AdminAction ?? (r as any).adminAction ?? null;
+              const stakeholderAction = (r as any).StakeholderFinalAction ?? (r as any).stakeholderFinalAction ?? null;
+              const v = getViewer();
+              const madeByStakeholder = r?.MadeByStakeholderID || r?.Stakeholder_ID || r?.stakeholder_id || r?.StakeholderId || null;
+              const viewerIsStakeholder = v.id && madeByStakeholder && String(v.id) === String(madeByStakeholder);
+
+              // Admin view before decision
+              if (!adminAction && v.isAdmin) {
+                return (
+                  <>
+                    <Button variant="bordered" onPress={() => setViewOpen(false)}>Close</Button>
+                    <Button color="default" onPress={() => { setViewOpen(false); setAcceptOpen(true); }} className="bg-black text-white">Accept</Button>
+                    <Button variant="bordered" onPress={() => { setViewOpen(false); setRejectOpen(true); }}>Reject</Button>
+                    <Button color="default" onPress={() => { setViewOpen(false); setRescheduleOpen(true); }}>Reschedule</Button>
+                  </>
+                );
+              }
+
+              // Stakeholder view after admin decision
+              if (adminAction && viewerIsStakeholder && !stakeholderAction) {
+                if (String(adminAction).toLowerCase().includes('accepted')) {
+                  return (
+                    <>
+                      <Button variant="bordered" onPress={() => setViewOpen(false)}>Close</Button>
+                        <Button color="default" onPress={async () => { setViewOpen(false); try { const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null; if (requestId) await performStakeholderConfirm(requestId, 'Accepted'); } catch (e) {} }} className="bg-black text-white">Accept</Button>
+                    </>
+                  );
+                }
+                if (String(adminAction).toLowerCase().includes('rejected')) {
+                  return (
+                    <>
+                      <Button variant="bordered" onPress={() => setViewOpen(false)}>Close</Button>
+                        <Button color="default" onPress={async () => { setViewOpen(false); try { const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null; if (requestId) await performStakeholderConfirm(requestId, 'Accepted'); } catch (e) {} }} className="bg-black text-white">Accept</Button>
+                    </>
+                  );
+                }
+                if (String(adminAction).toLowerCase().includes('resched') || String(adminAction).toLowerCase().includes('rescheduled')) {
+                  return (
+                    <>
+                      <Button variant="bordered" onPress={() => setViewOpen(false)}>Close</Button>
+                        <Button color="default" onPress={async () => { setViewOpen(false); try { const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null; if (requestId) await performStakeholderConfirm(requestId, 'Accepted'); } catch (e) {} }} className="bg-black text-white">Accept</Button>
+                        <Button variant="bordered" onPress={async () => { setViewOpen(false); try { const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null; if (requestId) await performStakeholderConfirm(requestId, 'Rejected'); } catch (e) {} }}>Reject</Button>
+                    </>
+                  );
+                }
+              }
+
+              // Default fallback action: close
+              return <Button variant="bordered" onPress={() => setViewOpen(false)}>Close</Button>;
+            })()}
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       {/* Reschedule Dialog */}
       <Modal isOpen={rescheduleOpen} onClose={() => setRescheduleOpen(false)} size="md" placement="center">
@@ -275,31 +862,48 @@ const EventCard: React.FC<EventCardProps> = ({
             <span className="text-lg font-semibold">Reschedule Event</span>
           </ModalHeader>
           <ModalBody>
-            <p className="text-sm text-default-600 mb-4">
-              Select new dates for this event.
-            </p>
-            
-            {/* Start Date Picker */}
+            <p className="text-sm text-default-600 mb-4">Select a new date for this event and provide a reason for rescheduling.</p>
+
+            {/* Current Date (read-only) */}
             <div className="space-y-2">
-              <label className="text-sm font-medium text-default-900">Start Date</label>
+              <label className="text-sm font-medium text-default-900">Current Date</label>
               <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                type="text"
+                value={date}
+                readOnly
+                className="w-full px-3 py-2 text-sm border border-default-200 rounded-lg bg-default-100"
+              />
+            </div>
+
+            {/* New Date Picker */}
+            <div className="space-y-2 mt-4">
+              <label className="text-sm font-medium text-default-900">New Date</label>
+              <DatePicker
+                value={rescheduledDate}
+                onChange={setRescheduledDate}
+                granularity="day"
+                hideTimeZone
+                variant="bordered"
+                classNames={{ base: "w-full", inputWrapper: "border-default-200 hover:border-default-400 h-10", input: "text-sm" }}
+              />
+            </div>
+
+            {/* Note */}
+            <div className="space-y-2 mt-4">
+              <label className="text-sm font-medium text-default-900">Reason for rescheduling</label>
+              <textarea
+                value={note}
+                onChange={(e) => setNote((e.target as HTMLTextAreaElement).value)}
+                rows={4}
                 className="w-full px-3 py-2 text-sm border border-default-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               />
             </div>
 
-            {/* End Date Picker */}
-            <div className="space-y-2 mt-4">
-              <label className="text-sm font-medium text-default-900">End Date</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-default-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-              />
-            </div>
+            {validationError && (
+              <div className="mt-3 p-3 bg-warning-50 border border-warning-200 rounded">
+                <p className="text-xs text-warning-700">{validationError}</p>
+              </div>
+            )}
           </ModalBody>
           <ModalFooter>
             <Button
@@ -313,13 +917,25 @@ const EventCard: React.FC<EventCardProps> = ({
               color="default"
               onPress={handleReschedule}
               className="bg-black text-white font-medium"
-              isDisabled={!startDate || !endDate}
+              isDisabled={!rescheduledDate || !note}
             >
               Reschedule
             </Button>
           </ModalFooter>
         </ModalContent>
       </Modal>
+
+      {/* Manage Staff Dialog (shared component) */}
+      <ManageStaffModal
+        isOpen={manageStaffOpen}
+        onClose={() => setManageStaffOpen(false)}
+        requestId={request?.Request_ID}
+        eventId={request?.Event_ID || (request?.event && request.event.Event_ID)}
+        request={request}
+        onSaved={async () => {
+          // onSaved hook: you can refresh data here if needed
+        }}
+      />
 
       {/* Cancel Dialog */}
       <Modal isOpen={cancelOpen} onClose={() => setCancelOpen(false)} size="md" placement="center">
@@ -364,9 +980,18 @@ const EventCard: React.FC<EventCardProps> = ({
             <span className="text-lg font-semibold">Reject Event</span>
           </ModalHeader>
           <ModalBody>
-            <p className="text-sm text-default-600">
-              Are you sure you want to reject this event? This action cannot be undone.
+            <p className="text-sm text-default-600 mb-3">
+              Provide a reason for rejecting this event. This will be shown to the requester.
             </p>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-default-900">Admin note</label>
+              <textarea
+                value={rejectNote}
+                onChange={(e) => setRejectNote((e.target as HTMLTextAreaElement).value)}
+                rows={4}
+                className="w-full px-3 py-2 text-sm border border-default-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              />
+            </div>
           </ModalBody>
           <ModalFooter>
             <Button
@@ -378,7 +1003,7 @@ const EventCard: React.FC<EventCardProps> = ({
             </Button>
             <Button
               color="default"
-              onPress={handleReject}
+              onPress={() => handleRejectWithNote(rejectNote)}
               className="bg-black text-white font-medium"
             >
               Reject
@@ -411,7 +1036,7 @@ const EventCard: React.FC<EventCardProps> = ({
             </Button>
             <Button
               color="default"
-              onPress={handleAccept}
+              onPress={() => handleAccept()}
               className="bg-black text-white font-medium"
             >
               Accept

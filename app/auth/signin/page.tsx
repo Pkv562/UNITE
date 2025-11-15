@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Input } from "@heroui/input";
 import { Button } from "@heroui/button";
 import { Link } from "@heroui/link";
@@ -14,20 +15,111 @@ export default function SignIn() {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setError("");
+
+    const payload = { email, password };
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.log("Sign in:", { email, password, rememberMe });
-    } catch (error) {
-      console.error("Sign in error:", error);
+      // Try staff/admin/coordinator login first
+  // Note: backend mounts auth routes at /api (not /api/auth)
+      let res = await fetch(`${API_URL}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+
+      let body = await res.json().catch(() => ({}));
+
+      // If staff login failed, try stakeholder login
+      if (!res.ok || body.success === false) {
+        res = await fetch(`${API_URL}/api/stakeholders/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: 'include',
+          body: JSON.stringify(payload),
+        });
+        body = await res.json().catch(() => ({}));
+      }
+
+      if (!res.ok || body.success === false) {
+        setError(body.message || "Invalid credentials");
+        setIsLoading(false);
+        return;
+      }
+
+      const { token, data } = body;
+
+      // Persist auth details: token + user
+      const storage = rememberMe ? localStorage : sessionStorage;
+      if (token) storage.setItem("unite_token", token);
+      if (data) storage.setItem("unite_user", JSON.stringify(data));
+
+      // Also write a sanitized legacy `unite_user` object to localStorage
+      // (development compatibility). This ensures the UNITE Sidebar's
+      // client-side getUserInfo() can reliably detect roles during
+      // hydration even when the app used sessionStorage or a different key.
+      try {
+        const legacy = {
+          role:
+            data?.staff_type ||
+            data?.role ||
+            (data?.Stakeholder_ID || data?.stakeholder_id || data?.Coordinator_ID ? "Stakeholder" : null),
+          isAdmin:
+            !!data?.isAdmin ||
+            String(data?.staff_type || "").toLowerCase().includes("admin") ||
+            (String(data?.role || "").toLowerCase().includes("sys") &&
+              String(data?.role || "").toLowerCase().includes("admin")),
+          First_Name: data?.First_Name || data?.first_name || null,
+          email: data?.Email || data?.email || null,
+          id:
+            data?.id ||
+            data?.ID ||
+            data?._id ||
+            data?.Stakeholder_ID ||
+            data?.StakeholderId ||
+            data?.stakeholder_id ||
+            data?.user_id ||
+            null,
+        };
+        if (typeof window !== "undefined") localStorage.setItem("unite_user", JSON.stringify(legacy));
+      } catch (e) {
+        // swallow any client storage errors
+      }
+
+      // Emit an in-window event to notify client-side components of an
+      // auth change (useful for SPA flows where storage events don't fire
+      // in the same window). Then navigate to dashboard. For maximum
+      // reliability we still perform a full navigation so SSR can read
+      // HttpOnly cookies when present.
+      try {
+        if (typeof window !== 'undefined') {
+          try { window.dispatchEvent(new CustomEvent('unite:auth-changed', { detail: { role: data?.role, isAdmin: data?.isAdmin } })); } catch (e) {}
+        }
+      } catch (e) {}
+
+      // Use a full navigation so the browser sends the HttpOnly cookie and
+      // the Next.js server-layout can read it during SSR.
+      if (typeof window !== 'undefined') {
+        window.location.assign('/dashboard');
+      } else {
+        router.push("/dashboard");
+      }
+    } catch (err) {
+      console.error("Sign in error:", err);
+      setError("An unexpected error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
+
+  const [error, setError] = useState("");
 
   const togglePasswordVisibility = () => setShowPassword(!showPassword);
 
@@ -141,6 +233,12 @@ export default function SignIn() {
               Forgot Password?
             </Link>
           </div>
+
+          {error && (
+            <div className="text-sm text-red-600" role="alert">
+              {error}
+            </div>
+          )}
 
           <div>
             <Button

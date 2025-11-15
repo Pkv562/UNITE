@@ -6,18 +6,18 @@ import { Dropdown, DropdownTrigger, DropdownMenu, DropdownSection, DropdownItem 
 import { useState } from "react"
 
 
-interface Coordinator {
+interface Stakeholder {
   id: string
   name: string
   email: string
   phone: string
-  province: string
+  organization?: string
   district: string
 }
 
 
-interface CoordinatorTableProps {
-  coordinators: Coordinator[]
+interface StakeholderTableProps {
+  coordinators: Stakeholder[]
   selectedCoordinators: string[]
   onSelectAll: (checked: boolean) => void
   onSelectCoordinator: (id: string, checked: boolean) => void
@@ -29,7 +29,7 @@ interface CoordinatorTableProps {
 }
 
 
-export default function CoordinatorTable({
+export default function StakeholderTable({
   coordinators,
   selectedCoordinators,
   onSelectAll,
@@ -39,17 +39,16 @@ export default function CoordinatorTable({
   onDeleteCoordinator,
   searchQuery,
   isAdmin,
-}: CoordinatorTableProps) {
+}: StakeholderTableProps) {
   const [/*unused*/, setUnused] = useState(false)
-  // debug logs removed
-  // Filter coordinators based on search query
+
   const filteredCoordinators = coordinators.filter(
     (coordinator) => {
       const q = searchQuery.toLowerCase()
       return (
         (coordinator.name || '').toLowerCase().includes(q) ||
         (coordinator.email || '').toLowerCase().includes(q) ||
-        (coordinator.province || '').toLowerCase().includes(q) ||
+        ((coordinator.organization || '')).toLowerCase().includes(q) ||
         (coordinator.district || '').toLowerCase().includes(q)
       )
     },
@@ -72,21 +71,21 @@ export default function CoordinatorTable({
                 <Checkbox
                   checked={isAllSelected}
                   onValueChange={onSelectAll}
-                  aria-label="Select all coordinators"
+                  aria-label="Select all stakeholders"
                   size="sm"
                 />
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Coordinator
+                Organization
+              </th>
+              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Stakeholder
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Email
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Phone Number
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Province
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 District
@@ -114,6 +113,9 @@ export default function CoordinatorTable({
                   />
                 </td>
                 <td className="px-6 py-4 text-sm font-normal text-gray-900">
+                  {coordinator.organization && coordinator.organization.trim() !== '' ? coordinator.organization : 'Independent'}
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-600">
                   {coordinator.name}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
@@ -123,54 +125,46 @@ export default function CoordinatorTable({
                   {coordinator.phone}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {coordinator.province}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-600">
                   {coordinator.district}
                 </td>
                 <td className="px-6 py-4">
-                  {/** Only show actions to admins. Non-admins get no action menu. */}
-                  {isAdmin ? (
-                    <Dropdown>
-                      <DropdownTrigger>
-                        <Button
-                          isIconOnly
-                          variant="light"
-                          size="sm"
-                          aria-label={`Actions for ${coordinator.name}`}
-                          className="text-gray-400 hover:text-gray-600"
+                  <Dropdown>
+                    <DropdownTrigger>
+                      <Button
+                        isIconOnly
+                        variant="light"
+                        size="sm"
+                        aria-label={`Actions for ${coordinator.name}`}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <MoreHorizontal size={18} />
+                      </Button>
+                    </DropdownTrigger>
+                    <DropdownMenu aria-label="Stakeholder actions" variant="faded">
+                      <DropdownSection title="Actions">
+                        <DropdownItem
+                          key="update"
+                          description="Edit the stakeholder's details"
+                          startContent={<Edit3 />}
+                          onPress={() => { if (onUpdateCoordinator) onUpdateCoordinator(coordinator.id) }}
                         >
-                          <MoreHorizontal size={18} />
-                        </Button>
-                      </DropdownTrigger>
-                      <DropdownMenu aria-label="Coordinator actions" variant="faded">
-                        <DropdownSection title="Actions">
-                          <DropdownItem
-                            key="update"
-                            description="Edit the coordinator's details"
-                            startContent={<Edit3 />}
-                            onPress={() => { if (onUpdateCoordinator) onUpdateCoordinator(coordinator.id) }}
-                          >
-                            Update coordinator
-                          </DropdownItem>
-                        </DropdownSection>
-                        <DropdownSection title="Danger zone">
-                          <DropdownItem
-                            key="delete"
-                            className="text-danger"
-                            color="danger"
-                            description="Permanently remove this coordinator"
-                            startContent={<Trash2 className="text-xl text-danger pointer-events-none shrink-0" />}
-                            onPress={() => { if (onDeleteCoordinator) onDeleteCoordinator(coordinator.id, coordinator.name) }}
-                          >
-                            Delete coordinator
-                          </DropdownItem>
-                        </DropdownSection>
-                      </DropdownMenu>
-                    </Dropdown>
-                  ) : (
-                    <span className="text-xs text-gray-400">—</span>
-                  )}
+                          Update stakeholder
+                        </DropdownItem>
+                      </DropdownSection>
+                      <DropdownSection title="Danger zone">
+                        <DropdownItem
+                          key="delete"
+                          className="text-danger"
+                          color="danger"
+                          description="Permanently remove this stakeholder"
+                          startContent={<Trash2 className="text-xl text-danger pointer-events-none shrink-0" />}
+                          onPress={() => { if (onDeleteCoordinator) onDeleteCoordinator(coordinator.id, coordinator.name) }}
+                        >
+                          Delete stakeholder
+                        </DropdownItem>
+                      </DropdownSection>
+                    </DropdownMenu>
+                  </Dropdown>
                 </td>
               </tr>
             ))}
@@ -183,7 +177,7 @@ export default function CoordinatorTable({
       {/* Empty State */}
       {filteredCoordinators.length === 0 && (
         <div className="px-6 py-12 text-center bg-white">
-          <p className="text-gray-500 text-sm">No coordinators found</p>
+          <p className="text-gray-500 text-sm">No stakeholders found</p>
           {searchQuery && (
             <p className="text-gray-400 text-xs mt-1">
               Try adjusting your search query
