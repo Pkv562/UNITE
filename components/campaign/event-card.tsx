@@ -157,8 +157,9 @@ const EventCard: React.FC<EventCardProps> = ({
             null;
 
           if (requestId) {
-            await performAdminAction(
+            await performRequestAction(
               requestId,
+              "admin-action",
               "Rescheduled",
               note.trim(),
               newDateISO,
@@ -199,7 +200,7 @@ const EventCard: React.FC<EventCardProps> = ({
         const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null;
 
         if (requestId) {
-          await performAdminAction(requestId, "Accepted", note || "");
+          await performRequestAction(requestId, "admin-action", "Accepted", note || "");
         } else if (onAcceptEvent) {
           try {
             onAcceptEvent(note);
@@ -221,7 +222,7 @@ const EventCard: React.FC<EventCardProps> = ({
         const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null;
 
         if (requestId) {
-          await performAdminAction(requestId, "Rejected", note || "");
+          await performRequestAction(requestId, "admin-action", "Rejected", note || "");
         } else if (onRejectEvent) {
           try {
             onRejectEvent(note);
@@ -454,19 +455,15 @@ const EventCard: React.FC<EventCardProps> = ({
       ? process.env.NEXT_PUBLIC_API_URL
       : "http://localhost:3000";
 
-  // Perform admin action via backend API (Accept / Reject / Rescheduled)
-  const performAdminAction = async (
+  // Unified function to perform request actions for any actor type
+  const performRequestAction = async (
     requestId: string,
-    action: "Accepted" | "Rejected" | "Rescheduled",
+    actorType: 'admin-action' | 'coordinator-action' | 'stakeholder-action',
+    action: 'Accepted' | 'Rejected' | 'Rescheduled',
     note?: string,
     rescheduledDate?: string | null,
   ) => {
     try {
-      const rawUser =
-        typeof window !== "undefined"
-          ? localStorage.getItem("unite_user")
-          : null;
-      const user = rawUser ? JSON.parse(rawUser as string) : null;
       const token =
         typeof window !== "undefined"
           ? localStorage.getItem("unite_token") ||
@@ -484,17 +481,19 @@ const EventCard: React.FC<EventCardProps> = ({
 
       if (token) {
         res = await fetchWithAuth(
-          `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`,
+          `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/${actorType}`,
           { method: "POST", body: JSON.stringify(body) },
         );
       } else {
+        // Fallback for legacy clients without token
         const legacyBody = {
-          adminId: user?.id || user?.Admin_ID || null,
-          ...body,
+          action,
+          note: note || "",
+          ...(rescheduledDate && { rescheduledDate })
         };
 
         res = await fetch(
-          `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`,
+          `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/${actorType}`,
           {
             method: "POST",
             headers,
@@ -506,7 +505,7 @@ const EventCard: React.FC<EventCardProps> = ({
       const resp = await res.json();
 
       if (!res.ok)
-        throw new Error(resp.message || "Failed to perform admin action");
+        throw new Error(resp.message || `Failed to perform ${actorType}`);
       // notify other parts of the app to refresh lists
       try {
         window.dispatchEvent(
@@ -842,6 +841,21 @@ const EventCard: React.FC<EventCardProps> = ({
   const getPendingStageLabel = (): string | null => {
     if (status !== "Pending") return null;
     const r = request || (request && (request as any).event) || {};
+    
+    // First check the request Status field for new workflow statuses
+    const requestStatus = r?.Status || r?.status || null;
+    
+    if (requestStatus === 'Pending_Stakeholder_Review') {
+      return "Waiting for stakeholder review";
+    }
+    if (requestStatus === 'Pending_Coordinator_Review') {
+      return "Waiting for coordinator review";
+    }
+    if (requestStatus === 'Pending_Admin_Review') {
+      return "Waiting for admin review";
+    }
+    
+    // Fallback to old logic for backward compatibility
     const adminAction =
       (r as any).AdminAction ?? (r as any).adminAction ?? null;
     const stakeholderAction =
@@ -1300,13 +1314,188 @@ const EventCard: React.FC<EventCardProps> = ({
                 request ||
                 (request && (request as any).event) ||
                 {};
+              const requestStatus = r?.Status || r?.status || null;
+              const v = getViewer();
+              
+              // Check new workflow statuses first
+              if (requestStatus === 'Pending_Stakeholder_Review') {
+                // Only stakeholders can act on stakeholder review requests
+                const stakeholderId = r?.stakeholder_id || r?.Stakeholder_ID || null;
+                const viewerIsStakeholder = v.id && stakeholderId && String(v.id) === String(stakeholderId);
+                
+                if (viewerIsStakeholder) {
+                  return (
+                    <>
+                      <Button
+                        variant="bordered"
+                        onPress={() => setViewOpen(false)}
+                      >
+                        Close
+                      </Button>
+                      <Button
+                        className="bg-black text-white"
+                        color="default"
+                        onPress={async () => {
+                          setViewOpen(false);
+                          try {
+                            const requestId =
+                              r?.Request_ID ||
+                              r?.RequestId ||
+                              r?.requestId ||
+                              null;
+                            if (requestId) {
+                              await performRequestAction(requestId, 'stakeholder-action', 'Accepted');
+                            }
+                          } catch (e) {}
+                        }}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        variant="bordered"
+                        onPress={async () => {
+                          setViewOpen(false);
+                          try {
+                            const requestId =
+                              r?.Request_ID ||
+                              r?.RequestId ||
+                              r?.requestId ||
+                              null;
+                            if (requestId) {
+                              await performRequestAction(requestId, 'stakeholder-action', 'Rejected');
+                            }
+                          } catch (e) {}
+                        }}
+                      >
+                        Reject
+                      </Button>
+                    </>
+                  );
+                }
+                return (
+                  <Button variant="bordered" onPress={() => setViewOpen(false)}>
+                    Close
+                  </Button>
+                );
+              }
+              
+              if (requestStatus === 'Pending_Coordinator_Review') {
+                // Only coordinators can act on coordinator review requests
+                const coordinatorId = r?.coordinator_id || r?.Coordinator_ID || null;
+                const viewerIsCoordinator = v.id && coordinatorId && String(v.id) === String(coordinatorId);
+                
+                if (viewerIsCoordinator) {
+                  return (
+                    <>
+                      <Button
+                        variant="bordered"
+                        onPress={() => setViewOpen(false)}
+                      >
+                        Close
+                      </Button>
+                      <Button
+                        className="bg-black text-white"
+                        color="default"
+                        onPress={async () => {
+                          setViewOpen(false);
+                          try {
+                            const requestId =
+                              r?.Request_ID ||
+                              r?.RequestId ||
+                              r?.requestId ||
+                              null;
+                            if (requestId) {
+                              await performRequestAction(requestId, 'coordinator-action', 'Accepted');
+                            }
+                          } catch (e) {}
+                        }}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        variant="bordered"
+                        onPress={async () => {
+                          setViewOpen(false);
+                          try {
+                            const requestId =
+                              r?.Request_ID ||
+                              r?.RequestId ||
+                              r?.requestId ||
+                              null;
+                            if (requestId) {
+                              await performRequestAction(requestId, 'coordinator-action', 'Rejected');
+                            }
+                          } catch (e) {}
+                        }}
+                      >
+                        Reject
+                      </Button>
+                    </>
+                  );
+                }
+                return (
+                  <Button variant="bordered" onPress={() => setViewOpen(false)}>
+                    Close
+                  </Button>
+                );
+              }
+              
+              if (requestStatus === 'Pending_Admin_Review') {
+                // Admins and coordinators can act on admin review requests
+                if (v.isAdmin || v.role === 'Coordinator') {
+                  return (
+                    <>
+                      <Button
+                        variant="bordered"
+                        onPress={() => setViewOpen(false)}
+                      >
+                        Close
+                      </Button>
+                      <Button
+                        className="bg-black text-white"
+                        color="default"
+                        onPress={() => {
+                          setViewOpen(false);
+                          setAcceptOpen(true);
+                        }}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        variant="bordered"
+                        onPress={() => {
+                          setViewOpen(false);
+                          setRejectOpen(true);
+                        }}
+                      >
+                        Reject
+                      </Button>
+                      <Button
+                        color="default"
+                        onPress={() => {
+                          setViewOpen(false);
+                          setRescheduleOpen(true);
+                        }}
+                      >
+                        Reschedule
+                      </Button>
+                    </>
+                  );
+                }
+                return (
+                  <Button variant="bordered" onPress={() => setViewOpen(false)}>
+                    Close
+                  </Button>
+                );
+              }
+              
+              // Fallback to old logic for backward compatibility
               const adminAction =
                 (r as any).AdminAction ?? (r as any).adminAction ?? null;
               const stakeholderAction =
                 (r as any).StakeholderFinalAction ??
                 (r as any).stakeholderFinalAction ??
                 null;
-              const v = getViewer();
               const madeByStakeholder =
                 r?.MadeByStakeholderID ||
                 r?.Stakeholder_ID ||

@@ -10,6 +10,7 @@ import {
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
+import { Select, SelectItem } from "@heroui/select";
 
 interface EditEventModalProps {
   isOpen: boolean;
@@ -41,6 +42,10 @@ export default function EditEventModal({
   const [audienceType, setAudienceType] = useState("");
   const [expectedAudienceSize, setExpectedAudienceSize] = useState("");
   const [description, setDescription] = useState("");
+  const [stakeholder, setStakeholder] = useState("");
+  const [stakeholderOptions, setStakeholderOptions] = useState<
+    { key: string; label: string }[]
+  >([]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [startTime, setStartTime] = useState("");
@@ -103,6 +108,22 @@ export default function EditEventModal({
         ""
       )?.toString() || "",
     );
+
+    // Prefill stakeholder selection when editing
+    try {
+      const sid =
+        request.MadeByStakeholderID || request.madeByStakeholderID ||
+        (request.event && (request.event.MadeByStakeholderID || request.event.madeByStakeholderID)) ||
+        request.stakeholder || null;
+
+      if (sid) {
+        setStakeholder(String(sid));
+        setStakeholderOptions([{ key: String(sid), label: String(sid) }]);
+      } else {
+        setStakeholder("");
+        setStakeholderOptions([]);
+      }
+    } catch (e) {}
   }, [request]);
 
   if (!request) return null;
@@ -114,6 +135,41 @@ export default function EditEventModal({
     user &&
     (user.staff_type === "Admin" || user.staff_type === "Coordinator")
   );
+
+  // When admin or coordinator opens edit modal, load stakeholders for the event's coordinator district
+  useEffect(() => {
+    const fetchForRequest = async () => {
+      try {
+        if (!request) return;
+        const coordId =
+          request.coordinator?.Coordinator_ID || request.coordinator?.CoordinatorId || request.Coordinator_ID || request.event?.Coordinator_ID || null;
+        if (!coordId) return;
+
+        const token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token");
+        const headers: any = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        // Resolve coordinator details for district
+        const coordRes = await fetch(`${API_URL}/api/coordinators/${encodeURIComponent(coordId)}`, { headers, credentials: 'include' });
+        const coordBody = await coordRes.json();
+        const coordData = coordBody?.data || coordBody;
+        const districtId = coordData?.District_ID || coordData?.District?.District_ID || coordData?.district_id || coordData?.district || null;
+        if (!districtId) return;
+
+        const stRes = await fetch(`${API_URL}/api/stakeholders?district_id=${encodeURIComponent(String(districtId))}`, { headers, credentials: 'include' });
+        const stBody = await stRes.json();
+        if (stRes.ok && Array.isArray(stBody.data)) {
+          const opts = (stBody.data || []).map((s: any) => ({ key: s.Stakeholder_ID || s.id, label: `${s.firstName || s.First_Name || ''} ${s.lastName || s.Last_Name || ''}`.trim() }));
+          setStakeholderOptions(opts);
+          // If current selected stakeholder isn't present in refreshed list, keep it but don't overwrite
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    fetchForRequest();
+  }, [request]);
 
   const handleSave = async () => {
     if (!request) return;
@@ -230,6 +286,8 @@ export default function EditEventModal({
           ...(user.staff_type === "Admin"
             ? { adminId: user.id }
             : { coordinatorId: user.id }),
+        // include stakeholder assignment when set
+        ...(stakeholder ? { MadeByStakeholderID: stakeholder, stakeholder } : {}),
         };
 
         const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
@@ -394,6 +452,45 @@ export default function EditEventModal({
                   }
                 />
               </div>
+            </div>
+
+            {/* Stakeholder assignment */}
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">Stakeholder</label>
+              {(() => {
+                const raw = typeof window !== 'undefined' ? localStorage.getItem('unite_user') : null;
+                const u = raw ? JSON.parse(raw) : null;
+                const role = String((u?.staff_type || u?.role || '')).toLowerCase();
+                const isStakeholderUser = role.includes('stakeholder');
+
+                if (isStakeholderUser) {
+                  const name = `${u?.firstName || u?.First_Name || ''} ${u?.lastName || u?.Last_Name || ''}`.trim();
+                  return (
+                    <Input disabled classNames={{ inputWrapper: 'h-10 bg-default-100' }} type="text" value={name || String(stakeholder)} variant="bordered" />
+                  );
+                }
+
+                // Admin or Coordinator may assign/choose stakeholder
+                if (stakeholderOptions.length === 0) {
+                  return (
+                    <Input disabled classNames={{ inputWrapper: 'h-10 bg-default-100' }} type="text" value={stakeholder ? String(stakeholder) : 'No stakeholders available'} variant="bordered" />
+                  );
+                }
+
+                return (
+                  <Select
+                    classNames={{ trigger: 'border-default-200 hover:border-default-400 h-10', value: 'text-sm' }}
+                    placeholder="Select stakeholder (optional)"
+                    selectedKeys={stakeholder ? [stakeholder] : []}
+                    variant="bordered"
+                    onSelectionChange={(keys: any) => setStakeholder(Array.from(keys)[0] as string)}
+                  >
+                    {stakeholderOptions.map((s: any) => (
+                      <SelectItem key={s.key}>{s.label}</SelectItem>
+                    ))}
+                  </Select>
+                );
+              })()}
             </div>
 
             {/* Category-specific fields */}

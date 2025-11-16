@@ -457,6 +457,13 @@ export default function CampaignPage() {
         eventPayload.MadeByCoordinatorID = data.coordinator;
       }
 
+      // If a stakeholder was selected, include it so server can assign and notify accordingly
+      if (data.stakeholder) {
+        eventPayload.MadeByStakeholderID = data.stakeholder;
+        // include explicit stakeholder reference (some controllers/validators accept this key)
+        eventPayload.stakeholder = data.stakeholder;
+      }
+
       // Decide endpoint based on user role. Use getUserInfo helper for robust detection.
       const info = getUserInfo();
       const roleStr = String(
