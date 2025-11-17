@@ -216,14 +216,42 @@ export default function CampaignPage() {
       }
     })();
     try {
-      const info = getUserInfo();
+      const raw = localStorage.getItem("unite_user");
 
-      try {
-        debug("[Campaign] getUserInfo:", info);
-      } catch (e) {}
-      if (info?.displayName) setCurrentUserName(info.displayName);
-      else if (info?.raw?.name) setCurrentUserName(info.raw.name);
-      if (info?.email) setCurrentUserEmail(info.email);
+      if (raw) {
+        const u = JSON.parse(raw);
+        const first =
+          u.First_Name ||
+          u.FirstName ||
+          u.first_name ||
+          u.firstName ||
+          u.First ||
+          "";
+        const middle =
+          u.Middle_Name ||
+          u.MiddleName ||
+          u.middle_name ||
+          u.middleName ||
+          u.Middle ||
+          "";
+        const last =
+          u.Last_Name ||
+          u.LastName ||
+          u.last_name ||
+          u.lastName ||
+          u.Last ||
+          "";
+        const parts = [first, middle, last]
+          .map((p: any) => (p || "").toString().trim())
+          .filter(Boolean);
+        const full = parts.join(" ");
+        const email =
+          u.Email || u.email || u.Email_Address || u.emailAddress || "";
+
+        if (full) setCurrentUserName(full);
+        else if (u.name) setCurrentUserName(u.name);
+        if (email) setCurrentUserEmail(email);
+      }
     } catch (err) {
       // ignore malformed localStorage entry
     }
@@ -455,6 +483,13 @@ export default function CampaignPage() {
       if (data.coordinator) {
         // For createEventRequest controller we need coordinatorId in body (coordinatorId param)
         eventPayload.MadeByCoordinatorID = data.coordinator;
+      }
+
+      // If a stakeholder was selected, include it so server can assign and notify accordingly
+      if (data.stakeholder) {
+        eventPayload.MadeByStakeholderID = data.stakeholder;
+        // include explicit stakeholder reference (some controllers/validators accept this key)
+        eventPayload.stakeholder = data.stakeholder;
       }
 
       // Decide endpoint based on user role. Use getUserInfo helper for robust detection.
@@ -689,6 +724,63 @@ export default function CampaignPage() {
     }
   };
 
+  // Handle cancel event action coming from EventCard
+  const handleCancelEvent = async (reqObj: any) => {
+    if (!reqObj) return;
+    const requestId =
+      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.RequestId;
+
+    if (!requestId) {
+      setErrorModalMessage("Unable to determine request id for cancellation");
+      setErrorModalOpen(true);
+
+      return;
+    }
+
+    try {
+      const rawUser = localStorage.getItem("unite_user");
+      const user = rawUser ? JSON.parse(rawUser) : null;
+      const token =
+        localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token");
+      const headers: any = { "Content-Type": "application/json" };
+
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // Get coordinator ID from user or request
+      const coordinatorId =
+        user?.Coordinator_ID || user?.id || reqObj.coordinator_id;
+
+      if (!coordinatorId) {
+        setErrorModalMessage(
+          "Unable to determine coordinator for cancellation",
+        );
+        setErrorModalOpen(true);
+
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
+        method: "DELETE",
+        headers,
+        body: JSON.stringify({ coordinatorId }),
+      });
+      const resp = await res.json();
+
+      if (!res.ok) throw new Error(resp.message || "Failed to cancel request");
+
+      // refresh requests list to reflect cancellation
+      await fetchRequests();
+
+      return resp;
+    } catch (err: any) {
+      console.error("Cancel error", err);
+      setErrorModalMessage(err?.message || "Failed to cancel request");
+      setErrorModalOpen(true);
+      throw err;
+    }
+  };
+
   // Normalize status for a request and filter client-side to ensure tab
   // selection reliably matches regardless of backend inconsistencies.
   // Normalize status, preferring the event-level Status field when present.
@@ -714,6 +806,7 @@ export default function CampaignPage() {
           evStatus.includes("awaiting")
         )
           return "Pending";
+        if (evStatus.includes("cancel")) return "Cancelled";
         // If event.Status exists but is an unfamiliar token, map common aliases
         if (evStatus === "completed" || evStatus === "done") return "Approved";
       }
@@ -746,6 +839,7 @@ export default function CampaignPage() {
       joined.includes("awaiting")
     )
       return "Pending";
+    if (joined.includes("cancel")) return "Cancelled";
 
     return "Pending";
   };
@@ -778,10 +872,39 @@ export default function CampaignPage() {
       const q = searchQuery.trim().toLowerCase();
       const ev = r.event || {};
       const title = (ev.Event_Title || ev.title || "").toString().toLowerCase();
-      // requester name
+      // requester name - check who actually created the request
       let requestee = "";
 
-      if (r.coordinator && r.coordinator.staff) {
+      if (
+        r.made_by_role === "Stakeholder" &&
+        r.stakeholder &&
+        r.stakeholder.staff
+      ) {
+        const s = r.stakeholder.staff;
+
+        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+          .trim()
+          .toLowerCase();
+      } else if (
+        (r.made_by_role === "Coordinator" ||
+          r.made_by_role === "SystemAdmin") &&
+        r.coordinator &&
+        r.coordinator.staff
+      ) {
+        const s = r.coordinator.staff;
+
+        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+          .trim()
+          .toLowerCase();
+      } else if (r.stakeholder && r.stakeholder.staff) {
+        // Fallback: stakeholder data exists
+        const s = r.stakeholder.staff;
+
+        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+          .trim()
+          .toLowerCase();
+      } else if (r.coordinator && r.coordinator.staff) {
+        // Final fallback: coordinator data
         const s = r.coordinator.staff;
 
         requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
@@ -808,7 +931,36 @@ export default function CampaignPage() {
       if (advancedFilter.requester) {
         let requestee = "";
 
-        if (r.coordinator && r.coordinator.staff) {
+        if (
+          r.made_by_role === "Stakeholder" &&
+          r.stakeholder &&
+          r.stakeholder.staff
+        ) {
+          const s = r.stakeholder.staff;
+
+          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+            .trim()
+            .toLowerCase();
+        } else if (
+          (r.made_by_role === "Coordinator" ||
+            r.made_by_role === "SystemAdmin") &&
+          r.coordinator &&
+          r.coordinator.staff
+        ) {
+          const s = r.coordinator.staff;
+
+          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+            .trim()
+            .toLowerCase();
+        } else if (r.stakeholder && r.stakeholder.staff) {
+          // Fallback: stakeholder data exists
+          const s = r.stakeholder.staff;
+
+          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+            .trim()
+            .toLowerCase();
+        } else if (r.coordinator && r.coordinator.staff) {
+          // Final fallback: coordinator data
           const s = r.coordinator.staff;
 
           requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
@@ -917,21 +1069,29 @@ export default function CampaignPage() {
               {paginatedRequests.map((req, index) => {
                 const event = req.event || {};
                 const title = event.Event_Title || event.title || "Untitled";
-                // Requestee name: prefer coordinator staff name, else stakeholder id
-                let requestee = "Unknown";
+                // Requestee name: check who actually created the request based on made_by_role
+                let requestee = req.createdByName || "Unknown";
+                let creatorDistrict = null;
 
-                if (req.coordinator && req.coordinator.staff) {
-                  const s = req.coordinator.staff;
-
-                  requestee =
-                    `${s.First_Name || ""} ${s.Last_Name || ""}`.trim();
-                } else if (
-                  req.MadeByStakeholderID ||
-                  event.MadeByStakeholderID
-                ) {
-                  requestee = (
-                    req.MadeByStakeholderID || event.MadeByStakeholderID
-                  ).toString();
+                // If creatorDistrict is still not set, try to get district based on stakeholder/coordinator presence
+                if (!creatorDistrict) {
+                  if (
+                    req.stakeholder &&
+                    (req.stakeholder.District_Number ||
+                      req.stakeholder.District_Name)
+                  ) {
+                    creatorDistrict =
+                      req.stakeholder.District_Number ||
+                      req.stakeholder.District_Name;
+                  } else if (
+                    req.coordinator &&
+                    (req.coordinator.District_Number ||
+                      req.coordinator.District_Name)
+                  ) {
+                    creatorDistrict =
+                      req.coordinator.District_Number ||
+                      req.coordinator.District_Name;
+                  }
                 }
 
                 const rawCategory =
@@ -954,13 +1114,18 @@ export default function CampaignPage() {
                     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
                     .join(" ");
                 }
-                // Map status to Approved/Pending/Rejected
+                // Map status to Approved/Pending/Rejected/Cancelled
                 const statusRaw = event.Status || req.Status || "Pending";
                 const status = statusRaw.includes("Reject")
                   ? "Rejected"
-                  : statusRaw.includes("Approved")
+                  : statusRaw.includes("Approved") ||
+                      statusRaw.includes("Complete") ||
+                      statusRaw.includes("Completed")
                     ? "Approved"
-                    : "Pending";
+                    : statusRaw.includes("Cancel") ||
+                        statusRaw.includes("Cancelled")
+                      ? "Cancelled"
+                      : "Pending";
 
                 const location = event.Location || event.location || "";
 
@@ -1002,7 +1167,7 @@ export default function CampaignPage() {
                   ? formatDateRange(start, end)
                   : event.date || "";
 
-                // Compute district display: prefer coordinator District_Number/Name and convert number to ordinal (1 -> 1st District)
+                // Compute district display: use the creator's district (stakeholder or coordinator)
                 const makeOrdinal = (n: number | string) => {
                   const num = parseInt(String(n), 10);
 
@@ -1017,14 +1182,9 @@ export default function CampaignPage() {
 
                 let displayDistrict = "";
 
-                if (
-                  req.coordinator &&
-                  (req.coordinator.District_Number ||
-                    req.coordinator.District_Name)
-                ) {
-                  const dn =
-                    req.coordinator.District_Number ||
-                    req.coordinator.District_Name;
+                // Use creator's district first (now properly set above)
+                if (creatorDistrict) {
+                  const dn = creatorDistrict;
                   // If district number looks numeric, convert to ordinal + ' District'
                   const parsed = parseInt(
                     String(dn).replace(/[^0-9]/g, ""),
@@ -1062,6 +1222,7 @@ export default function CampaignPage() {
                     request={req}
                     status={status as any}
                     title={title}
+                    onCancelEvent={() => handleCancelEvent(req)}
                     onEditEvent={() => handleOpenEdit(req)}
                     onRescheduleEvent={(
                       currentDate: string,

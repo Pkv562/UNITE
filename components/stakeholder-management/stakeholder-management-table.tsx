@@ -1,5 +1,5 @@
 "use client";
-import { MoreHorizontal, Edit3, Trash2 } from "lucide-react";
+import { MoreHorizontal, Edit3, Trash2, Check, X } from "lucide-react";
 import { Checkbox } from "@heroui/checkbox";
 import { Button } from "@heroui/button";
 import {
@@ -17,7 +17,10 @@ interface Stakeholder {
   email: string;
   phone: string;
   organization?: string;
-  district: string;
+  entity?: string; // alias for organization
+  province?: string;
+  district?: string;
+  municipality?: string;
 }
 
 interface StakeholderTableProps {
@@ -30,6 +33,10 @@ interface StakeholderTableProps {
   onDeleteCoordinator?: (id: string, name?: string) => void;
   searchQuery: string;
   isAdmin?: boolean;
+  municipalityCache?: Record<string, string>;
+  isRequests?: boolean;
+  onAcceptRequest?: (id: string) => void;
+  onRejectRequest?: (id: string) => void;
 }
 
 export default function StakeholderTable({
@@ -42,6 +49,10 @@ export default function StakeholderTable({
   onDeleteCoordinator,
   searchQuery,
   isAdmin,
+  municipalityCache,
+  isRequests = false,
+  onAcceptRequest,
+  onRejectRequest,
 }: StakeholderTableProps) {
   const [, /*unused*/ setUnused] = useState(false);
 
@@ -51,8 +62,19 @@ export default function StakeholderTable({
     return (
       (coordinator.name || "").toLowerCase().includes(q) ||
       (coordinator.email || "").toLowerCase().includes(q) ||
-      (coordinator.organization || "").toLowerCase().includes(q) ||
-      (coordinator.district || "").toLowerCase().includes(q)
+      (coordinator.organization || coordinator.entity || "")
+        .toLowerCase()
+        .includes(q) ||
+      (coordinator.province || "").toLowerCase().includes(q) ||
+      (coordinator.district || "").toLowerCase().includes(q) ||
+      (
+        (municipalityCache &&
+          municipalityCache[String(coordinator.municipality)]) ||
+        coordinator.municipality ||
+        ""
+      )
+        .toLowerCase()
+        .includes(q)
     );
   });
 
@@ -77,10 +99,7 @@ export default function StakeholderTable({
                 />
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Organization
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Stakeholder
+                Name
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Email
@@ -89,7 +108,16 @@ export default function StakeholderTable({
                 Phone Number
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Entity
+              </th>
+              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Province
+              </th>
+              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 District
+              </th>
+              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Municipality
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Action
@@ -115,12 +143,6 @@ export default function StakeholderTable({
                   />
                 </td>
                 <td className="px-6 py-4 text-sm font-normal text-gray-900">
-                  {coordinator.organization &&
-                  coordinator.organization.trim() !== ""
-                    ? coordinator.organization
-                    : "Independent"}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-600">
                   {coordinator.name}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
@@ -130,7 +152,19 @@ export default function StakeholderTable({
                   {coordinator.phone}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {coordinator.district}
+                  {coordinator.organization || coordinator.entity || "—"}
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-600">
+                  {coordinator.province || "—"}
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-600">
+                  {coordinator.district || "—"}
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-600">
+                  {(municipalityCache &&
+                    municipalityCache[String(coordinator.municipality)]) ||
+                    coordinator.municipality ||
+                    "—"}
                 </td>
                 <td className="px-6 py-4">
                   <Dropdown>
@@ -149,39 +183,68 @@ export default function StakeholderTable({
                       aria-label="Stakeholder actions"
                       variant="faded"
                     >
-                      <DropdownSection title="Actions">
-                        <DropdownItem
-                          key="update"
-                          description="Edit the stakeholder's details"
-                          startContent={<Edit3 />}
-                          onPress={() => {
-                            if (onUpdateCoordinator)
-                              onUpdateCoordinator(coordinator.id);
-                          }}
-                        >
-                          Update stakeholder
-                        </DropdownItem>
-                      </DropdownSection>
-                      <DropdownSection title="Danger zone">
-                        <DropdownItem
-                          key="delete"
-                          className="text-danger"
-                          color="danger"
-                          description="Permanently remove this stakeholder"
-                          startContent={
-                            <Trash2 className="text-xl text-danger pointer-events-none shrink-0" />
-                          }
-                          onPress={() => {
-                            if (onDeleteCoordinator)
-                              onDeleteCoordinator(
-                                coordinator.id,
-                                coordinator.name,
-                              );
-                          }}
-                        >
-                          Delete stakeholder
-                        </DropdownItem>
-                      </DropdownSection>
+                      {isRequests ? (
+                        <DropdownSection title="Actions">
+                          <DropdownItem
+                            key="accept"
+                            description="Approve this signup request"
+                            startContent={<Check className="text-green-600" />}
+                            onPress={() => {
+                              if (onAcceptRequest) onAcceptRequest(coordinator.id);
+                            }}
+                          >
+                            Accept Request
+                          </DropdownItem>
+                          <DropdownItem
+                            key="reject"
+                            className="text-danger"
+                            color="danger"
+                            description="Reject this signup request"
+                            startContent={<X className="text-red-600" />}
+                            onPress={() => {
+                              if (onRejectRequest) onRejectRequest(coordinator.id);
+                            }}
+                          >
+                            Reject Request
+                          </DropdownItem>
+                        </DropdownSection>
+                      ) : (
+                        <>
+                          <DropdownSection title="Actions">
+                            <DropdownItem
+                              key="update"
+                              description="Edit the stakeholder's details"
+                              startContent={<Edit3 />}
+                              onPress={() => {
+                                if (onUpdateCoordinator)
+                                  onUpdateCoordinator(coordinator.id);
+                              }}
+                            >
+                              Update stakeholder
+                            </DropdownItem>
+                          </DropdownSection>
+                          <DropdownSection title="Danger zone">
+                            <DropdownItem
+                              key="delete"
+                              className="text-danger"
+                              color="danger"
+                              description="Permanently remove this stakeholder"
+                              startContent={
+                                <Trash2 className="text-xl text-danger pointer-events-none shrink-0" />
+                              }
+                              onPress={() => {
+                                if (onDeleteCoordinator)
+                                  onDeleteCoordinator(
+                                    coordinator.id,
+                                    coordinator.name,
+                                  );
+                              }}
+                            >
+                              Delete stakeholder
+                            </DropdownItem>
+                          </DropdownSection>
+                        </>
+                      )}
                     </DropdownMenu>
                   </Dropdown>
                 </td>
@@ -194,7 +257,9 @@ export default function StakeholderTable({
       {/* Empty State */}
       {filteredCoordinators.length === 0 && (
         <div className="px-6 py-12 text-center bg-white">
-          <p className="text-gray-500 text-sm">No stakeholders found</p>
+          <p className="text-gray-500 text-sm">
+            {isRequests ? "No signup requests found" : "No stakeholders found"}
+          </p>
           {searchQuery && (
             <p className="text-gray-400 text-xs mt-1">
               Try adjusting your search query

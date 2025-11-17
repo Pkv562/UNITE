@@ -28,6 +28,7 @@ interface CreateTrainingEventModalProps {
 
 interface TrainingEventData {
   coordinator: string;
+  stakeholder?: string;
   eventTitle: string;
   trainingType: string;
   date: string;
@@ -48,6 +49,10 @@ export const CreateTrainingEventModal: React.FC<
   CreateTrainingEventModalProps
 > = ({ isOpen, onClose, onConfirm, isSubmitting, error }) => {
   const [coordinator, setCoordinator] = useState("");
+  const [stakeholder, setStakeholder] = useState("");
+  const [stakeholderOptions, setStakeholderOptions] = useState<
+    { key: string; label: string }[]
+  >([]);
   const [eventTitle, setEventTitle] = useState("");
   const [titleTouched, setTitleTouched] = useState(false);
   const [trainingType, setTrainingType] = useState("");
@@ -72,6 +77,81 @@ export const CreateTrainingEventModal: React.FC<
     { key: string; label: string }[]
   >([]);
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+
+  // Load stakeholders for selected coordinator's district when coordinator changes
+  useEffect(() => {
+    const fetchStakeholdersForCoordinator = async () => {
+      try {
+        if (!coordinator) {
+          setStakeholderOptions([]);
+
+          return;
+        }
+
+        const token =
+          localStorage.getItem("unite_token") ||
+          sessionStorage.getItem("unite_token");
+        const headers: any = { "Content-Type": "application/json" };
+
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        // Fetch coordinator details to get district id
+        let districtId: any = null;
+
+        try {
+          const coordRes = await fetch(
+            `${API_URL}/api/coordinators/${encodeURIComponent(coordinator)}`,
+            { headers, credentials: "include" },
+          );
+          const coordBody = await coordRes.json();
+
+          const coordData = coordBody?.data || coordBody;
+
+          districtId =
+            coordData?.District_ID ||
+            coordData?.District?.District_ID ||
+            coordData?.District_Id ||
+            coordData?.district_id ||
+            coordData?.district ||
+            null;
+        } catch (e) {
+          // ignore
+        }
+
+        if (!districtId) {
+          setStakeholderOptions([]);
+
+          return;
+        }
+
+        const stRes = await fetch(
+          `${API_URL}/api/stakeholders?district_id=${encodeURIComponent(String(districtId))}`,
+          { headers, credentials: "include" },
+        );
+        const stBody = await stRes.json();
+
+        if (stRes.ok && Array.isArray(stBody.data)) {
+          const opts = (stBody.data || []).map((s: any) => ({
+            key: s.Stakeholder_ID || s.StakeholderId || s.id,
+            label:
+              `${s.firstName || s.First_Name || ""} ${s.lastName || s.Last_Name || ""}`.trim(),
+          }));
+
+          setStakeholderOptions(opts);
+          if (stakeholder && !opts.find((o: any) => o.key === stakeholder)) {
+            setStakeholder("");
+          }
+        } else {
+          setStakeholderOptions([]);
+        }
+      } catch (err) {
+        console.warn("Failed to load stakeholders", err);
+        setStakeholderOptions([]);
+      }
+    };
+
+    fetchStakeholdersForCoordinator();
+  }, [coordinator]);
 
   useEffect(() => {
     // fetch coordinators when modal opens - robust handling for admin/coordinator/stakeholder
@@ -131,8 +211,141 @@ export const CreateTrainingEventModal: React.FC<
 
             setCoordinatorOptions(opts);
 
+            // Prefill stakeholder field if the authenticated user is a stakeholder
+            try {
+              const raw = localStorage.getItem("unite_user");
+              const u = raw ? JSON.parse(raw) : null;
+              const roleStr = String(
+                u?.staff_type || u?.role || "",
+              ).toLowerCase();
+
+              if (u && roleStr.includes("stakeholder")) {
+                const sid = u.Stakeholder_ID || u.StakeholderId || u.id;
+
+                if (sid) {
+                  setStakeholder(String(sid));
+                  setStakeholderOptions([
+                    {
+                      key: String(sid),
+                      label:
+                        `${u.firstName || u.First_Name || ""} ${u.lastName || u.Last_Name || ""}`.trim(),
+                    },
+                  ]);
+                }
+              }
+            } catch (e) {}
+
             return;
           }
+        }
+
+        // Special handling for stakeholders: auto-select their coordinator and themselves
+        const roleStr = String(
+          info?.role || user?.staff_type || user?.role || "",
+        ).toLowerCase();
+
+        console.log(
+          "Stakeholder check: roleStr =",
+          roleStr,
+          "user =",
+          user,
+          "info =",
+          info,
+        );
+        if (user && roleStr.includes("stakeholder")) {
+          const sid =
+            info?.raw?.id ||
+            user.Stakeholder_ID ||
+            user.StakeholderId ||
+            user.id;
+
+          console.log("Stakeholder detected: sid =", sid);
+          if (sid) {
+            try {
+              const stRes = await fetch(
+                `${API_URL}/api/stakeholders/${encodeURIComponent(sid)}`,
+                { headers, credentials: "include" },
+              );
+              const stBody = await stRes.json();
+
+              console.log("Stakeholder fetch response:", stRes.ok, stBody);
+              if (stRes.ok && stBody.data) {
+                const st = stBody.data;
+                const districtId = st.district;
+
+                console.log("Stakeholder district ID:", districtId);
+                if (districtId) {
+                  const coordRes = await fetch(
+                    `${API_URL}/api/coordinators?district_id=${encodeURIComponent(districtId)}`,
+                    { headers, credentials: "include" },
+                  );
+                  const coordBody = await coordRes.json();
+
+                  console.log(
+                    "Coordinator fetch response:",
+                    coordRes.ok,
+                    coordBody,
+                  );
+                  if (
+                    coordRes.ok &&
+                    coordBody.data &&
+                    Array.isArray(coordBody.data) &&
+                    coordBody.data.length > 0
+                  ) {
+                    const coordOpts = coordBody.data.map((c: any) => {
+                      const staff = c.Staff || c.staff || null;
+                      const district = c.District || c.district || null;
+                      const fullName = staff
+                        ? [staff.First_Name, staff.Middle_Name, staff.Last_Name]
+                            .filter(Boolean)
+                            .join(" ")
+                            .trim()
+                        : c.StaffName || c.label || "";
+                      const districtLabel = district?.District_Number
+                        ? `District ${district.District_Number}`
+                        : district?.District_Name || "";
+
+                      return {
+                        key: c.Coordinator_ID || (staff && staff.ID) || c.id,
+                        label: `${fullName}${districtLabel ? " - " + districtLabel : ""}`,
+                      };
+                    });
+
+                    setCoordinatorOptions(coordOpts);
+                    if (coordOpts.length > 0) {
+                      setCoordinator(coordOpts[0].key);
+                      console.log(
+                        "Coordinator set to:",
+                        coordOpts[0].key,
+                        coordOpts[0].label,
+                      );
+                    }
+                  } else {
+                    console.error(
+                      "No coordinators found for district:",
+                      districtId,
+                    );
+                  }
+                } else {
+                  console.error("No district ID found for stakeholder");
+                }
+                // Set stakeholder to themselves
+                setStakeholder(String(sid));
+                setStakeholderOptions([
+                  {
+                    key: String(sid),
+                    label:
+                      `${st.firstName || st.First_Name || ""} ${st.lastName || st.Last_Name || ""}`.trim(),
+                  },
+                ]);
+                console.log("Set stakeholder for stakeholder user");
+              }
+            } catch (e) {
+              console.error("Failed to fetch for stakeholder", e);
+            }
+          }
+
+          return;
         }
 
         // non-admin flows: try to derive coordinator id from user or token
@@ -369,6 +582,7 @@ export const CreateTrainingEventModal: React.FC<
     const eventData: TrainingEventData = {
       eventTitle,
       coordinator,
+      stakeholder,
       trainingType,
       date: date ? new Date(date).toDateString() : "",
       startTime: startISO,
@@ -493,6 +707,96 @@ export const CreateTrainingEventModal: React.FC<
                 );
               })()}
             </div>
+
+            {/* Stakeholder - appears immediately below Coordinator */}
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">
+                Stakeholder
+              </label>
+              {(() => {
+                const rawUser =
+                  typeof window !== "undefined"
+                    ? localStorage.getItem("unite_user")
+                    : null;
+                const user = rawUser ? JSON.parse(rawUser) : null;
+                const isStakeholder = !!(
+                  user?.Stakeholder_ID ||
+                  (user?.id && user.id.toLowerCase().startsWith("stkh_"))
+                );
+
+                if (isStakeholder) {
+                  const name =
+                    `${user?.firstName || user?.First_Name || ""} ${user?.lastName || user?.Last_Name || ""}`.trim();
+
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={name || "Stakeholder"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                if (!coordinator) {
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={"Select a coordinator first"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                const available = stakeholderOptions.length;
+
+                if (available === 0) {
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={"No stakeholders available"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                return (
+                  <Select
+                    classNames={{
+                      trigger:
+                        "border-default-200 hover:border-default-400 h-10",
+                      value: "text-sm",
+                    }}
+                    placeholder="Select one (optional)"
+                    selectedKeys={stakeholder ? [stakeholder] : []}
+                    variant="bordered"
+                    onSelectionChange={(keys) =>
+                      setStakeholder(Array.from(keys)[0] as string)
+                    }
+                  >
+                    {stakeholderOptions.map((s) => (
+                      <SelectItem key={s.key}>{s.label}</SelectItem>
+                    ))}
+                  </Select>
+                );
+              })()}
+            </div>
+
+            {/* (duplicate Stakeholder removed) */}
 
             {/* Event Title */}
             <div>
@@ -734,6 +1038,7 @@ interface CreateBloodDriveEventModalProps {
 
 interface BloodDriveEventData {
   coordinator: string;
+  stakeholder?: string;
   eventTitle: string;
   date: string;
   startTime?: string;
@@ -753,6 +1058,10 @@ export const CreateBloodDriveEventModal: React.FC<
   CreateBloodDriveEventModalProps
 > = ({ isOpen, onClose, onConfirm, isSubmitting, error }) => {
   const [coordinator, setCoordinator] = useState("");
+  const [stakeholder, setStakeholder] = useState("");
+  const [stakeholderOptions, setStakeholderOptions] = useState<
+    { key: string; label: string }[]
+  >([]);
   const [eventTitle, setEventTitle] = useState("");
   const [titleTouched, setTitleTouched] = useState(false);
   const [date, setDate] = useState<any>(null);
@@ -835,6 +1144,119 @@ export const CreateBloodDriveEventModal: React.FC<
 
             return;
           }
+        }
+
+        // Special handling for stakeholders: auto-select their coordinator and themselves
+        const roleStr = String(
+          info?.role || user?.staff_type || user?.role || "",
+        ).toLowerCase();
+
+        console.log(
+          "Stakeholder check: roleStr =",
+          roleStr,
+          "user =",
+          user,
+          "info =",
+          info,
+        );
+        if (
+          user &&
+          (user.Stakeholder_ID ||
+            (user.id && user.id.toLowerCase().startsWith("stkh_")))
+        ) {
+          const sid =
+            info?.raw?.id ||
+            user.Stakeholder_ID ||
+            user.StakeholderId ||
+            user.id;
+
+          console.log("Stakeholder detected: sid =", sid);
+          if (sid) {
+            try {
+              const stRes = await fetch(
+                `${API_URL}/api/stakeholders/${encodeURIComponent(sid)}`,
+                { headers, credentials: "include" },
+              );
+              const stBody = await stRes.json();
+
+              console.log("Stakeholder fetch response:", stRes.ok, stBody);
+              if (stRes.ok && stBody.data) {
+                const st = stBody.data;
+                const districtId = st.district;
+
+                console.log("Stakeholder district ID:", districtId);
+                if (districtId) {
+                  const coordRes = await fetch(
+                    `${API_URL}/api/coordinators?district_id=${encodeURIComponent(districtId)}`,
+                    { headers, credentials: "include" },
+                  );
+                  const coordBody = await coordRes.json();
+
+                  console.log(
+                    "Coordinator fetch response:",
+                    coordRes.ok,
+                    coordBody,
+                  );
+                  if (
+                    coordRes.ok &&
+                    coordBody.data &&
+                    Array.isArray(coordBody.data) &&
+                    coordBody.data.length > 0
+                  ) {
+                    const coordOpts = coordBody.data.map((c: any) => {
+                      const staff = c.Staff || c.staff || null;
+                      const district = c.District || c.district || null;
+                      const fullName = staff
+                        ? [staff.First_Name, staff.Middle_Name, staff.Last_Name]
+                            .filter(Boolean)
+                            .join(" ")
+                            .trim()
+                        : c.StaffName || c.label || "";
+                      const districtLabel = district?.District_Number
+                        ? `District ${district.District_Number}`
+                        : district?.District_Name || "";
+
+                      return {
+                        key: c.Coordinator_ID || (staff && staff.ID) || c.id,
+                        label: `${fullName}${districtLabel ? " - " + districtLabel : ""}`,
+                      };
+                    });
+
+                    setCoordinatorOptions(coordOpts);
+                    if (coordOpts.length > 0) {
+                      setCoordinator(coordOpts[0].key);
+                      console.log(
+                        "Coordinator set to:",
+                        coordOpts[0].key,
+                        coordOpts[0].label,
+                      );
+                    }
+                  } else {
+                    console.error(
+                      "No coordinators found for district:",
+                      districtId,
+                    );
+                  }
+                } else {
+                  console.error("No district ID found for stakeholder");
+                }
+                // Set stakeholder to themselves
+                setStakeholder(String(sid));
+                setStakeholderOptions([
+                  {
+                    key: String(sid),
+                    label:
+                      `${st.firstName || st.First_Name || ""} ${st.lastName || st.Last_Name || ""}`.trim(),
+                  },
+                ]);
+                console.log("Set stakeholder for stakeholder user");
+              }
+            } catch (e) {
+              console.error("Failed to fetch for stakeholder", e);
+            }
+          }
+
+          return;
         }
 
         if (user) {
@@ -966,6 +1388,29 @@ export const CreateBloodDriveEventModal: React.FC<
                     label: name,
                   },
                 ]);
+                // If current auth user is a stakeholder, prefill stakeholder values
+                try {
+                  const raw = localStorage.getItem("unite_user");
+                  const u = raw ? JSON.parse(raw) : null;
+                  const roleStr = String(
+                    u?.staff_type || u?.role || "",
+                  ).toLowerCase();
+
+                  if (u && roleStr.includes("stakeholder")) {
+                    const sid = u.Stakeholder_ID || u.StakeholderId || u.id;
+
+                    if (sid) {
+                      setStakeholder(String(sid));
+                      setStakeholderOptions([
+                        {
+                          key: String(sid),
+                          label:
+                            `${u.firstName || u.First_Name || ""} ${u.lastName || u.Last_Name || ""}`.trim(),
+                        },
+                      ]);
+                    }
+                  }
+                } catch (e) {}
                 setCoordinator(coord?.Coordinator_ID || resolvedCoordId);
               }
             } catch (e) {
@@ -980,6 +1425,81 @@ export const CreateBloodDriveEventModal: React.FC<
 
     if (isOpen) fetchCoordinators();
   }, [isOpen]);
+
+  // Load stakeholders for selected coordinator's district when coordinator changes
+  useEffect(() => {
+    const fetchStakeholdersForCoordinator = async () => {
+      try {
+        if (!coordinator) {
+          setStakeholderOptions([]);
+
+          return;
+        }
+
+        const token =
+          localStorage.getItem("unite_token") ||
+          sessionStorage.getItem("unite_token");
+        const headers: any = { "Content-Type": "application/json" };
+
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        // Fetch coordinator details to get district id
+        let districtId: any = null;
+
+        try {
+          const coordRes = await fetch(
+            `${API_URL}/api/coordinators/${encodeURIComponent(coordinator)}`,
+            { headers, credentials: "include" },
+          );
+          const coordBody = await coordRes.json();
+
+          const coordData = coordBody?.data || coordBody;
+
+          districtId =
+            coordData?.District_ID ||
+            coordData?.District?.District_ID ||
+            coordData?.District_Id ||
+            coordData?.district_id ||
+            coordData?.district ||
+            null;
+        } catch (e) {
+          // ignore
+        }
+
+        if (!districtId) {
+          setStakeholderOptions([]);
+
+          return;
+        }
+
+        const stRes = await fetch(
+          `${API_URL}/api/stakeholders?district_id=${encodeURIComponent(String(districtId))}`,
+          { headers, credentials: "include" },
+        );
+        const stBody = await stRes.json();
+
+        if (stRes.ok && Array.isArray(stBody.data)) {
+          const opts = (stBody.data || []).map((s: any) => ({
+            key: s.Stakeholder_ID || s.StakeholderId || s.id,
+            label:
+              `${s.firstName || s.First_Name || ""} ${s.lastName || s.Last_Name || ""}`.trim(),
+          }));
+
+          setStakeholderOptions(opts);
+          if (stakeholder && !opts.find((o: any) => o.key === stakeholder)) {
+            setStakeholder("");
+          }
+        } else {
+          setStakeholderOptions([]);
+        }
+      } catch (err) {
+        console.warn("Failed to load stakeholders", err);
+        setStakeholderOptions([]);
+      }
+    };
+
+    fetchStakeholdersForCoordinator();
+  }, [coordinator]);
 
   // Validate date when it changes
   useEffect(() => {
@@ -1037,6 +1557,7 @@ export const CreateBloodDriveEventModal: React.FC<
     const eventData: BloodDriveEventData = {
       eventTitle,
       coordinator,
+      stakeholder,
       date: date ? new Date(date).toDateString() : "",
       startTime: startISO,
       endTime: endISO,
@@ -1155,6 +1676,94 @@ export const CreateBloodDriveEventModal: React.FC<
                     value={selected?.label || ""}
                     variant="bordered"
                   />
+                );
+              })()}
+            </div>
+
+            {/* Stakeholder - appears immediately below Coordinator */}
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">
+                Stakeholder
+              </label>
+              {(() => {
+                const rawUser =
+                  typeof window !== "undefined"
+                    ? localStorage.getItem("unite_user")
+                    : null;
+                const user = rawUser ? JSON.parse(rawUser) : null;
+                const isStakeholder = !!(
+                  user?.Stakeholder_ID ||
+                  (user?.id && user.id.toLowerCase().startsWith("stkh_"))
+                );
+
+                if (isStakeholder) {
+                  const name =
+                    `${user?.firstName || user?.First_Name || ""} ${user?.lastName || user?.Last_Name || ""}`.trim();
+
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={name || "Stakeholder"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                if (!coordinator) {
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={"Select a coordinator first"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                const available = stakeholderOptions.length;
+
+                if (available === 0) {
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={"No stakeholders available"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                return (
+                  <Select
+                    classNames={{
+                      trigger:
+                        "border-default-200 hover:border-default-400 h-10",
+                      value: "text-sm",
+                    }}
+                    placeholder="Select one (optional)"
+                    selectedKeys={stakeholder ? [stakeholder] : []}
+                    variant="bordered"
+                    onSelectionChange={(keys) =>
+                      setStakeholder(Array.from(keys)[0] as string)
+                    }
+                  >
+                    {stakeholderOptions.map((s) => (
+                      <SelectItem key={s.key}>{s.label}</SelectItem>
+                    ))}
+                  </Select>
                 );
               })()}
             </div>
@@ -1378,6 +1987,7 @@ interface CreateAdvocacyEventModalProps {
 
 interface AdvocacyEventData {
   coordinator: string;
+  stakeholder?: string;
   eventTitle: string;
   audienceType: string;
   date: string;
@@ -1398,6 +2008,10 @@ export const CreateAdvocacyEventModal: React.FC<
   CreateAdvocacyEventModalProps
 > = ({ isOpen, onClose, onConfirm, isSubmitting, error }) => {
   const [coordinator, setCoordinator] = useState("");
+  const [stakeholder, setStakeholder] = useState("");
+  const [stakeholderOptions, setStakeholderOptions] = useState<
+    { key: string; label: string }[]
+  >([]);
   const [eventTitle, setEventTitle] = useState("");
   const [titleTouched, setTitleTouched] = useState(false);
   const [audienceType, setAudienceType] = useState("");
@@ -1479,8 +2093,142 @@ export const CreateAdvocacyEventModal: React.FC<
 
             setCoordinatorOptions(opts);
 
+            // Prefill stakeholder if the authenticated user is a stakeholder
+            try {
+              const raw = localStorage.getItem("unite_user");
+              const u = raw ? JSON.parse(raw) : null;
+              const roleStr = String(
+                u?.staff_type || u?.role || "",
+              ).toLowerCase();
+
+              if (u && roleStr.includes("stakeholder")) {
+                const sid = u.Stakeholder_ID || u.StakeholderId || u.id;
+
+                if (sid) {
+                  setStakeholder(String(sid));
+                  setStakeholderOptions([
+                    {
+                      key: String(sid),
+                      label:
+                        `${u.firstName || u.First_Name || ""} ${u.lastName || u.Last_Name || ""}`.trim(),
+                    },
+                  ]);
+                }
+              }
+            } catch (e) {}
+
             return;
           }
+        }
+
+        // Special handling for stakeholders: auto-select their coordinator and themselves
+        const isStakeholder = !!(
+          user?.Stakeholder_ID ||
+          (user?.id && user.id.toLowerCase().startsWith("stkh_"))
+        );
+
+        console.log(
+          "Stakeholder check: isStakeholder =",
+          isStakeholder,
+          "user =",
+          user,
+          "info =",
+          info,
+        );
+        if (user && isStakeholder) {
+          const sid =
+            info?.raw?.id ||
+            user.Stakeholder_ID ||
+            user.StakeholderId ||
+            user.id;
+
+          console.log("Stakeholder detected: sid =", sid);
+          if (sid) {
+            try {
+              const stRes = await fetch(
+                `${API_URL}/api/stakeholders/${encodeURIComponent(sid)}`,
+                { headers, credentials: "include" },
+              );
+              const stBody = await stRes.json();
+
+              console.log("Stakeholder fetch response:", stRes.ok, stBody);
+              if (stRes.ok && stBody.data) {
+                const st = stBody.data;
+                const districtId = st.district;
+
+                console.log("Stakeholder district ID:", districtId);
+                if (districtId) {
+                  const coordRes = await fetch(
+                    `${API_URL}/api/coordinators?district_id=${encodeURIComponent(districtId)}`,
+                    { headers, credentials: "include" },
+                  );
+                  const coordBody = await coordRes.json();
+
+                  console.log(
+                    "Coordinator fetch response:",
+                    coordRes.ok,
+                    coordBody,
+                  );
+                  if (
+                    coordRes.ok &&
+                    coordBody.data &&
+                    Array.isArray(coordBody.data) &&
+                    coordBody.data.length > 0
+                  ) {
+                    const coordOpts = coordBody.data.map((c: any) => {
+                      const staff = c.Staff || c.staff || null;
+                      const district = c.District || c.district || null;
+                      const fullName = staff
+                        ? [staff.First_Name, staff.Middle_Name, staff.Last_Name]
+                            .filter(Boolean)
+                            .join(" ")
+                            .trim()
+                        : c.StaffName || c.label || "";
+                      const districtLabel = district?.District_Number
+                        ? `District ${district.District_Number}`
+                        : district?.District_Name || "";
+
+                      return {
+                        key: c.Coordinator_ID || (staff && staff.ID) || c.id,
+                        label: `${fullName}${districtLabel ? " - " + districtLabel : ""}`,
+                      };
+                    });
+
+                    setCoordinatorOptions(coordOpts);
+                    if (coordOpts.length > 0) {
+                      setCoordinator(coordOpts[0].key);
+                      console.log(
+                        "Coordinator set to:",
+                        coordOpts[0].key,
+                        coordOpts[0].label,
+                      );
+                    }
+                  } else {
+                    console.error(
+                      "No coordinators found for district:",
+                      districtId,
+                    );
+                  }
+                } else {
+                  console.error("No district ID found for stakeholder");
+                }
+                // Set stakeholder to themselves
+                setStakeholder(String(sid));
+                setStakeholderOptions([
+                  {
+                    key: String(sid),
+                    label:
+                      `${st.firstName || st.First_Name || ""} ${st.lastName || st.Last_Name || ""}`.trim(),
+                  },
+                ]);
+                console.log("Set stakeholder for stakeholder user");
+              }
+            } catch (e) {
+              console.error("Failed to fetch for stakeholder", e);
+            }
+          }
+
+          return;
         }
 
         if (user) {
@@ -1627,6 +2375,81 @@ export const CreateAdvocacyEventModal: React.FC<
     if (isOpen) fetchCoordinators();
   }, [isOpen]);
 
+  // Load stakeholders for selected coordinator's district when coordinator changes
+  useEffect(() => {
+    const fetchStakeholdersForCoordinator = async () => {
+      try {
+        if (!coordinator) {
+          setStakeholderOptions([]);
+
+          return;
+        }
+
+        const token =
+          localStorage.getItem("unite_token") ||
+          sessionStorage.getItem("unite_token");
+        const headers: any = { "Content-Type": "application/json" };
+
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        // Fetch coordinator details to get district id
+        let districtId: any = null;
+
+        try {
+          const coordRes = await fetch(
+            `${API_URL}/api/coordinators/${encodeURIComponent(coordinator)}`,
+            { headers, credentials: "include" },
+          );
+          const coordBody = await coordRes.json();
+
+          const coordData = coordBody?.data || coordBody;
+
+          districtId =
+            coordData?.District_ID ||
+            coordData?.District?.District_ID ||
+            coordData?.District_Id ||
+            coordData?.district_id ||
+            coordData?.district ||
+            null;
+        } catch (e) {
+          // ignore
+        }
+
+        if (!districtId) {
+          setStakeholderOptions([]);
+
+          return;
+        }
+
+        const stRes = await fetch(
+          `${API_URL}/api/stakeholders?district_id=${encodeURIComponent(String(districtId))}`,
+          { headers, credentials: "include" },
+        );
+        const stBody = await stRes.json();
+
+        if (stRes.ok && Array.isArray(stBody.data)) {
+          const opts = (stBody.data || []).map((s: any) => ({
+            key: s.Stakeholder_ID || s.StakeholderId || s.id,
+            label:
+              `${s.firstName || s.First_Name || ""} ${s.lastName || s.Last_Name || ""}`.trim(),
+          }));
+
+          setStakeholderOptions(opts);
+          if (stakeholder && !opts.find((o: any) => o.key === stakeholder)) {
+            setStakeholder("");
+          }
+        } else {
+          setStakeholderOptions([]);
+        }
+      } catch (err) {
+        console.warn("Failed to load stakeholders", err);
+        setStakeholderOptions([]);
+      }
+    };
+
+    fetchStakeholdersForCoordinator();
+  }, [coordinator]);
+
   // Validate date when it changes
   useEffect(() => {
     if (date) {
@@ -1690,6 +2513,7 @@ export const CreateAdvocacyEventModal: React.FC<
     const eventData: AdvocacyEventData = {
       eventTitle,
       coordinator,
+      stakeholder,
       audienceType,
       date: date ? new Date(date).toDateString() : "",
       startTime: startISO,
@@ -1807,6 +2631,94 @@ export const CreateAdvocacyEventModal: React.FC<
                     value={selected?.label || ""}
                     variant="bordered"
                   />
+                );
+              })()}
+            </div>
+
+            {/* Stakeholder - appears immediately below Coordinator */}
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">
+                Stakeholder
+              </label>
+              {(() => {
+                const rawUser =
+                  typeof window !== "undefined"
+                    ? localStorage.getItem("unite_user")
+                    : null;
+                const user = rawUser ? JSON.parse(rawUser) : null;
+                const isStakeholder = !!(
+                  user?.Stakeholder_ID ||
+                  (user?.id && user.id.toLowerCase().startsWith("stkh_"))
+                );
+
+                if (isStakeholder) {
+                  const name =
+                    `${user?.firstName || user?.First_Name || ""} ${user?.lastName || user?.Last_Name || ""}`.trim();
+
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={name || "Stakeholder"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                if (!coordinator) {
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={"Select a coordinator first"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                const available = stakeholderOptions.length;
+
+                if (available === 0) {
+                  return (
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-default-200 h-10 bg-default-100",
+                        input: "text-sm",
+                      }}
+                      type="text"
+                      value={"No stakeholders available"}
+                      variant="bordered"
+                    />
+                  );
+                }
+
+                return (
+                  <Select
+                    classNames={{
+                      trigger:
+                        "border-default-200 hover:border-default-400 h-10",
+                      value: "text-sm",
+                    }}
+                    placeholder="Select one (optional)"
+                    selectedKeys={stakeholder ? [stakeholder] : []}
+                    variant="bordered"
+                    onSelectionChange={(keys) =>
+                      setStakeholder(Array.from(keys)[0] as string)
+                    }
+                  >
+                    {stakeholderOptions.map((s) => (
+                      <SelectItem key={s.key}>{s.label}</SelectItem>
+                    ))}
+                  </Select>
                 );
               })()}
             </div>
