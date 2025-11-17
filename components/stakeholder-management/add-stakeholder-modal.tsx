@@ -580,7 +580,7 @@ export default function AddStakeholderModal({
           null;
 
         // If still no district id, try fetching the coordinator/stakeholder record from backend
-        if (!uid) {
+        if (!uid && !isSysAdmin) {
           const infoId =
             info?.raw?.id || info?.raw?.ID || parsed?.id || parsed?.ID || null;
 

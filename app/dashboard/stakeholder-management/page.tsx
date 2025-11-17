@@ -39,6 +39,7 @@ export default function StakeholderManagement() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
+  const [signupRequests, setSignupRequests] = useState<any[]>([]);
   const [stakeholders, setStakeholders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,12 +68,11 @@ export default function StakeholderManagement() {
   const [municipalityCache, setMunicipalityCache] = useState<
     Record<string, string>
   >({});
-  const [userDistrictId, setUserDistrictId] = useState<string | null>(null);
-  // userDistrictId that is explicitly passed when opening the Add modal so
-  // modal receives the computed value immediately (avoids React state async race)
-  const [openUserDistrictId, setOpenUserDistrictId] = useState<string | null>(
-    null,
-  );
+  const [isAcceptModalOpen, setIsAcceptModalOpen] = useState(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [pendingAcceptId, setPendingAcceptId] = useState<string | null>(null);
+  const [pendingRejectId, setPendingRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   // Do not call getUserInfo() synchronously — read it on mount so server and client
   // produce the same initial HTML; update user-derived state after hydration.
@@ -80,6 +80,10 @@ export default function StakeholderManagement() {
   const [displayName, setDisplayName] = useState("Bicol Medical Center");
   const [displayEmail, setDisplayEmail] = useState("bmc@gmail.com");
   const [canManageStakeholders, setCanManageStakeholders] = useState(false);
+  const [userDistrictId, setUserDistrictId] = useState<string | null>(null);
+  const [openUserDistrictId, setOpenUserDistrictId] = useState<string | null>(
+    null,
+  );
   const router = useRouter();
 
   useEffect(() => {
@@ -619,6 +623,7 @@ export default function StakeholderManagement() {
     setIsDeleteModalOpen(true);
   };
 
+  // Confirm delete stakeholder
   const confirmDeleteStakeholder = async (id: string) => {
     try {
       setLoading(true);
@@ -775,12 +780,8 @@ export default function StakeholderManagement() {
       if (af.province) params.set("province", String(af.province));
 
       const url = base
-        ? useAdminEndpoint
-          ? `${base}/api/admin/${encodeURIComponent(adminId)}/stakeholders?${params.toString()}`
-          : `${base}/api/stakeholders?${params.toString()}`
-        : useAdminEndpoint
-          ? `/api/admin/${encodeURIComponent(adminId)}/stakeholders?${params.toString()}`
-          : `/api/stakeholders?${params.toString()}`;
+        ? `${base}/api/stakeholders?${params.toString()}`
+        : `/api/stakeholders?${params.toString()}`;
 
       // Debug: log computed request details so we can verify coordinator filtering
       // removed verbose request debug logging
@@ -1630,9 +1631,112 @@ export default function StakeholderManagement() {
     fetchStakeholders({ ...(filters as any), q: searchQuery || undefined });
   }, [searchQuery]);
 
+  async function fetchSignupRequests() {
+    setLoading(true);
+    try {
+      const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+      const url = base ? `${base}/api/signup-requests` : `/api/signup-requests`;
+      const token =
+        typeof window !== "undefined"
+          ? localStorage.getItem("unite_token") ||
+            sessionStorage.getItem("unite_token")
+          : null;
+      const headers: any = {};
+
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(url, { headers });
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : null;
+
+      if (!res.ok) throw new Error(json?.message || "Failed to fetch requests");
+      const items = json.data || [];
+      // Populate with resolved names
+      const mapped = items.map((req: any) => ({
+        id: req._id,
+        name: `${req.firstName} ${req.middleName || ''} ${req.lastName}`.trim(),
+        email: req.email,
+        phone: req.phoneNumber,
+        organization: req.organization || '',
+        province: req.province?.name || req.province?.Province_Name || provincesMap[req.province] || req.province,
+        district: req.district?.name || req.district?.District_Name || districtsMap?.[req.district]?.name || req.district,
+        municipality: req.municipality?.name || req.municipality?.Name || req.municipality?.City_Municipality || municipalityCache[req.municipality] || req.municipality,
+        status: req.status,
+        submittedAt: new Date(req.submittedAt).toLocaleDateString(),
+      }));
+
+      setSignupRequests(mapped);
+    } catch (err: any) {
+      console.error("Failed to fetch signup requests:", err);
+      setError(err.message || "Failed to fetch signup requests");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchStakeholders();
+    fetchSignupRequests();
   }, []);
+
+  const handleAcceptRequest = async (id: string) => {
+    setPendingAcceptId(id);
+    setIsAcceptModalOpen(true);
+  };
+
+  const confirmAcceptRequest = async () => {
+    if (!pendingAcceptId) return;
+    setIsAcceptModalOpen(false);
+    try {
+      const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+      const url = base ? `${base}/api/signup-requests/${pendingAcceptId}/approve` : `/api/signup-requests/${pendingAcceptId}/approve`;
+      const token = typeof window !== "undefined" ? localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token") : null;
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(url, { method: "PUT", headers });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(errorData.message || "Failed to accept request");
+      }
+      // Refresh both lists
+      await fetchStakeholders();
+      await fetchSignupRequests();
+    } catch (err: any) {
+      console.error("Failed to accept request:", err);
+      setError(err.message || "Failed to accept request");
+    } finally {
+      setPendingAcceptId(null);
+    }
+  };
+
+  const handleRejectRequest = async (id: string) => {
+    setPendingRejectId(id);
+    setIsRejectModalOpen(true);
+  };
+
+  const confirmRejectRequest = async () => {
+    if (!pendingRejectId) return;
+    setIsRejectModalOpen(false);
+    try {
+      const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+      const url = base ? `${base}/api/signup-requests/${pendingRejectId}/reject` : `/api/signup-requests/${pendingRejectId}/reject`;
+      const token = typeof window !== "undefined" ? localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token") : null;
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ reason: rejectReason }) });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(errorData.message || "Failed to reject request");
+      }
+      // Remove the rejected request from local state since it's deleted
+      setSignupRequests(prev => prev.filter(req => req.id !== pendingRejectId));
+      setRejectReason("");
+    } catch (err: any) {
+      console.error("Failed to reject request:", err);
+      setError(err.message || "Failed to reject request");
+    } finally {
+      setPendingRejectId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -1669,7 +1773,9 @@ export default function StakeholderManagement() {
         {error && <p className="text-sm text-red-500">{error}</p>}
         <StakeholderTable
           coordinators={
-            selectedTab === "all"
+            selectedTab === "pending"
+              ? signupRequests
+              : selectedTab === "all"
               ? stakeholders
               : stakeholders.filter((s: any) => {
                   const statusRaw =
@@ -1682,14 +1788,6 @@ export default function StakeholderManagement() {
                       st.includes("completed") ||
                       st.includes("approved")
                     );
-                  if (selectedTab === "pending")
-                    return (
-                      st.includes("pending") ||
-                      st.includes("awaiting") ||
-                      st.includes("wait")
-                    );
-                  if (selectedTab === "rejected")
-                    return st.includes("reject") || st.includes("rejected");
 
                   return true;
                 })
@@ -1704,6 +1802,9 @@ export default function StakeholderManagement() {
           searchQuery={searchQuery}
           // Pass true only when user is both a system admin and has StaffType='Admin'
           isAdmin={canManageStakeholders}
+          isRequests={selectedTab === "pending"}
+          onAcceptRequest={handleAcceptRequest}
+          onRejectRequest={handleRejectRequest}
         />
       </div>
 
@@ -1773,6 +1874,83 @@ export default function StakeholderManagement() {
         onClose={() => setOpenAdvancedFilter(false)}
       />
       {/* Generate code modal removed from toolbar per new design */}
+
+      {/* Accept Request Confirmation Modal */}
+      {isAcceptModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 9999 }}>
+          <div
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl border border-gray-200"
+            style={{ zIndex: 10000, position: 'relative', minHeight: '200px' }}
+          >
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Confirm Acceptance</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to accept this signup request? This will create a stakeholder account and send a confirmation email to the user.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                onClick={() => {
+                  setIsAcceptModalOpen(false);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700"
+                onClick={() => {
+                  confirmAcceptRequest();
+                }}
+              >
+                Accept Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Request Confirmation Modal */}
+      {isRejectModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex: 9999 }}>
+          <div
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl border border-gray-200"
+            style={{ zIndex: 10000, position: 'relative', minHeight: '250px' }}
+          >
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Confirm Rejection</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Are you sure you want to reject this signup request? This action cannot be undone and the request will be permanently deleted.
+            </p>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Reason for rejection (optional)
+              </label>
+              <textarea
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                rows={3}
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Please provide a reason for rejection..."
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                onClick={() => {
+                  setIsRejectModalOpen(false);
+                  setRejectReason("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700"
+                onClick={confirmRejectRequest}
+              >
+                Reject Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

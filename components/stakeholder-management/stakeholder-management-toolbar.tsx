@@ -51,7 +51,6 @@ export default function StakeholderToolbar({
             <Tab key="all" title="All" />
             <Tab key="approved" title="Approved" />
             <Tab key="pending" title="Pending" />
-            <Tab key="rejected" title="Rejected" />
           </Tabs>
 
           <Input

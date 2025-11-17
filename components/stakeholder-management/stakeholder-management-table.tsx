@@ -1,5 +1,5 @@
 "use client";
-import { MoreHorizontal, Edit3, Trash2 } from "lucide-react";
+import { MoreHorizontal, Edit3, Trash2, Check, X } from "lucide-react";
 import { Checkbox } from "@heroui/checkbox";
 import { Button } from "@heroui/button";
 import {
@@ -34,6 +34,9 @@ interface StakeholderTableProps {
   searchQuery: string;
   isAdmin?: boolean;
   municipalityCache?: Record<string, string>;
+  isRequests?: boolean;
+  onAcceptRequest?: (id: string) => void;
+  onRejectRequest?: (id: string) => void;
 }
 
 export default function StakeholderTable({
@@ -47,6 +50,9 @@ export default function StakeholderTable({
   searchQuery,
   isAdmin,
   municipalityCache,
+  isRequests = false,
+  onAcceptRequest,
+  onRejectRequest,
 }: StakeholderTableProps) {
   const [, /*unused*/ setUnused] = useState(false);
 
@@ -177,39 +183,68 @@ export default function StakeholderTable({
                       aria-label="Stakeholder actions"
                       variant="faded"
                     >
-                      <DropdownSection title="Actions">
-                        <DropdownItem
-                          key="update"
-                          description="Edit the stakeholder's details"
-                          startContent={<Edit3 />}
-                          onPress={() => {
-                            if (onUpdateCoordinator)
-                              onUpdateCoordinator(coordinator.id);
-                          }}
-                        >
-                          Update stakeholder
-                        </DropdownItem>
-                      </DropdownSection>
-                      <DropdownSection title="Danger zone">
-                        <DropdownItem
-                          key="delete"
-                          className="text-danger"
-                          color="danger"
-                          description="Permanently remove this stakeholder"
-                          startContent={
-                            <Trash2 className="text-xl text-danger pointer-events-none shrink-0" />
-                          }
-                          onPress={() => {
-                            if (onDeleteCoordinator)
-                              onDeleteCoordinator(
-                                coordinator.id,
-                                coordinator.name,
-                              );
-                          }}
-                        >
-                          Delete stakeholder
-                        </DropdownItem>
-                      </DropdownSection>
+                      {isRequests ? (
+                        <DropdownSection title="Actions">
+                          <DropdownItem
+                            key="accept"
+                            description="Approve this signup request"
+                            startContent={<Check className="text-green-600" />}
+                            onPress={() => {
+                              if (onAcceptRequest) onAcceptRequest(coordinator.id);
+                            }}
+                          >
+                            Accept Request
+                          </DropdownItem>
+                          <DropdownItem
+                            key="reject"
+                            className="text-danger"
+                            color="danger"
+                            description="Reject this signup request"
+                            startContent={<X className="text-red-600" />}
+                            onPress={() => {
+                              if (onRejectRequest) onRejectRequest(coordinator.id);
+                            }}
+                          >
+                            Reject Request
+                          </DropdownItem>
+                        </DropdownSection>
+                      ) : (
+                        <>
+                          <DropdownSection title="Actions">
+                            <DropdownItem
+                              key="update"
+                              description="Edit the stakeholder's details"
+                              startContent={<Edit3 />}
+                              onPress={() => {
+                                if (onUpdateCoordinator)
+                                  onUpdateCoordinator(coordinator.id);
+                              }}
+                            >
+                              Update stakeholder
+                            </DropdownItem>
+                          </DropdownSection>
+                          <DropdownSection title="Danger zone">
+                            <DropdownItem
+                              key="delete"
+                              className="text-danger"
+                              color="danger"
+                              description="Permanently remove this stakeholder"
+                              startContent={
+                                <Trash2 className="text-xl text-danger pointer-events-none shrink-0" />
+                              }
+                              onPress={() => {
+                                if (onDeleteCoordinator)
+                                  onDeleteCoordinator(
+                                    coordinator.id,
+                                    coordinator.name,
+                                  );
+                              }}
+                            >
+                              Delete stakeholder
+                            </DropdownItem>
+                          </DropdownSection>
+                        </>
+                      )}
                     </DropdownMenu>
                   </Dropdown>
                 </td>
@@ -222,7 +257,9 @@ export default function StakeholderTable({
       {/* Empty State */}
       {filteredCoordinators.length === 0 && (
         <div className="px-6 py-12 text-center bg-white">
-          <p className="text-gray-500 text-sm">No stakeholders found</p>
+          <p className="text-gray-500 text-sm">
+            {isRequests ? "No signup requests found" : "No stakeholders found"}
+          </p>
           {searchQuery && (
             <p className="text-gray-400 text-xs mt-1">
               Try adjusting your search query
