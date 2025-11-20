@@ -58,6 +58,19 @@ export default function StakeholderTable({
 }: StakeholderTableProps) {
   const [, /*unused*/ setUnused] = useState(false);
 
+  const displayValue = (v: any, fallback = "—") => {
+    if (v === null || v === undefined) return fallback;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+      return String(v);
+    // Common server shapes: object with `name`, `Province_Name`, `District_Name`, `City_Municipality`, or `_id`
+    if (typeof v === "object") {
+      return (
+        v.name || v.Name || v.Province_Name || v.District_Name || v.City_Municipality || v.City || v.label || v._id || v.id || fallback
+      );
+    }
+    return fallback;
+  };
+
   const filteredCoordinators = coordinators.filter((coordinator) => {
     const q = searchQuery.toLowerCase();
 
@@ -229,19 +242,18 @@ export default function StakeholderTable({
                   {coordinator.phone}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {coordinator.organization || coordinator.entity || "—"}
+                  {displayValue(coordinator.organization || coordinator.entity)}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {coordinator.province || "—"}
+                  {displayValue(coordinator.province)}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {coordinator.district || "—"}
+                  {displayValue(coordinator.district)}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {(municipalityCache &&
-                    municipalityCache[String(coordinator.municipality)]) ||
-                    coordinator.municipality ||
-                    "—"}
+                  {displayValue(
+                    (municipalityCache && municipalityCache[String(coordinator.municipality)]) || coordinator.municipality,
+                  )}
                 </td>
                 <td className="px-6 py-4">
                   <Dropdown>
