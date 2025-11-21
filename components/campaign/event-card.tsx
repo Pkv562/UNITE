@@ -117,6 +117,7 @@ const EventCard: React.FC<EventCardProps> = ({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [successModal, setSuccessModal] = useState(false);
   const [fullRequest, setFullRequest] = useState<any>(null);
+  const [resolvedGeo, setResolvedGeo] = useState<any>({});
 
   const resolvedRequest =
     fullRequest ||
@@ -616,6 +617,93 @@ const EventCard: React.FC<EventCardProps> = ({
       }
 
       setFullRequest(finalRequest || r);
+      // Try to resolve district/province names when opening modal
+      (async () => {
+        try {
+          const rr = finalRequest || r || {};
+          const pickId =
+            rr?.district || rr?.District || rr?.districtId || rr?.District_ID || rr?.district_id || null;
+
+          const isObjectId = (s: any) => typeof s === "string" && /^[a-f0-9]{24}$/i.test(s);
+
+          if (pickId && isObjectId(pickId)) {
+            try {
+              const token =
+                typeof window !== "undefined"
+                  ? localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token")
+                  : null;
+              const headers: any = { "Content-Type": "application/json" };
+              if (token) headers["Authorization"] = `Bearer ${token}`;
+
+              // First try the direct lookup (this endpoint expects `District_ID` normally)
+              let foundDistrict: any = null;
+              try {
+                const res = await fetch(
+                  `${API_BASE}/api/districts/${encodeURIComponent(pickId)}`,
+                  { headers, credentials: token ? undefined : "include" },
+                );
+
+                if (res && res.ok) {
+                  const body = await res.json().catch(() => null);
+                  const data = body?.data || body?.district || body;
+                  foundDistrict = data || null;
+                }
+              } catch (e) {
+                // ignore direct lookup failure and try fallback
+              }
+
+              // Fallback: list districts (large limit) and search by Mongo _id
+              if (!foundDistrict) {
+                try {
+                  const listRes = await fetch(`${API_BASE}/api/districts?page=1&limit=1000`, {
+                    headers,
+                    credentials: token ? undefined : "include",
+                  });
+
+                  if (listRes && listRes.ok) {
+                    const listBody = await listRes.json().catch(() => null);
+                    const list = listBody?.data || listBody?.districts || listBody || [];
+                    if (Array.isArray(list) && list.length) {
+                      const match = list.find((d: any) => String(d._id) === String(pickId) || String(d.District_ID) === String(pickId));
+                      if (match) foundDistrict = match;
+                    }
+                  }
+                } catch (e) {
+                  // ignore
+                }
+              }
+
+              if (foundDistrict) {
+                const districtName = foundDistrict?.District_Name || foundDistrict?.DistrictName || foundDistrict?.name || foundDistrict?.Name || null;
+                let provinceName = foundDistrict?.Province_Name || foundDistrict?.ProvinceName || foundDistrict?.province || foundDistrict?.Province || null;
+
+                // If provinceName looks like a Mongo _id, try to resolve via provinces list
+                const isObjectId = (s: any) => typeof s === "string" && /^[a-f0-9]{24}$/i.test(s);
+                if (provinceName && isObjectId(provinceName)) {
+                  try {
+                    const provRes = await fetch(`${API_BASE}/api/locations/provinces`, { headers, credentials: token ? undefined : "include" });
+                    if (provRes && provRes.ok) {
+                      const provBody = await provRes.json().catch(() => null);
+                      const provList = provBody?.data || provBody || [];
+                      if (Array.isArray(provList)) {
+                        const matchProv = provList.find((p: any) => String(p._id) === String(provinceName) || String(p.Province_ID) === String(provinceName));
+                        if (matchProv) provinceName = matchProv?.name || matchProv?.Province_Name || matchProv?.ProvinceName || null;
+                      }
+                    }
+                  } catch (e) {
+                    // ignore
+                  }
+                }
+
+                setResolvedGeo((prev: any) => ({ ...prev, district: districtName || null, province: provinceName || null }));
+              }
+            } catch (e) {
+              // ignore fetch errors
+            }
+          }
+        } catch (e) {}
+      })();
+
       setViewOpen(true);
     } catch (e) {
       // fallback to provided request
@@ -817,7 +905,8 @@ const EventCard: React.FC<EventCardProps> = ({
     if (allowedActionSet.size === 0) return null;
 
     const buttons: JSX.Element[] = [];
-
+    // Only show the core action set: Accept, Reschedule, Reject
+    // Reject is styled as a danger action to make it visually distinct.
     if (hasAllowedAction(["accept", "approve"])) {
       buttons.push(
         <Button
@@ -830,21 +919,6 @@ const EventCard: React.FC<EventCardProps> = ({
           }}
         >
           Accept
-        </Button>,
-      );
-    }
-
-    if (hasAllowedAction("reject")) {
-      buttons.push(
-        <Button
-          key="footer-reject"
-          variant="bordered"
-          onPress={() => {
-            setViewOpen(false);
-            setRejectOpen(true);
-          }}
-        >
-          Reject
         </Button>,
       );
     }
@@ -864,47 +938,18 @@ const EventCard: React.FC<EventCardProps> = ({
       );
     }
 
-    if (hasAllowedAction("confirm")) {
+    if (hasAllowedAction("reject")) {
       buttons.push(
         <Button
-          key="footer-confirm"
-          className="bg-black text-white"
-          color="default"
-          onPress={async () => {
-            await runStakeholderDecision("Accepted");
-          }}
-        >
-          Confirm
-        </Button>,
-      );
-    }
-
-    if (hasAllowedAction("decline")) {
-      buttons.push(
-        <Button
-          key="footer-decline"
-          variant="bordered"
-          onPress={async () => {
-            await runStakeholderDecision("Rejected");
-          }}
-        >
-          Decline
-        </Button>,
-      );
-    }
-
-    if (hasAllowedAction("cancel")) {
-      buttons.push(
-        <Button
-          key="footer-cancel"
+          key="footer-reject"
           color="danger"
           variant="bordered"
           onPress={() => {
             setViewOpen(false);
-            setCancelOpen(true);
+            setRejectOpen(true);
           }}
         >
-          Cancel Request
+          Reject
         </Button>,
       );
     }
@@ -1115,1102 +1160,148 @@ const EventCard: React.FC<EventCardProps> = ({
                 r?.event?.reviewSummary ||
                 r?.event?.reviewMessage ||
                 null;
-              const decisionSummary =
-                r?.decisionSummary ||
-                r?.event?.decisionSummary ||
-                null;
 
-              if (!reviewSummary && !decisionSummary) return null;
+              if (!reviewSummary) return null;
+
+              // helper to pick first available field from candidates
+              const pick = (...cands: any[]) => {
+                for (const c of cands) {
+                  if (c !== undefined && c !== null && c !== "") return c;
+                }
+                return null;
+              };
+
+              const requestedDateRaw = pick(
+                r?.RequestedDate,
+                r?.Date,
+                r?.requestedDate,
+                r?.event?.Start_Date,
+                r?.event?.Start,
+                null,
+              );
+
+              let startRaw = pick(
+                r?.StartTime,
+                r?.Start,
+                r?.start,
+                r?.event?.Start,
+                r?.event?.Start_Time,
+                null,
+              );
+              let endRaw = pick(
+                r?.EndTime,
+                r?.End,
+                r?.end,
+                r?.event?.End,
+                null,
+              );
+
+              // If time fields are missing, try to parse them from the message (e.g. "from 08:00–16:00")
+              if (!startRaw) {
+                const timeMatch = String(reviewSummary).match(/from\s+(\d{1,2}:\d{2})(?:\s*[–-]\s*(\d{1,2}:\d{2}))?/i);
+                if (timeMatch) {
+                  startRaw = timeMatch[1];
+                  if (timeMatch[2]) endRaw = timeMatch[2];
+                }
+              }
+
+              // If date missing, attempt to extract an ISO date like 2025-12-22 from the message
+              let inferredDate = requestedDateRaw;
+              if (!inferredDate) {
+                const dateMatch = String(reviewSummary).match(/(\d{4}-\d{2}-\d{2})/);
+                if (dateMatch) inferredDate = dateMatch[1];
+              }
+
+              const formatTime = (t?: any) => {
+                if (!t) return "";
+                try {
+                  let d = new Date(t);
+                  if (isNaN(d.getTime()) && inferredDate) {
+                    d = new Date(`${inferredDate}T${t}`);
+                  }
+                  if (isNaN(d.getTime())) return String(t);
+                  return d.toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  });
+                } catch (e) {
+                  return String(t);
+                }
+              };
+
+              const dateDisplay = formatDate(inferredDate as any);
+              const timeDisplay = startRaw ? `${formatTime(startRaw)}${endRaw ? " - " + formatTime(endRaw) : ""}` : "";
+
+              // Additional fields to display if present
+              const requester = pick(r?.createdByName, r?.RequesterName, r?.First_Name, r?.first_name, r?.Requester, r?.requesterName) || "—";
+
+              // Prefer resolved geo names fetched when opening the modal
+              let districtVal = resolvedGeo?.district || null;
+              let provinceVal = resolvedGeo?.province || null;
+              let municipalityVal = pick(r?.municipality, r?.Municipality, r?.MunicipalityName) || null;
+              let locationVal = pick(r?.Location, r?.location, r?.Venue, r?.venue) || null;
+              const eventType = pick(r?.Event_Type, r?.eventType, r?.Category, r?.category, r?.event?.Category) || "—";
+
+              // If location is still missing, try to parse it from the message (e.g. "Located at XYZ")
+              if (!locationVal) {
+                const locMatch = String(reviewSummary).match(/Located at\s+([^\.\n,]+)/i);
+                if (locMatch && locMatch[1]) {
+                  locationVal = locMatch[1].trim();
+                }
+              }
+
+              // Fallback to dash when unresolved
+              districtVal = districtVal || "—";
+              provinceVal = provinceVal || "—";
+              municipalityVal = municipalityVal || "—";
+              locationVal = locationVal || "—";
 
               return (
                 <div className="space-y-3 mb-4">
-                  {reviewSummary ? (
-                    <div className="p-3 border border-default-200 rounded-lg bg-default-50">
-                      <p className="text-sm font-medium text-default-900 mb-1">
-                        Request Message
-                      </p>
-                      <p className="text-xs text-default-700 whitespace-pre-line">
-                        {reviewSummary}
-                      </p>
+                  <div className="p-4 border border-default-200 rounded-lg bg-default-50">
+                    <p className="text-sm font-semibold text-default-900 mb-2">Request Message</p>
+                    <p className="text-sm text-default-800 whitespace-pre-line">{reviewSummary}</p>
+
+                    <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-default-700 font-semibold">Requester</p>
+                        <p className="text-default-800 font-medium">{requester}</p>
+
+                        <p className="mt-3 text-default-700 font-semibold">Province</p>
+                        <p className="text-default-800">{provinceVal}</p>
+
+                        <p className="mt-3 text-default-700 font-semibold">District</p>
+                        <p className="text-default-800">{districtVal}</p>
+
+                        <p className="mt-3 text-default-700 font-semibold">Municipality</p>
+                        <p className="text-default-800">{municipalityVal}</p>
+                      </div>
+
+                      <div>
+                        <p className="text-default-700 font-semibold">Date</p>
+                        <p className="text-default-800 font-medium">{dateDisplay}</p>
+
+                        <p className="mt-3 text-default-700 font-semibold">Time</p>
+                        <p className="text-default-800">{timeDisplay || "—"}</p>
+
+                        <p className="mt-3 text-default-700 font-semibold">Location</p>
+                        <p className="text-default-800">{locationVal}</p>
+
+                        <p className="mt-3 text-default-700 font-semibold">Event Type</p>
+                        <p className="text-default-800">{eventType}</p>
+                      </div>
                     </div>
-                  ) : null}
-                  {decisionSummary ? (
-                    <div className="p-3 border border-default-200 rounded-lg bg-default-50">
-                      <p className="text-sm font-medium text-default-900 mb-1">
-                        Latest Decision
-                      </p>
-                      <p className="text-xs text-default-700 whitespace-pre-line">
-                        {decisionSummary}
-                      </p>
-                    </div>
-                  ) : null}
+                  </div>
                 </div>
               );
             })()}
-            {(() => {
-              const r =
-                fullRequest ||
-                request ||
-                (request && (request as any).event) ||
-                {};
-              const adminAction =
-                (r as any).AdminAction ?? (r as any).adminAction ?? null;
-              const stakeholderAction =
-                (r as any).StakeholderFinalAction ??
-                (r as any).stakeholderFinalAction ??
-                null;
-              const isEdit =
-                r.originalData && Object.keys(r.originalData).length > 0;
-              const isRescheduled =
-                adminAction &&
-                String(adminAction).toLowerCase().includes("resched");
-              const isStakeholderRescheduled =
-                stakeholderAction &&
-                String(stakeholderAction).toLowerCase().includes("resched");
-              const isRejected =
-                adminAction &&
-                String(adminAction).toLowerCase().includes("reject");
-              const isCancelled =
-                adminAction &&
-                String(adminAction).toLowerCase().includes("cancel");
-
-              if (isStakeholderRescheduled) {
-                // Stakeholder rescheduled request
-                return (
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-medium">
-                        Stakeholder Rescheduled Event
-                      </h4>
-                    </div>
-                    <div>
-                      <p className="text-xs text-default-800">
-                        Original Date:{" "}
-                        {r?.RequestedDate || r?.Date || date || "—"}
-                      </p>
-                      <p className="text-xs text-default-800">
-                        New Date:{" "}
-                        {formatDate(
-                          r?.RescheduledDate ||
-                            r?.Rescheduled_Date ||
-                            r?.rescheduledDate,
-                        )}
-                      </p>
-                      <p className="text-xs text-default-600">
-                        Note: {r?.StakeholderNote || "—"}
-                      </p>
-                    </div>
-                  </div>
-                );
-              } else if (isRescheduled) {
-                // Admin rescheduled request
-                return (
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-medium">Rescheduled Event</h4>
-                    </div>
-                    <div>
-                      <p className="text-xs text-default-800">
-                        Original Date:{" "}
-                        {r?.RequestedDate || r?.Date || date || "—"}
-                      </p>
-                      <p className="text-xs text-default-800">
-                        New Date:{" "}
-                        {formatDate(
-                          r?.RescheduledDate ||
-                            r?.Rescheduled_Date ||
-                            r?.rescheduledDate,
-                        )}
-                      </p>
-                      <p className="text-xs text-default-600">
-                        Note: {r?.AdminNote || "—"}
-                      </p>
-                    </div>
-                    {/* Stakeholder action if any */}
-                    {stakeholderAction ? (
-                      <div className="mt-2 p-2 border border-default-200 rounded">
-                        {(() => {
-                          const s = String(
-                            stakeholderAction || "",
-                          ).toLowerCase();
-
-                          if (s.includes("accept"))
-                            return (
-                              <div className="px-2 py-1 rounded-full bg-success-50 text-success-700 text-xs font-semibold inline-block">
-                                Stakeholder: Accepted
-                              </div>
-                            );
-                          if (s.includes("reject"))
-                            return (
-                              <div className="px-2 py-1 rounded-full bg-danger-50 text-danger-700 text-xs font-semibold inline-block">
-                                Stakeholder: Rejected
-                              </div>
-                            );
-
-                          return (
-                            <div className="px-2 py-1 rounded-full bg-default-50 text-default-700 text-xs font-semibold inline-block">
-                              Stakeholder: {String(stakeholderAction)}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              } else if (isEdit) {
-                // Admin rescheduled request
-                return (
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-medium">Rescheduled Event</h4>
-                    </div>
-                    <div>
-                      <p className="text-xs text-default-800">
-                        Original Date:{" "}
-                        {r?.RequestedDate || r?.Date || date || "—"}
-                      </p>
-                      <p className="text-xs text-default-800">
-                        New Date:{" "}
-                        {formatDate(
-                          r?.RescheduledDate ||
-                            r?.Rescheduled_Date ||
-                            r?.rescheduledDate,
-                        )}
-                      </p>
-                      <p className="text-xs text-default-600">
-                        Note: {r?.AdminNote || "—"}
-                      </p>
-                    </div>
-                    {/* Stakeholder action if any */}
-                    {stakeholderAction ? (
-                      <div className="mt-2 p-2 border border-default-200 rounded">
-                        {(() => {
-                          const s = String(
-                            stakeholderAction || "",
-                          ).toLowerCase();
-
-                          if (s.includes("accept"))
-                            return (
-                              <div className="px-2 py-1 rounded-full bg-success-50 text-success-700 text-xs font-semibold inline-block">
-                                Stakeholder: Accepted
-                              </div>
-                            );
-                          if (s.includes("reject"))
-                            return (
-                              <div className="px-2 py-1 rounded-full bg-danger-50 text-danger-700 text-xs font-semibold inline-block">
-                                Stakeholder: Rejected
-                              </div>
-                            );
-
-                          return (
-                            <div className="px-2 py-1 rounded-full bg-default-50 text-default-700 text-xs font-semibold inline-block">
-                              Stakeholder: {String(stakeholderAction)}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              } else if (isRejected) {
-                // Rejected request
-                return (
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-medium">Rejected Event</h4>
-                    </div>
-                    <div>
-                      <p className="text-xs text-default-800">
-                        Rejection Reason: {r?.AdminNote || "—"}
-                      </p>
-                    </div>
-                  </div>
-                );
-              } else if (isCancelled) {
-                // Cancelled request
-                return (
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-medium">Cancelled Event</h4>
-                    </div>
-                    <div>
-                      <p className="text-xs text-default-800">
-                        Cancellation Reason: {r?.AdminNote || "—"}
-                      </p>
-                    </div>
-                  </div>
-                );
-              } else {
-                // Creation request: show full details
-                const requesterName =
-                  r?.createdByName ||
-                  r?.RequesterName ||
-                  r?.First_Name ||
-                  r?.first_name ||
-                  null;
-                const requesterEmail =
-                  r?.Email || r?.email || r?.requesterEmail || null;
-                const requestedDate =
-                  r?.RequestedDate || r?.Date || date || null;
-                const startTime =
-                  r?.StartTime || r?.start_time || r?.Start || null;
-                const endTime = r?.EndTime || r?.end_time || r?.End || null;
-                const eventType =
-                  r?.Event_Type ||
-                  r?.eventType ||
-                  r?.Category ||
-                  r?.category ||
-                  r?.event?.Category ||
-                  r?.event?.category ||
-                  r?.event?.categoryData?.type ||
-                  category ||
-                  null;
-
-                return (
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-medium">Requester</h4>
-                      <p className="text-xs text-default-800">
-                        {requesterName || "—"}
-                      </p>
-                      <p className="text-xs text-default-600">
-                        {requesterEmail || "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-medium">
-                        Requested Date & Time
-                      </h4>
-                      <p className="text-xs text-default-800">
-                        {requestedDate || "—"}
-                      </p>
-                      {startTime || endTime ? (
-                        <p className="text-xs text-default-600">
-                          {startTime || "—"} — {endTime || "—"}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-medium">Event Type</h4>
-                      <p className="text-xs text-default-800">
-                        {eventType || "—"}
-                      </p>
-                    </div>
-                    {/* Event-type specific details */}
-                    {eventType &&
-                    String(eventType).toLowerCase().includes("blood") ? (
-                      <div>
-                        <h4 className="text-sm font-medium">
-                          Blood Drive Details
-                        </h4>
-                        {(() => {
-                          const candidates = [
-                            r?.blood_count,
-                            r?.Blood_Count,
-                            r?.bloodCount,
-                            r?.Target_Donation,
-                            r?.TargetDonation,
-                            r?.target_donation,
-                            r?.targetDonation,
-                            r?.BloodDrive?.Target_Donation,
-                            r?.bloodDrive?.Target_Donation,
-                            r?.event?.Target_Donation,
-                            r?.event?.TargetDonation,
-                            r?.event?.Target_Donation_Count,
-                            r?.event?.BloodDrive?.Target_Donation,
-                            r?.event?.bloodDrive?.Target_Donation,
-                            r?.event?.categoryData?.Target_Donation,
-                            r?.event?.categoryData?.TargetDonation,
-                            r?.event?.categoryData?.Target_Donation_Count,
-                            r?.categoryData?.Target_Donation,
-                            r?.categoryData?.TargetDonation,
-                            r?.category?.data?.Target_Donation,
-                            r?.category?.data?.TargetDonation,
-                          ];
-                          const found = candidates.find(
-                            (v) => v !== undefined && v !== null && v !== "",
-                          );
-                          const display =
-                            found !== undefined && found !== null
-                              ? String(found)
-                              : "—";
-
-                          return (
-                            <p className="text-xs text-default-800">
-                              Target donation / Blood count: {display}
-                            </p>
-                          );
-                        })()}
-                      </div>
-                    ) : null}
-                    {eventType &&
-                    String(eventType).toLowerCase().includes("training") ? (
-                      <div>
-                        <h4 className="text-sm font-medium">
-                          Training Details
-                        </h4>
-                        {(() => {
-                          const trainingType =
-                            r?.training_type ||
-                            r?.TrainingType ||
-                            r?.event?.categoryData?.TrainingType ||
-                            r?.event?.categoryData?.trainingType ||
-                            r?.category?.TrainingType ||
-                            r?.categoryData?.TrainingType ||
-                            null;
-                          const maxParticipants =
-                            r?.max_participants ||
-                            r?.MaxParticipants ||
-                            r?.event?.categoryData?.MaxParticipants ||
-                            r?.event?.categoryData?.maxParticipants ||
-                            r?.category?.MaxParticipants ||
-                            r?.categoryData?.MaxParticipants ||
-                            null;
-
-                          return (
-                            <>
-                              <p className="text-xs text-default-800">
-                                Training Type: {trainingType ?? "—"}
-                              </p>
-                              <p className="text-xs text-default-800">
-                                Max participants: {maxParticipants ?? "—"}
-                              </p>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    ) : null}
-                    {eventType &&
-                    String(eventType).toLowerCase().includes("advocacy") ? (
-                      <div>
-                        <h4 className="text-sm font-medium">
-                          Advocacy Details
-                        </h4>
-                        {(() => {
-                          const targetAudience =
-                            r?.event?.categoryData?.TargetAudience ||
-                            r?.TargetAudience ||
-                            r?.category?.TargetAudience ||
-                            r?.categoryData?.TargetAudience ||
-                            r?.target_audience ||
-                            r?.targetAudience ||
-                            null;
-                          const expectedSize =
-                            r?.event?.categoryData?.ExpectedAudienceSize ||
-                            r?.ExpectedAudienceSize ||
-                            r?.category?.ExpectedAudienceSize ||
-                            r?.categoryData?.ExpectedAudienceSize ||
-                            r?.expected_audience_size ||
-                            r?.ExpectedAudienceSize ||
-                            null;
-
-                          return (
-                            <>
-                              <p className="text-xs text-default-800">
-                                Target audience: {targetAudience ?? "—"}
-                              </p>
-                              <p className="text-xs text-default-800">
-                                Expected audience size: {expectedSize ?? "—"}
-                              </p>
-                            </>
-                          );
-                        })()}
-                      </div>
-                    ) : null}
-                    {/* Admin decision summary (if any) with color cues */}
-                    {adminAction ? (
-                      <div className="mt-2 p-3 border rounded">
-                        <div className="flex items-center gap-3">
-                          {(() => {
-                            const a = String(adminAction || "").toLowerCase();
-
-                            if (a.includes("accept")) {
-                              return (
-                                <div className="px-2 py-1 rounded-full bg-success-50 text-success-700 text-xs font-semibold">
-                                  Accepted
-                                </div>
-                              );
-                            }
-                            if (a.includes("resched")) {
-                              return (
-                                <div className="px-2 py-1 rounded-full bg-warning-50 text-warning-700 text-xs font-semibold">
-                                  Rescheduled
-                                </div>
-                              );
-                            }
-                            if (a.includes("reject")) {
-                              return (
-                                <div className="px-2 py-1 rounded-full bg-danger-50 text-danger-700 text-xs font-semibold">
-                                  Rejected
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <div className="px-2 py-1 rounded-full bg-default-50 text-default-700 text-xs font-semibold">
-                                {String(adminAction)}
-                              </div>
-                            );
-                          })()}
-                          <p className="text-sm font-medium">
-                            Admin action: {String(adminAction)}
-                          </p>
-                        </div>
-                        {adminAction === "Rescheduled" ||
-                        adminAction === "rescheduled" ? (
-                          <div className="text-xs text-default-800 mt-2">
-                            <p>
-                              New date/time:{" "}
-                              {formatDate(
-                                r?.RescheduledDate ||
-                                  r?.Rescheduled_Date ||
-                                  r?.rescheduledDate,
-                              )}
-                            </p>
-                          </div>
-                        ) : null}
-                        {r?.AdminNote ? (
-                          <p className="text-xs text-default-600 mt-2">
-                            Note: {r.AdminNote}
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {/* Stakeholder confirmation summary (if any) with color cue */}
-                    {stakeholderAction ? (
-                      <div className="mt-2 p-2 border border-default-200 rounded">
-                        {(() => {
-                          const s = String(
-                            stakeholderAction || "",
-                          ).toLowerCase();
-
-                          if (s.includes("accept"))
-                            return (
-                              <div className="px-2 py-1 rounded-full bg-success-50 text-success-700 text-xs font-semibold inline-block">
-                                Stakeholder: Accepted
-                              </div>
-                            );
-                          if (s.includes("reject"))
-                            return (
-                              <div className="px-2 py-1 rounded-full bg-danger-50 text-danger-700 text-xs font-semibold inline-block">
-                                Stakeholder: Rejected
-                              </div>
-                            );
-
-                          return (
-                            <div className="px-2 py-1 rounded-full bg-default-50 text-default-700 text-xs font-semibold inline-block">
-                              Stakeholder: {String(stakeholderAction)}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              }
-            })()}
+            {/* Reduced details: only request message is shown above. */}
           </ModalBody>
           <ModalFooter>
-            {/* Role & stage-specific actions */}
             {(() => {
               const dynamicFooter = renderFooterActionsFromAllowed();
-              if (dynamicFooter) {
-                return dynamicFooter;
-              }
+              if (dynamicFooter) return dynamicFooter;
 
-              const r =
-                fullRequest ||
-                request ||
-                (request && (request as any).event) ||
-                {};
-              const requestStatus = r?.Status || r?.status || null;
-              const v = getViewer();
-
-              // Check new workflow statuses first
-              if (requestStatus === "Pending_Stakeholder_Review") {
-                // Only stakeholders can act on stakeholder review requests
-                const stakeholderId =
-                  r?.stakeholder_id || r?.Stakeholder_ID || null;
-                const viewerIsStakeholder =
-                  v.id &&
-                  stakeholderId &&
-                  String(v.id) === String(stakeholderId);
-
-                if (viewerIsStakeholder) {
-                  return (
-                    <>
-                      <Button
-                        variant="bordered"
-                        onPress={() => setViewOpen(false)}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        className="bg-black text-white"
-                        color="default"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId) {
-                              await performRequestAction(
-                                requestId,
-                                "stakeholder-action",
-                                "Accepted",
-                              );
-                            }
-                          } catch (e) {
-                            console.error("Stakeholder accept error:", e);
-                            alert(
-                              "Failed to accept request: " +
-                                ((e as Error).message || "Unknown error"),
-                            );
-                          }
-                        }}
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        variant="bordered"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId) {
-                              await performRequestAction(
-                                requestId,
-                                "stakeholder-action",
-                                "Rejected",
-                              );
-                            }
-                          } catch (e) {}
-                        }}
-                      >
-                        Reject
-                      </Button>
-                    </>
-                  );
-                }
-
-                return (
-                  <Button variant="bordered" onPress={() => setViewOpen(false)}>
-                    Close
-                  </Button>
-                );
-              }
-
-              if (requestStatus === "Pending_Coordinator_Review") {
-                // Coordinators and sys admins can act on coordinator review requests
-                const coordinatorId =
-                  r?.coordinator_id || r?.Coordinator_ID || null;
-                const viewerIsCoordinator =
-                  v.id &&
-                  coordinatorId &&
-                  String(v.id) === String(coordinatorId);
-
-                if (viewerIsCoordinator || v.isAdmin) {
-                  const isEditRequest =
-                    r.originalData && Object.keys(r.originalData).length > 0;
-
-                  return (
-                    <>
-                      <Button
-                        variant="bordered"
-                        onPress={() => setViewOpen(false)}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        className="bg-black text-white"
-                        color="default"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId) {
-                              if (v.isAdmin) {
-                                await performRequestAction(
-                                  requestId,
-                                  "admin-action",
-                                  "Accepted",
-                                );
-                              } else {
-                                await performRequestAction(
-                                  requestId,
-                                  "coordinator-action",
-                                  "Accepted",
-                                );
-                              }
-                            }
-                          } catch (e) {}
-                        }}
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        variant="bordered"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId) {
-                              if (v.isAdmin) {
-                                await performRequestAction(
-                                  requestId,
-                                  "admin-action",
-                                  "Rejected",
-                                );
-                              } else {
-                                await performRequestAction(
-                                  requestId,
-                                  "coordinator-action",
-                                  "Rejected",
-                                );
-                              }
-                            }
-                          } catch (e) {}
-                        }}
-                      >
-                        Reject
-                      </Button>
-                      {!isEditRequest && (
-                        <Button
-                          color="default"
-                          onPress={() => {
-                            setViewOpen(false);
-                            setRescheduleOpen(true);
-                          }}
-                        >
-                          Reschedule
-                        </Button>
-                      )}
-                    </>
-                  );
-                }
-
-                return (
-                  <Button variant="bordered" onPress={() => setViewOpen(false)}>
-                    Close
-                  </Button>
-                );
-              }
-
-              if (requestStatus === "Pending_Admin_Review") {
-                // Admins and coordinators can act on admin review requests
-                if (v.isAdmin || v.role === "Coordinator") {
-                  const isEditRequest =
-                    r.originalData && Object.keys(r.originalData).length > 0;
-
-                  return (
-                    <>
-                      <Button
-                        variant="bordered"
-                        onPress={() => setViewOpen(false)}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        className="bg-black text-white"
-                        color="default"
-                        onPress={() => {
-                          setViewOpen(false);
-                          setAcceptOpen(true);
-                        }}
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        variant="bordered"
-                        onPress={() => {
-                          setViewOpen(false);
-                          setRejectOpen(true);
-                        }}
-                      >
-                        Reject
-                      </Button>
-                      {!isEditRequest && (
-                        <Button
-                          color="default"
-                          onPress={() => {
-                            setViewOpen(false);
-                            setRescheduleOpen(true);
-                          }}
-                        >
-                          Reschedule
-                        </Button>
-                      )}
-                    </>
-                  );
-                }
-
-                return (
-                  <Button variant="bordered" onPress={() => setViewOpen(false)}>
-                    Close
-                  </Button>
-                );
-              }
-
-              // Fallback to old logic for backward compatibility
-              const adminAction =
-                (r as any).AdminAction ?? (r as any).adminAction ?? null;
-              const stakeholderAction =
-                (r as any).StakeholderFinalAction ??
-                (r as any).stakeholderFinalAction ??
-                null;
-              const madeByStakeholder =
-                r?.stakeholder?.Stakeholder_ID ||
-                r?.MadeByStakeholderID ||
-                r?.Stakeholder_ID ||
-                r?.stakeholder_id ||
-                r?.StakeholderId ||
-                null;
-              const viewerIsStakeholder =
-                v.id &&
-                madeByStakeholder &&
-                String(v.id) === String(madeByStakeholder);
-
-              // Admin/coordinator view when stakeholder rescheduled
-              if (
-                stakeholderAction &&
-                String(stakeholderAction).toLowerCase().includes("resched") &&
-                (v.isAdmin || v.role === "Coordinator")
-              ) {
-                return (
-                  <>
-                    <Button
-                      variant="bordered"
-                      onPress={() => setViewOpen(false)}
-                    >
-                      Close
-                    </Button>
-                    <Button
-                      className="bg-black text-white"
-                      color="default"
-                      onPress={async () => {
-                        setViewOpen(false);
-                        try {
-                          const requestId =
-                            r?.Request_ID ||
-                            r?.RequestId ||
-                            r?.requestId ||
-                            null;
-
-                          if (requestId) {
-                            if (v.isAdmin) {
-                              await performRequestAction(
-                                requestId,
-                                "admin-action",
-                                "Accepted",
-                              );
-                            } else {
-                              await performRequestAction(
-                                requestId,
-                                "coordinator-action",
-                                "Accepted",
-                              );
-                            }
-                          }
-                        } catch (e) {
-                          console.error(
-                            "Accept stakeholder reschedule error:",
-                            e,
-                          );
-                          alert(
-                            "Failed to accept reschedule: " +
-                              ((e as Error).message || "Unknown error"),
-                          );
-                        }
-                      }}
-                    >
-                      Accept Reschedule
-                    </Button>
-                    <Button
-                      variant="bordered"
-                      onPress={async () => {
-                        setViewOpen(false);
-                        try {
-                          const requestId =
-                            r?.Request_ID ||
-                            r?.RequestId ||
-                            r?.requestId ||
-                            null;
-
-                          if (requestId) {
-                            if (v.isAdmin) {
-                              await performRequestAction(
-                                requestId,
-                                "admin-action",
-                                "Rejected",
-                              );
-                            } else {
-                              await performRequestAction(
-                                requestId,
-                                "coordinator-action",
-                                "Rejected",
-                              );
-                            }
-                          }
-                        } catch (e) {}
-                      }}
-                    >
-                      Reject Reschedule
-                    </Button>
-                  </>
-                );
-              }
-
-              // Admin view before decision
-              if (!adminAction && v.isAdmin) {
-                const isEditRequest =
-                  r.originalData && Object.keys(r.originalData).length > 0;
-
-                return (
-                  <>
-                    <Button
-                      variant="bordered"
-                      onPress={() => setViewOpen(false)}
-                    >
-                      Close
-                    </Button>
-                    <Button
-                      className="bg-black text-white"
-                      color="default"
-                      onPress={() => {
-                        setViewOpen(false);
-                        setAcceptOpen(true);
-                      }}
-                    >
-                      Accept
-                    </Button>
-                    <Button
-                      variant="bordered"
-                      onPress={() => {
-                        setViewOpen(false);
-                        setRejectOpen(true);
-                      }}
-                    >
-                      Reject
-                    </Button>
-                    {!isEditRequest && (
-                      <Button
-                        color="default"
-                        onPress={() => {
-                          setViewOpen(false);
-                          setRescheduleOpen(true);
-                        }}
-                      >
-                        Reschedule
-                      </Button>
-                    )}
-                  </>
-                );
-              }
-
-              // Stakeholder view after admin decision
-              if (adminAction && viewerIsStakeholder && !stakeholderAction) {
-                if (String(adminAction).toLowerCase().includes("accepted")) {
-                  return (
-                    <>
-                      <Button
-                        variant="bordered"
-                        onPress={() => setViewOpen(false)}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        className="bg-black text-white"
-                        color="default"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId)
-                              await performStakeholderConfirm(
-                                requestId,
-                                "Accepted",
-                              );
-                          } catch (e) {}
-                        }}
-                      >
-                        Accept
-                      </Button>
-                    </>
-                  );
-                }
-                if (String(adminAction).toLowerCase().includes("rejected")) {
-                  return (
-                    <>
-                      <Button
-                        variant="bordered"
-                        onPress={() => setViewOpen(false)}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        className="bg-black text-white"
-                        color="default"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId)
-                              await performStakeholderConfirm(
-                                requestId,
-                                "Accepted",
-                              );
-                          } catch (e) {}
-                        }}
-                      >
-                        Accept
-                      </Button>
-                    </>
-                  );
-                }
-                if (
-                  String(adminAction).toLowerCase().includes("resched") ||
-                  String(adminAction).toLowerCase().includes("rescheduled")
-                ) {
-                  return (
-                    <>
-                      <Button
-                        variant="bordered"
-                        onPress={() => setViewOpen(false)}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        className="bg-black text-white"
-                        color="default"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId)
-                              await performStakeholderConfirm(
-                                requestId,
-                                "Accepted",
-                              );
-                          } catch (e) {}
-                        }}
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        variant="bordered"
-                        onPress={async () => {
-                          setViewOpen(false);
-                          try {
-                            const requestId =
-                              r?.Request_ID ||
-                              r?.RequestId ||
-                              r?.requestId ||
-                              null;
-
-                            if (requestId)
-                              await performStakeholderConfirm(
-                                requestId,
-                                "Rejected",
-                              );
-                          } catch (e) {}
-                        }}
-                      >
-                        Reject
-                      </Button>
-                    </>
-                  );
-                }
-              }
-
-              // Fallback for rescheduled requests by admin: coordinators can accept/reject
-              if (adminAction && String(adminAction).toLowerCase().includes("resched") && v.role === "Coordinator") {
-                return (
-                  <>
-                    <Button variant="bordered" onPress={() => setViewOpen(false)}>
-                      Close
-                    </Button>
-                    <Button
-                      className="bg-black text-white"
-                      color="default"
-                      onPress={async () => {
-                        setViewOpen(false);
-                        try {
-                          const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null;
-                          if (requestId) {
-                            await performRequestAction(
-                              requestId,
-                              "coordinator-action",
-                              "Accepted",
-                            );
-                          }
-                        } catch (e) {
-                          console.error("Accept reschedule error:", e);
-                          alert(
-                            "Failed to accept reschedule: " +
-                              ((e as Error).message || "Unknown error"),
-                          );
-                        }
-                      }}
-                    >
-                      Accept Reschedule
-                    </Button>
-                    <Button
-                      variant="bordered"
-                      onPress={async () => {
-                        setViewOpen(false);
-                        try {
-                          const requestId = r?.Request_ID || r?.RequestId || r?.requestId || null;
-                          if (requestId) {
-                            await performRequestAction(
-                              requestId,
-                              "coordinator-action",
-                              "Rejected",
-                            );
-                          }
-                        } catch (e) {}
-                      }}
-                    >
-                      Reject Reschedule
-                    </Button>
-                  </>
-                );
-              }
-
-              // Default fallback action: close
               return (
                 <Button variant="bordered" onPress={() => setViewOpen(false)}>
                   Close
