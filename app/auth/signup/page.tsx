@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 // use native inputs here for tighter visual control
 import { Button } from "@heroui/button";
 import { Link } from "@heroui/link";
-import { Eye, EyeOff, Check } from "lucide-react";
+import { Eye, EyeSlash, Check } from "@gravity-ui/icons";
 
 export default function SignUp() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<"next" | "prev">("next");
   const [showPassword, setShowPassword] = useState(false);
@@ -22,31 +24,28 @@ export default function SignUp() {
   const [codeValidated, setCodeValidated] = useState(false);
   const [validatedData, setValidatedData] = useState<any>(null);
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+  const [showModal, setShowModal] = useState(false);
 
-  const provinces = [
-    "",
-    "Albay",
-    "Camarines Sur",
-    "Sorsogon",
-    "Catanduanes",
-    "Masbate",
-  ];
+  const [provinces, setProvinces] = useState<any[]>([]);
+  const [districts, setDistricts] = useState<any[]>([]);
+  const [municipalities, setMunicipalities] = useState<any[]>([]);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
 
   const [formData, setFormData] = useState({
     First_Name: "",
     Middle_Name: "",
     Last_Name: "",
-    Email: "",
     Phone_Number: "",
     Password: "",
     ConfirmPassword: "",
-    Province_Name: "",
-    City_Municipality: "",
+    Province: "",
+    District: "",
+    Municipality: "",
     Organization_Institution: "",
     Field: "",
-    Registration_Code: "",
-    District_ID: undefined as string | undefined,
-    Coordinator_ID: undefined as string | undefined,
+    Email: "",
+    Verification_Code: "",
   });
 
   const update = (patch: Partial<typeof formData>) =>
@@ -60,61 +59,139 @@ export default function SignUp() {
       return !!(
         formData.First_Name.trim() &&
         formData.Last_Name.trim() &&
-        formData.Email.trim() &&
         formData.Phone_Number.trim()
       );
     }
     if (step === 1) {
+      return !!(formData.Province && formData.District && formData.Municipality);
+    }
+    if (step === 2) {
       return (
         formData.Password.length >= 8 &&
         formData.Password === formData.ConfirmPassword
       );
     }
-    if (step === 2) {
-      return !!formData.City_Municipality.trim();
+    if (step === 3) {
+      return !!formData.Email.trim() && emailVerified;
     }
-
     return true;
   };
 
+  // Fetch provinces on mount
+  useEffect(() => {
+    const fetchProvinces = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/locations/provinces`);
+        const data = await res.json();
+        if (data.success) setProvinces(data.data);
+      } catch (err) {
+        console.error("Failed to fetch provinces", err);
+      }
+    };
+    fetchProvinces();
+  }, [API_URL]);
+
+  // Fetch districts when province changes
+  useEffect(() => {
+    if (formData.Province) {
+      const fetchDistricts = async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/locations/provinces/${formData.Province}/districts`);
+          const data = await res.json();
+          if (data.success) setDistricts(data.data);
+        } catch (err) {
+          console.error("Failed to fetch districts", err);
+        }
+      };
+      fetchDistricts();
+      // Clear district and municipality
+      update({ District: "", Municipality: "" });
+      setMunicipalities([]);
+    } else {
+      setDistricts([]);
+      setMunicipalities([]);
+      update({ District: "", Municipality: "" });
+    }
+  }, [formData.Province, API_URL]);
+
+  // Fetch municipalities when district changes
+  useEffect(() => {
+    if (formData.District) {
+      const fetchMunicipalities = async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/locations/districts/${formData.District}/municipalities`);
+          const data = await res.json();
+          if (data.success) setMunicipalities(data.data);
+        } catch (err) {
+          console.error("Failed to fetch municipalities", err);
+        }
+      };
+      fetchMunicipalities();
+      // Clear municipality
+      update({ Municipality: "" });
+    } else {
+      setMunicipalities([]);
+      update({ Municipality: "" });
+    }
+  }, [formData.District, API_URL]);
+
   const submitToServer = async () => {
-    setIsLoading(true);
+    // Not used anymore - registration completes on verification page
+  };
+
+  const sendVerificationCode = async () => {
+    if (!formData.Email.trim()) return;
+    setValidatingCode(true);
     setError(null);
     try {
-      const payload: any = {
-        First_Name: formData.First_Name,
-        Middle_Name: formData.Middle_Name || null,
-        Last_Name: formData.Last_Name,
-        Email: formData.Email,
-        Phone_Number: formData.Phone_Number,
-        Password: formData.Password,
-        Province_Name: formData.Province_Name,
-        City_Municipality: formData.City_Municipality,
-        Organization_Institution: formData.Organization_Institution || null,
-        Field: formData.Field || null,
-        Registration_Code: formData.Registration_Code || null,
-        District_ID: formData.District_ID || null,
-        Coordinator_ID: formData.Coordinator_ID || null,
+      const payload = {
+        firstName: formData.First_Name,
+        middleName: formData.Middle_Name || null,
+        lastName: formData.Last_Name,
+        email: formData.Email,
+        phoneNumber: formData.Phone_Number,
+        password: formData.Password,
+        organization: formData.Organization_Institution || null,
+        province: formData.Province,
+        district: formData.District,
+        municipality: formData.Municipality,
       };
-
-      const res = await fetch(`${API_URL}/api/stakeholders/register`, {
+      const res = await fetch(`${API_URL}/api/signup-requests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => ({}));
 
-      if (!res.ok) throw new Error(body.message || "Registration failed");
-      // show brief success message then redirect
-      setRegistrationSuccess(true);
-      setTimeout(() => {
-        if (typeof window !== "undefined")
-          window.location.assign("/auth/signin");
-      }, 1800);
+      if (!res.ok) throw new Error(body.message || "Failed to send code");
+      setEmailSent(true);
+      setShowSuccessAnim(true);
+      setTimeout(() => setShowSuccessAnim(false), 1400);
     } catch (err: any) {
-      setError(err?.message || "Registration failed");
+      setError(err?.message || "Failed to send code");
     } finally {
-      setIsLoading(false);
+      setValidatingCode(false);
+    }
+  };
+
+  const verifyCode = async () => {
+    if (!formData.Verification_Code.trim()) return;
+    setValidatingCode(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/signup-requests/verify-email?token=${encodeURIComponent(formData.Verification_Code)}`);
+      const body = await res.json().catch(() => ({}));
+
+      if (!res.ok) throw new Error(body.message || "Invalid code");
+      setEmailVerified(true);
+      setCodeValidated(true);
+      setShowSuccessAnim(true);
+      setTimeout(() => setShowSuccessAnim(false), 1400);
+    } catch (err: any) {
+      setError(err?.message || "Invalid code");
+      setCodeValidated(false);
+    } finally {
+      setValidatingCode(false);
     }
   };
 
@@ -123,117 +200,21 @@ export default function SignUp() {
     setError(null);
     if (!validateStep()) {
       setError("Please complete required fields for this step.");
-
       return;
     }
     if (step < 3) {
       setDirection("next");
       setStep((s) => s + 1);
-
       return;
     }
-    // final submit
-    if (formData.Password !== formData.ConfirmPassword) {
-      setError("Passwords do not match.");
-
+    // Email verification step - just show that email was sent
+    if (!emailSent) {
+      setError("Please send the verification email first.");
       return;
     }
-
-    // If a registration code is present but not yet validated, validate it automatically
-    if (formData.Registration_Code?.trim() && !codeValidated) {
-      setError(null);
-      const r = await validateRegistrationCode(
-        formData.Registration_Code.trim(),
-      );
-
-      if (!r.success) {
-        setError(String(r.message || "Invalid registration code"));
-
-        return;
-      }
-    }
-
-    await submitToServer();
+    setRegistrationSuccess(true);
+    setShowModal(true);
   };
-
-  // validate registration code with backend and autofill province/district/coordinator
-  const validateRegistrationCode = async (code: string) => {
-    if (!code || !API_URL) return { success: false };
-    setValidatingCode(true);
-    try {
-      const res = await fetch(
-        `${API_URL}/api/registration-codes/validate?code=${encodeURIComponent(code)}`,
-      );
-      const body = await res.json().catch(() => ({}));
-
-      if (!res.ok) throw new Error(body.message || "Invalid code");
-      // fill form fields
-      setFormData((p) => ({
-        ...p,
-        Province_Name: body.data?.Province_Name || p.Province_Name,
-        District_ID: body.data?.District_ID || p.District_ID,
-        Coordinator_ID: body.data?.Coordinator_ID || p.Coordinator_ID,
-      }));
-      setCodeValidated(true);
-      setValidatedData(body.data || null);
-      // trigger short success animation
-      setShowSuccessAnim(true);
-      setTimeout(() => setShowSuccessAnim(false), 1400);
-      setError(null);
-
-      return { success: true, data: body.data };
-    } catch (err: any) {
-      setCodeValidated(false);
-      setValidatedData(null);
-
-      return { success: false, message: err?.message || "Invalid code" };
-    } finally {
-      setValidatingCode(false);
-    }
-  };
-
-  // Auto-validate registration code after user types 6+ chars (debounced)
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const code = formData.Registration_Code?.trim() || "";
-
-    // clear states when empty
-    if (!code) {
-      setRegistrationError(null);
-      setCodeValidated(false);
-      setValidatedData(null);
-
-      return;
-    }
-
-    if (step === 3) {
-      if (code.length >= 6) {
-        // debounce before validating
-        timer = setTimeout(async () => {
-          const r = await validateRegistrationCode(code);
-
-          if (!cancelled) {
-            if (!r.success)
-              setRegistrationError(
-                String(r.message || "Invalid registration code"),
-              );
-            else setRegistrationError(null);
-          }
-        }, 450);
-      } else {
-        // too short: clear validation state
-        setRegistrationError(null);
-        setCodeValidated(false);
-        setValidatedData(null);
-      }
-    }
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [formData.Registration_Code, step]);
 
   return (
     <div className="w-full max-w-[400px] mx-auto">
@@ -297,21 +278,6 @@ export default function SignUp() {
               <div>
                 <label
                   className="text-sm font-medium block mb-1"
-                  htmlFor="email"
-                >
-                  Email <span className="text-danger-500">*</span>
-                </label>
-                <input
-                  className={`${inputClass} w-full`}
-                  id="email"
-                  type="email"
-                  value={formData.Email}
-                  onChange={(e) => update({ Email: e.target.value })}
-                />
-              </div>
-              <div>
-                <label
-                  className="text-sm font-medium block mb-1"
                   htmlFor="phone-number"
                 >
                   Phone number <span className="text-danger-500">*</span>
@@ -326,9 +292,112 @@ export default function SignUp() {
             </div>
           </div>
 
-          {/* Step 2 - Credentials */}
+          {/* Step 2 - Location */}
           <div
             className={`absolute inset-0 ${step === 1 ? "block" : "hidden"}`}
+          >
+            <div className="space-y-3 pb-20">
+              <div>
+                <label
+                  className="text-sm font-medium block mb-1"
+                  htmlFor="province"
+                >
+                  Province <span className="text-danger-500">*</span>
+                </label>
+                <select
+                  className={`${inputClass} w-full`}
+                  id="province"
+                  value={formData.Province}
+                  onChange={(e) => update({ Province: e.target.value })}
+                >
+                  <option value="">Select Province</option>
+                  {provinces.map((prov) => (
+                    <option key={prov._id} value={prov._id}>
+                      {prov.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  className="text-sm font-medium block mb-1"
+                  htmlFor="district"
+                >
+                  District <span className="text-danger-500">*</span>
+                </label>
+                <select
+                  className={`${inputClass} w-full`}
+                  id="district"
+                  value={formData.District}
+                  onChange={(e) => update({ District: e.target.value })}
+                  disabled={!formData.Province}
+                >
+                  <option value="">Select District</option>
+                  {districts.map((dist) => (
+                    <option key={dist._id} value={dist._id}>
+                      {dist.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  className="text-sm font-medium block mb-1"
+                  htmlFor="municipality"
+                >
+                  Municipality <span className="text-danger-500">*</span>
+                </label>
+                <select
+                  className={`${inputClass} w-full`}
+                  id="municipality"
+                  value={formData.Municipality}
+                  onChange={(e) => update({ Municipality: e.target.value })}
+                  disabled={!formData.District}
+                >
+                  <option value="">Select Municipality</option>
+                  {municipalities.map((mun) => (
+                    <option key={mun._id} value={mun._id}>
+                      {mun.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  className="text-sm font-medium block mb-1"
+                  htmlFor="organization"
+                >
+                  Organization / Institution
+                </label>
+                <input
+                  className={`${inputClass} w-full`}
+                  id="organization"
+                  value={formData.Organization_Institution}
+                  onChange={(e) =>
+                    update({ Organization_Institution: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label
+                  className="text-sm font-medium block mb-1"
+                  htmlFor="field"
+                >
+                  Field
+                </label>
+                <input
+                  className={`${inputClass} w-full`}
+                  id="field"
+                  value={formData.Field}
+                  onChange={(e) => update({ Field: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Step 3 - Credentials */}
+          <div
+            className={`absolute inset-0 ${step === 2 ? "block" : "hidden"}`}
           >
             <div className="space-y-3 pb-20">
               <div>
@@ -355,7 +424,7 @@ export default function SignUp() {
                     onClick={() => setShowPassword(!showPassword)}
                   >
                     {showPassword ? (
-                      <EyeOff className="w-4 h-4" />
+                      <EyeSlash className="w-4 h-4" />
                     ) : (
                       <Eye className="w-4 h-4" />
                     )}
@@ -391,7 +460,7 @@ export default function SignUp() {
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   >
                     {showConfirmPassword ? (
-                      <EyeOff className="w-4 h-4" />
+                      <EyeSlash className="w-4 h-4" />
                     ) : (
                       <Eye className="w-4 h-4" />
                     )}
@@ -401,128 +470,91 @@ export default function SignUp() {
             </div>
           </div>
 
-          {/* Step 3 - Location & Org */}
-          <div
-            className={`absolute inset-0 ${step === 2 ? "block" : "hidden"}`}
-          >
-            <div className="space-y-3 pb-20">
-              {/* Province is determined by registration code (no UI input) */}
-              <div>
-                <label
-                  className="text-sm font-medium block mb-1"
-                  htmlFor="city-municipality"
-                >
-                  City / Municipality <span className="text-danger-500">*</span>
-                </label>
-                <input
-                  className={`${inputClass} w-full`}
-                  id="city-municipality"
-                  value={formData.City_Municipality}
-                  onChange={(e) =>
-                    update({ City_Municipality: e.target.value })
-                  }
-                />
-              </div>
-              <div>
-                <label
-                  className="text-sm font-medium block mb-1"
-                  htmlFor="organization"
-                >
-                  Organization / Institution
-                </label>
-                <input
-                  className={`${inputClass} w-full`}
-                  id="organization"
-                  value={formData.Organization_Institution}
-                  onChange={(e) =>
-                    update({ Organization_Institution: e.target.value })
-                  }
-                />
-              </div>
-              <div>
-                <label
-                  className="text-sm font-medium block mb-1"
-                  htmlFor="field"
-                >
-                  Field
-                </label>
-                <input
-                  className={`${inputClass} w-full`}
-                  id="field"
-                  value={formData.Field}
-                  onChange={(e) => update({ Field: e.target.value })}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Step 4 - Registration Code */}
+          {/* Step 4 - Email Verification */}
           <div
             className={`absolute inset-0 ${step === 3 ? "block" : "hidden"}`}
           >
             <div className="pb-20">
-              <label
-                className="text-sm font-medium block mb-1"
-                htmlFor="registration-code"
-              >
-                Registration code
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  className={`${inputClass} w-full`}
-                  id="registration-code"
-                  value={formData.Registration_Code}
-                  onChange={(e) => {
-                    update({ Registration_Code: e.target.value });
-                    setCodeValidated(false);
-                    setValidatedData(null);
-                    setRegistrationError(null);
-                  }}
-                />
-                <div className="flex items-center gap-2">
-                  {validatingCode ? (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="w-4 h-4 rounded-full border-2 border-t-transparent border-gray-300 animate-spin" />
-                      Checking
-                    </span>
-                  ) : codeValidated ? (
-                    <div className="relative inline-flex items-center">
-                      {showSuccessAnim && (
-                        <span className="absolute -inset-1 flex items-center justify-center">
-                          <span className="w-9 h-9 rounded-full bg-green-400 opacity-30 animate-ping" />
-                        </span>
-                      )}
-                      <span className="inline-flex items-center gap-1 text-green-600 text-sm font-medium relative">
-                        <Check className="w-4 h-4" /> Verified
-                      </span>
-                    </div>
-                  ) : registrationError ? (
-                    <span className="text-sm text-red-600">
-                      {registrationError}
-                    </span>
-                  ) : (
-                    <span className="text-sm text-default-500">
-                      Will validate automatically
-                    </span>
-                  )}
+              <div className="space-y-3">
+                <div>
+                  <label
+                    className="text-sm font-medium block mb-1"
+                    htmlFor="email"
+                  >
+                    Email <span className="text-danger-500">*</span>
+                  </label>
+                  <input
+                    className={`${inputClass} w-full`}
+                    id="email"
+                    type="email"
+                    value={formData.Email}
+                    onChange={(e) => {
+                      update({ Email: e.target.value });
+                      setEmailSent(false);
+                      setEmailVerified(false);
+                      setCodeValidated(false);
+                    }}
+                  />
                 </div>
+                <div className="flex gap-2">
+                  <button
+                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm"
+                    type="button"
+                    onClick={sendVerificationCode}
+                    disabled={!formData.Email.trim() || emailSent}
+                  >
+                    {validatingCode ? "Sending..." : emailSent ? "Code Sent" : "Send Verification Code"}
+                  </button>
+                </div>
+                {emailSent && (
+                  <p className="text-sm text-gray-600 mt-2">
+                    Check your email for the verification code to complete your signup.
+                  </p>
+                )}
+                {emailSent && !emailVerified && (
+                  <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                    <p className="text-sm text-blue-800">
+                      A verification code has been sent to your email. Please check your inbox and enter the code below to complete your registration.
+                    </p>
+                    <div className="mt-3">
+                      <label
+                        className="text-sm font-medium block mb-1"
+                        htmlFor="verification-code"
+                      >
+                        Verification Code
+                      </label>
+                      <input
+                        className={`${inputClass} w-full`}
+                        id="verification-code"
+                        value={formData.Verification_Code}
+                        onChange={(e) => update({ Verification_Code: e.target.value })}
+                      />
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm"
+                        onClick={verifyCode}
+                        disabled={validatingCode}
+                      >
+                        {validatingCode ? "Verifying..." : "Verify Code"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {emailSent && emailVerified && (
+                  <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                    <div className="flex items-center gap-2 text-green-800">
+                      <Check className="w-5 h-5" />
+                      <p className="text-sm font-medium">Email verified successfully!</p>
+                    </div>
+                  </div>
+                )}
               </div>
-              <p className="text-xs text-default-500 mt-2">
-                If you have a registration code from a coordinator, enter it
-                here. District and coordinator assignment are done by the
-                backend; the code is validated automatically on this step and
-                before creating your account.
-              </p>
             </div>
           </div>
         </div>
 
         {error && <div className="text-sm text-red-600">{error}</div>}
-        {registrationSuccess && (
-          <div className="text-sm text-green-600">
-            Account created successfully — redirecting to sign in...
-          </div>
-        )}
 
         <div className="flex items-center gap-3">
           {step > 0 ? (
@@ -547,7 +579,7 @@ export default function SignUp() {
               size="md"
               type="submit"
             >
-              {step < 3 ? "Next" : "Create account"}
+              {step < 3 ? "Next" : "Complete Registration"}
             </Button>
           </div>
         </div>
@@ -562,6 +594,33 @@ export default function SignUp() {
           Sign in
         </Link>
       </div>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <Check className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Registration Successful!
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Your sign-up request has been submitted successfully. It is now pending coordinator approval. You will be notified once it's approved.
+              </p>
+              <Button
+                className="w-full bg-danger-600 hover:bg-danger-700 text-white"
+                onClick={() => {
+                  setShowModal(false);
+                  router.push("/");
+                }}
+              >
+                Go to Home
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,6 +10,8 @@ import {
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
+import { Avatar } from "@heroui/avatar";
+import { Person, Droplet, Megaphone } from "@gravity-ui/icons";
 
 interface EditEventModalProps {
   isOpen: boolean;
@@ -41,6 +43,10 @@ export default function EditEventModal({
   const [audienceType, setAudienceType] = useState("");
   const [expectedAudienceSize, setExpectedAudienceSize] = useState("");
   const [description, setDescription] = useState("");
+  const [stakeholder, setStakeholder] = useState("");
+  const [stakeholderOptions, setStakeholderOptions] = useState<
+    { key: string; label: string }[]
+  >([]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [startTime, setStartTime] = useState("");
@@ -103,6 +109,26 @@ export default function EditEventModal({
         ""
       )?.toString() || "",
     );
+
+    // Prefill stakeholder selection when editing
+    try {
+      const sid =
+        request.MadeByStakeholderID ||
+        request.madeByStakeholderID ||
+        (request.event &&
+          (request.event.MadeByStakeholderID ||
+            request.event.madeByStakeholderID)) ||
+        request.stakeholder ||
+        null;
+
+      if (sid) {
+        setStakeholder(String(sid));
+        setStakeholderOptions([{ key: String(sid), label: String(sid) }]);
+      } else {
+        setStakeholder("");
+        setStakeholderOptions([]);
+      }
+    } catch (e) {}
   }, [request]);
 
   if (!request) return null;
@@ -114,6 +140,9 @@ export default function EditEventModal({
     user &&
     (user.staff_type === "Admin" || user.staff_type === "Coordinator")
   );
+  const isAdmin = user && user.staff_type === "Admin";
+
+  const isStakeholder = user && user.staff_type === "Stakeholder";
 
   const handleSave = async () => {
     if (!request) return;
@@ -205,9 +234,11 @@ export default function EditEventModal({
           .toLowerCase()
           .includes("blood")
       ) {
-        updateData.Target_Donation = goalCount
-          ? parseInt(goalCount, 10)
-          : undefined;
+        if (isAdmin) {
+          updateData.Target_Donation = goalCount
+            ? parseInt(goalCount, 10)
+            : undefined;
+        }
       }
 
       if (
@@ -222,14 +253,39 @@ export default function EditEventModal({
           : undefined;
       }
 
-      if (isAdminOrCoordinator) {
-        // call update endpoint with adminId or coordinatorId
+      // Determine if this is a major change that requires review
+      const hasMajorChanges = (() => {
+        if (!isStakeholder) return false; // Admins/coordinators can make any changes directly
+
+        // Check if dates changed
+        if (startTime !== initialStartTime || endTime !== initialEndTime)
+          return true;
+
+        // Check if target donation changed (for blood drives)
+        if (String(categoryType).toLowerCase().includes("blood")) {
+          const originalGoal =
+            (
+              request.event?.Target_Donation ||
+              request.event?.categoryData?.Target_Donation ||
+              0
+            )?.toString() || "";
+
+          if (goalCount !== originalGoal) return true;
+        }
+
+        return false;
+      })();
+
+      if (!hasMajorChanges) {
+        // Direct update - no review needed
         const body = {
           ...updateData,
           // include coordinatorId or adminId depending on role
           ...(user.staff_type === "Admin"
             ? { adminId: user.id }
-            : { coordinatorId: user.id }),
+            : user.staff_type === "Coordinator"
+              ? { coordinatorId: user.id }
+              : { MadeByStakeholderID: user.Stakeholder_ID || user.id }),
         };
 
         const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
@@ -251,7 +307,7 @@ export default function EditEventModal({
         if (onSaved) onSaved();
         onClose();
       } else {
-        // Stakeholder: create a new change request instead (will be pending)
+        // Major changes - create a change request that needs review
         // Use existing coordinator if present
         const coordinatorId =
           request.coordinator?.Coordinator_ID ||
@@ -287,15 +343,49 @@ export default function EditEventModal({
           // leave undefined if parsing fails
         }
 
-        // For stakeholders, update the existing request via PUT so we don't create a new request
+        // For change requests, update the existing request via PUT
         const body: any = {
           ...updateData,
-          MadeByStakeholderID: stakeholderId,
         };
 
         // include times/date if present
         if (payloadStartDate) body.Start_Date = payloadStartDate;
         if (payloadEndDate) body.End_Date = payloadEndDate;
+
+        // Include the requester id based on role
+        if (isAdminOrCoordinator) {
+          body.adminId = user.staff_type === "Admin" ? user.id : undefined;
+          body.coordinatorId =
+            user.staff_type === "Coordinator" ? user.id : undefined;
+        } else {
+          body.MadeByStakeholderID = stakeholderId;
+        }
+
+        // Determine if this edit requires review (only for stakeholders)
+        const requiresReview = (() => {
+          if (!isStakeholder) return false; // Admins/coordinators don't require review
+
+          // Check if dates changed
+          if (startTime !== initialStartTime || endTime !== initialEndTime)
+            return true;
+
+          // Check if target donation changed (for blood drives)
+          if (isBlood) {
+            const originalGoal =
+              (
+                request.event?.Target_Donation ||
+                request.event?.categoryData?.Target_Donation ||
+                0
+              )?.toString() || "";
+
+            if (goalCount !== originalGoal) return true;
+          }
+
+          return false;
+        })();
+
+        // Include the review requirement flag
+        body.requiresReview = requiresReview;
 
         // PUT to update existing request
         const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
@@ -328,6 +418,37 @@ export default function EditEventModal({
   };
 
   // render modal content with inputs; date fields intentionally shown but disabled
+  const cat =
+    (request.category && (request.category.type || request.category.Type)) ||
+    (request.event && (request.event.categoryType || request.event.Category)) ||
+    "";
+  const isBlood = String(cat).toLowerCase().includes("blood");
+
+  // Determine if this will be a direct save or require review
+  const willRequireReview = (() => {
+    if (!isStakeholder) return false; // Admins/coordinators don't require review
+
+    // Check if dates changed
+    if (startTime !== initialStartTime || endTime !== initialEndTime)
+      return true;
+
+    // Check if target donation changed (for blood drives)
+    if (isBlood) {
+      const originalGoal =
+        (
+          request.event?.Target_Donation ||
+          request.event?.categoryData?.Target_Donation ||
+          0
+        )?.toString() || "";
+
+      if (goalCount !== originalGoal) return true;
+    }
+
+    return false;
+  })();
+
+  const isDirectSave = !willRequireReview;
+
   return (
     <Modal
       isOpen={isOpen}
@@ -337,30 +458,63 @@ export default function EditEventModal({
       onClose={onClose}
     >
       <ModalContent>
-        <ModalHeader className="flex items-center gap-3 pb-4">
-          <div>
-            <h2 className="text-xl font-semibold">Edit event</h2>
-            <p className="text-xs text-default-500">
-              Edit details (date cannot be changed here)
-            </p>
+        <ModalHeader className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Avatar
+              className="bg-default-100 border-1 border-default"
+              icon={
+                String(
+                  (request?.category &&
+                    (request.category.type || request.category.Type)) ||
+                    (request?.event &&
+                      (request.event.categoryType || request.event.Category)) ||
+                    "",
+                )
+                  .toLowerCase()
+                  .includes("blood") ? (
+                  <Droplet />
+                ) : String(
+                    (request?.category &&
+                      (request.category.type || request.category.Type)) ||
+                      (request?.event &&
+                        (request.event.categoryType ||
+                          request.event.Category)) ||
+                      "",
+                  )
+                    .toLowerCase()
+                    .includes("advocacy") ? (
+                  <Megaphone />
+                ) : (
+                  <Person />
+                )
+              }
+            />
           </div>
+          <h3 className="text-sm font-semibold py-2">Edit Event</h3>
+          <p className="text-xs font-normal">
+            Edit details (date cannot be changed here)
+          </p>
         </ModalHeader>
         <ModalBody className="py-4">
           <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Event Title</label>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Event Title</label>
               <Input
-                classNames={{ inputWrapper: "h-10" }}
+                classNames={{ inputWrapper: "border-default-200 h-9" }}
+                radius="md"
+                size="sm"
                 type="text"
                 value={title}
                 variant="bordered"
                 onChange={(e) => setTitle((e.target as HTMLInputElement).value)}
               />
             </div>
-            <div>
-              <label className="text-sm font-medium">Location</label>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Location</label>
               <Input
-                classNames={{ inputWrapper: "h-10" }}
+                classNames={{ inputWrapper: "border-default-200 h-9" }}
+                radius="md"
+                size="sm"
                 type="text"
                 value={location}
                 variant="bordered"
@@ -370,10 +524,12 @@ export default function EditEventModal({
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-sm font-medium">Contact Email</label>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Contact Email</label>
                 <Input
-                  classNames={{ inputWrapper: "h-10" }}
+                  classNames={{ inputWrapper: "border-default-200 h-9" }}
+                  radius="md"
+                  size="sm"
                   type="email"
                   value={email}
                   variant="bordered"
@@ -382,10 +538,12 @@ export default function EditEventModal({
                   }
                 />
               </div>
-              <div>
-                <label className="text-sm font-medium">Contact Number</label>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Contact Number</label>
                 <Input
-                  classNames={{ inputWrapper: "h-10" }}
+                  classNames={{ inputWrapper: "border-default-200 h-9" }}
+                  radius="md"
+                  size="sm"
                   type="tel"
                   value={contactNumber}
                   variant="bordered"
@@ -409,12 +567,14 @@ export default function EditEventModal({
               if (key.includes("training")) {
                 return (
                   <>
-                    <div>
-                      <label className="text-sm font-medium">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">
                         Type of training
                       </label>
                       <Input
-                        classNames={{ inputWrapper: "h-10" }}
+                        classNames={{ inputWrapper: "border-default-200 h-9" }}
+                        radius="md"
+                        size="sm"
                         type="text"
                         value={trainingType}
                         variant="bordered"
@@ -423,12 +583,14 @@ export default function EditEventModal({
                         }
                       />
                     </div>
-                    <div>
-                      <label className="text-sm font-medium">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">
                         Max participants
                       </label>
                       <Input
-                        classNames={{ inputWrapper: "h-10" }}
+                        classNames={{ inputWrapper: "border-default-200 h-9" }}
+                        radius="md"
+                        size="sm"
                         type="number"
                         value={maxParticipants}
                         variant="bordered"
@@ -439,10 +601,15 @@ export default function EditEventModal({
                         }
                       />
                     </div>
-                    <div>
-                      <label className="text-sm font-medium">Description</label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Description</label>
                       <Textarea
+                        classNames={{
+                          inputWrapper: "border-default-200",
+                        }}
                         minRows={3}
+                        radius="md"
+                        size="sm"
                         value={description}
                         variant="bordered"
                         onChange={(e: any) => setDescription(e.target.value)}
@@ -454,10 +621,15 @@ export default function EditEventModal({
               if (key.includes("blood")) {
                 return (
                   <>
-                    <div>
-                      <label className="text-sm font-medium">Goal count</label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Goal count</label>
                       <Input
-                        classNames={{ inputWrapper: "h-10" }}
+                        classNames={{
+                          inputWrapper: `border-default-200 h-9 ${!isAdmin ? "bg-default-100" : ""}`,
+                        }}
+                        disabled={!isAdmin}
+                        radius="md"
+                        size="sm"
                         type="number"
                         value={goalCount}
                         variant="bordered"
@@ -466,10 +638,15 @@ export default function EditEventModal({
                         }
                       />
                     </div>
-                    <div>
-                      <label className="text-sm font-medium">Description</label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Description</label>
                       <Textarea
+                        classNames={{
+                          inputWrapper: "border-default-200",
+                        }}
                         minRows={3}
+                        radius="md"
+                        size="sm"
                         value={description}
                         variant="bordered"
                         onChange={(e: any) => setDescription(e.target.value)}
@@ -481,12 +658,14 @@ export default function EditEventModal({
               if (key.includes("advocacy")) {
                 return (
                   <>
-                    <div>
-                      <label className="text-sm font-medium">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">
                         Audience Type
                       </label>
                       <Input
-                        classNames={{ inputWrapper: "h-10" }}
+                        classNames={{ inputWrapper: "border-default-200 h-9" }}
+                        radius="md"
+                        size="sm"
                         type="text"
                         value={audienceType}
                         variant="bordered"
@@ -495,12 +674,14 @@ export default function EditEventModal({
                         }
                       />
                     </div>
-                    <div>
-                      <label className="text-sm font-medium">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">
                         Target number of audience
                       </label>
                       <Input
-                        classNames={{ inputWrapper: "h-10" }}
+                        classNames={{ inputWrapper: "border-default-200 h-9" }}
+                        radius="md"
+                        size="sm"
                         type="number"
                         value={expectedAudienceSize}
                         variant="bordered"
@@ -511,10 +692,15 @@ export default function EditEventModal({
                         }
                       />
                     </div>
-                    <div>
-                      <label className="text-sm font-medium">Description</label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Description</label>
                       <Textarea
+                        classNames={{
+                          inputWrapper: "border-default-200",
+                        }}
                         minRows={3}
+                        radius="md"
+                        size="sm"
                         value={description}
                         variant="bordered"
                         onChange={(e: any) => setDescription(e.target.value)}
@@ -529,11 +715,15 @@ export default function EditEventModal({
 
             {/* Show date but disabled to indicate not editable here (End Date intentionally omitted) */}
             <div className="grid grid-cols-1 gap-3 mt-2 items-end">
-              <div>
-                <label className="text-sm font-medium">Start Date</label>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Start Date</label>
                 <Input
                   disabled
-                  classNames={{ inputWrapper: "h-10 bg-default-100" }}
+                  classNames={{
+                    inputWrapper: "border-default-200 h-9 bg-default-100",
+                  }}
+                  radius="md"
+                  size="sm"
                   type="text"
                   value={
                     request.event?.Start_Date
@@ -550,10 +740,12 @@ export default function EditEventModal({
 
             {/* Time inputs: allow editing times while keeping date unchanged */}
             <div className="grid grid-cols-2 gap-3 mt-2">
-              <div>
-                <label className="text-sm font-medium">Start Time</label>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Start Time</label>
                 <Input
-                  classNames={{ inputWrapper: "h-10" }}
+                  classNames={{ inputWrapper: "border-default-200 h-9" }}
+                  radius="md"
+                  size="sm"
                   type="time"
                   value={startTime}
                   variant="bordered"
@@ -562,10 +754,12 @@ export default function EditEventModal({
                   }
                 />
               </div>
-              <div>
-                <label className="text-sm font-medium">End Time</label>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">End Time</label>
                 <Input
-                  classNames={{ inputWrapper: "h-10" }}
+                  classNames={{ inputWrapper: "border-default-200 h-9" }}
+                  radius="md"
+                  size="sm"
                   type="time"
                   value={endTime}
                   variant="bordered"
@@ -600,10 +794,10 @@ export default function EditEventModal({
             onPress={handleSave}
           >
             {isSubmitting
-              ? isAdminOrCoordinator
+              ? isDirectSave
                 ? "Saving..."
                 : "Submitting request..."
-              : isAdminOrCoordinator
+              : isDirectSave
                 ? "Save changes"
                 : "Submit change request"}
           </Button>

@@ -18,18 +18,18 @@ import {
   DropdownSection,
 } from "@heroui/dropdown";
 import {
-  Download,
-  Filter,
-  SlidersHorizontal,
+  ArrowDownToSquare as Download,
+  Funnel as Filter,
+  Wrench as SlidersHorizontal,
   Ticket,
   ChevronDown,
-} from "lucide-react";
+} from "@gravity-ui/icons";
 
 import {
   CreateTrainingEventModal,
   CreateBloodDriveEventModal,
   CreateAdvocacyEventModal,
-} from "@/components/calendar/event-creation-modal";
+} from "@/components/campaign/event-creation-modal";
 
 interface CalendarToolbarProps {
   onExport?: () => void;

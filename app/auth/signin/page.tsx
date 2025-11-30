@@ -6,7 +6,9 @@ import { Input } from "@heroui/input";
 import { Button } from "@heroui/button";
 import { Link } from "@heroui/link";
 import { Checkbox } from "@heroui/checkbox";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeSlash } from '@gravity-ui/icons';
+
+import { useLoading } from "@/components/loading-overlay";
 
 export default function SignIn() {
   const [showPassword, setShowPassword] = useState(false);
@@ -15,6 +17,7 @@ export default function SignIn() {
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  const { setIsLoading: setGlobalLoading } = useLoading();
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,13 +60,13 @@ export default function SignIn() {
       const { token, data } = body;
 
       // Debug: Log response data to help diagnose production issues
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[Login] Response data:', {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Login] Response data:", {
           hasToken: !!token,
           hasData: !!data,
           staffType: data?.StaffType || data?.staff_type || data?.role,
           isAdmin: data?.isAdmin,
-          dataKeys: data ? Object.keys(data) : []
+          dataKeys: data ? Object.keys(data) : [],
         });
       }
 
@@ -79,23 +82,25 @@ export default function SignIn() {
       // hydration even when the app used sessionStorage or a different key.
       try {
         // Get StaffType from response - backend now includes this field
-        const staffType = data?.StaffType || data?.staff_type || data?.role || null;
+        const staffType =
+          data?.StaffType || data?.staff_type || data?.role || null;
         const staffTypeStr = String(staffType || "").toLowerCase();
-        
+
         // Determine if user is Admin: StaffType === 'Admin' or explicit isAdmin flag
         // This is critical for sidebar to show correct icons
-        const isAdminUser = 
-          !!data?.isAdmin || 
-          staffType === 'Admin' || 
-          staffTypeStr === 'admin' ||
-          (staffTypeStr.includes('sys') && staffTypeStr.includes('admin'));
-        
+        const isAdminUser =
+          !!data?.isAdmin ||
+          staffType === "Admin" ||
+          staffTypeStr === "admin" ||
+          (staffTypeStr.includes("sys") && staffTypeStr.includes("admin"));
+
         const legacy = {
           role: staffType,
           StaffType: staffType, // CRITICAL: Sidebar needs this exact field name
           staff_type: staffType, // Also include lowercase variant for compatibility
           isAdmin: isAdminUser,
-          First_Name: data?.First_Name || data?.first_name || data?.FirstName || null,
+          First_Name:
+            data?.First_Name || data?.first_name || data?.FirstName || null,
           email: data?.Email || data?.email || null,
           id:
             data?.id ||
@@ -115,14 +120,14 @@ export default function SignIn() {
 
         if (typeof window !== "undefined") {
           localStorage.setItem("unite_user", JSON.stringify(legacy));
-          
+
           // Debug: Verify what was stored
-          if (process.env.NODE_ENV === 'development') {
-            console.log('[Login] Stored legacy object:', {
+          if (process.env.NODE_ENV === "development") {
+            console.log("[Login] Stored legacy object:", {
               StaffType: legacy.StaffType,
               role: legacy.role,
               isAdmin: legacy.isAdmin,
-              hasStaffType: !!legacy.StaffType
+              hasStaffType: !!legacy.StaffType,
             });
           }
         }
@@ -147,6 +152,11 @@ export default function SignIn() {
           } catch (e) {}
         }
       } catch (e) {}
+
+      // Set flag to show loading overlay on dashboard navigation
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("showLoadingOverlay", "true");
+      }
 
       // Use a full navigation so the browser sends the HttpOnly cookie and
       // the Next.js server-layout can read it during SSR.
@@ -233,7 +243,7 @@ export default function SignIn() {
                         size={20}
                       />
                     ) : (
-                      <EyeOff
+                      <EyeSlash
                         className="text-default-800 pointer-events-none"
                         size={20}
                       />

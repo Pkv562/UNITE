@@ -13,6 +13,8 @@ import EventCard from "@/components/campaign/event-card";
 import EventViewModal from "@/components/campaign/event-view-modal";
 import EditEventModal from "@/components/campaign/event-edit-modal";
 
+import { useLoading } from "@/components/loading-overlay";
+
 /**
  * Campaign Page Component
  * Main campaign management page with topbar, toolbar, and content area.
@@ -22,6 +24,8 @@ export default function CampaignPage() {
   // Defer initializing selectedDate to after hydration to avoid any
   // server/client time differences during initial render.
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+
+  const { setIsLoading } = useLoading();
 
   useEffect(() => {
     if (!selectedDate) setSelectedDate(new Date());
@@ -38,9 +42,13 @@ export default function CampaignPage() {
   const pageSize = 6; // show max 6 requests per page
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
-  const [quickFilterCategory, setQuickFilterCategory] = useState<
-    string | undefined
-  >(undefined);
+  const [quickFilter, setQuickFilter] = useState<{
+    category?: string;
+    startDate?: string;
+    endDate?: string;
+    province?: string;
+    district?: string;
+  } | null>(null);
   const [advancedFilter, setAdvancedFilter] = useState<{
     start?: string;
     end?: string;
@@ -61,7 +69,41 @@ export default function CampaignPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editRequest, setEditRequest] = useState<any>(null);
 
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+
+  const [provinces, setProvinces] = useState<any[]>([]);
+  const [districts, setDistricts] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchProvinces = async () => {
+      try {
+        const token = localStorage.getItem("unite_token");
+        const res = await fetch(`${API_URL}/api/loc/provinces`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        if (json.success) setProvinces(json.data);
+      } catch (error) {
+        console.error("Failed to fetch provinces:", error);
+      }
+    };
+    fetchProvinces();
+  }, [API_URL]);
+
+  const fetchDistricts = async (provinceId: number | string) => {
+    try {
+      const token = localStorage.getItem("unite_token");
+      const res = await fetch(`${API_URL}/api/loc/districts/${provinceId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.success) setDistricts(json.data);
+    } catch (error) {
+      console.error("Failed to fetch districts:", error);
+    }
+  };
 
   // Helper to parse a variety of date shapes (ISO string, ms timestamp,
   // and Mongo Extended JSON like { $date: { $numberLong: '...' } }).
@@ -131,7 +173,8 @@ export default function CampaignPage() {
       // Do not send date_from/date_to to server; advanced date filtering is
       // performed client-side against the event's Start_Date to avoid server
       // timezone/format mismatches.
-      if (quickFilterCategory) params.set("category", quickFilterCategory);
+      if (quickFilter?.category && quickFilter.category !== "all")
+        params.set("category", quickFilter.category);
 
       const url = `${API_URL}/api/requests/me?${params.toString()}`;
       // Request fresh data (avoid cached 304 responses) so client-side filters
@@ -190,6 +233,15 @@ export default function CampaignPage() {
   };
 
   useEffect(() => {
+    // Check if we should show loading overlay from login
+    if (
+      typeof window !== "undefined" &&
+      sessionStorage.getItem("showLoadingOverlay") === "true"
+    ) {
+      sessionStorage.removeItem("showLoadingOverlay");
+      setIsLoading(true);
+    }
+
     // load requests and also initialize the displayed user name/email for the topbar
     fetchRequests();
     // fetch published events for the calendar
@@ -216,17 +268,49 @@ export default function CampaignPage() {
       }
     })();
     try {
-      const info = getUserInfo();
+      const raw = localStorage.getItem("unite_user");
 
-      try {
-        debug("[Campaign] getUserInfo:", info);
-      } catch (e) {}
-      if (info?.displayName) setCurrentUserName(info.displayName);
-      else if (info?.raw?.name) setCurrentUserName(info.raw.name);
-      if (info?.email) setCurrentUserEmail(info.email);
+      if (raw) {
+        const u = JSON.parse(raw);
+        const first =
+          u.First_Name ||
+          u.First_Name ||
+          u.first_name ||
+          u.FirstName ||
+          u.firstName ||
+          u.First ||
+          "";
+        const middle =
+          u.Middle_Name ||
+          u.MiddleName ||
+          u.middle_name ||
+          u.middleName ||
+          u.Middle ||
+          "";
+        const last =
+          u.Last_Name ||
+          u.LastName ||
+          u.last_name ||
+          u.lastName ||
+          u.Last ||
+          "";
+        const parts = [first, middle, last]
+          .map((p: any) => (p || "").toString().trim())
+          .filter(Boolean);
+        const full = parts.join(" ");
+        const email =
+          u.Email || u.email || u.Email_Address || u.emailAddress || "";
+
+        if (full) setCurrentUserName(full);
+        else if (u.name) setCurrentUserName(u.name);
+        if (email) setCurrentUserEmail(email);
+      }
     } catch (err) {
       // ignore malformed localStorage entry
     }
+
+    // Mark initial load as done after setting states
+    setInitialLoadDone(true);
   }, []);
 
   // reset to first page whenever filters/search change
@@ -235,7 +319,7 @@ export default function CampaignPage() {
   }, [
     searchQuery,
     selectedTab,
-    quickFilterCategory,
+    JSON.stringify(quickFilter),
     JSON.stringify(advancedFilter),
   ]);
 
@@ -253,7 +337,7 @@ export default function CampaignPage() {
     currentPage,
     selectedTab,
     searchQuery,
-    quickFilterCategory,
+    JSON.stringify(quickFilter),
     JSON.stringify(advancedFilter),
   ]);
 
@@ -289,6 +373,13 @@ export default function CampaignPage() {
     };
     // Intentionally run once on mount to register the listener
   }, []);
+
+  // Hide global loading overlay after initial data loads
+  useEffect(() => {
+    if (initialLoadDone) {
+      setIsLoading(false);
+    }
+  }, [initialLoadDone, setIsLoading]);
 
   // Sample event data
   const events = [
@@ -372,14 +463,8 @@ export default function CampaignPage() {
   };
 
   // Handler for quick filter
-  const handleQuickFilter = (filter?: { category?: string | undefined }) => {
-    // called from toolbar dropdown with selected filters
-    if (filter && Object.prototype.hasOwnProperty.call(filter, "category")) {
-      setQuickFilterCategory(filter.category);
-    } else {
-      // clear
-      setQuickFilterCategory(undefined);
-    }
+  const handleQuickFilter = (filter: any) => {
+    setQuickFilter(filter);
   };
 
   // Handler for advanced filter (expects { start?, title?, requester? })
@@ -455,6 +540,13 @@ export default function CampaignPage() {
       if (data.coordinator) {
         // For createEventRequest controller we need coordinatorId in body (coordinatorId param)
         eventPayload.MadeByCoordinatorID = data.coordinator;
+      }
+
+      // If a stakeholder was selected, include it so server can assign and notify accordingly
+      if (data.stakeholder) {
+        eventPayload.MadeByStakeholderID = data.stakeholder;
+        // include explicit stakeholder reference (some controllers/validators accept this key)
+        eventPayload.stakeholder = data.stakeholder;
       }
 
       // Decide endpoint based on user role. Use getUserInfo helper for robust detection.
@@ -689,6 +781,63 @@ export default function CampaignPage() {
     }
   };
 
+  // Handle cancel event action coming from EventCard
+  const handleCancelEvent = async (reqObj: any) => {
+    if (!reqObj) return;
+    const requestId =
+      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.RequestId;
+
+    if (!requestId) {
+      setErrorModalMessage("Unable to determine request id for cancellation");
+      setErrorModalOpen(true);
+
+      return;
+    }
+
+    try {
+      const rawUser = localStorage.getItem("unite_user");
+      const user = rawUser ? JSON.parse(rawUser) : null;
+      const token =
+        localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token");
+      const headers: any = { "Content-Type": "application/json" };
+
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // Get coordinator ID from user or request
+      const coordinatorId =
+        user?.Coordinator_ID || user?.id || reqObj.coordinator_id;
+
+      if (!coordinatorId) {
+        setErrorModalMessage(
+          "Unable to determine coordinator for cancellation",
+        );
+        setErrorModalOpen(true);
+
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
+        method: "DELETE",
+        headers,
+        body: JSON.stringify({ coordinatorId }),
+      });
+      const resp = await res.json();
+
+      if (!res.ok) throw new Error(resp.message || "Failed to cancel request");
+
+      // refresh requests list to reflect cancellation
+      await fetchRequests();
+
+      return resp;
+    } catch (err: any) {
+      console.error("Cancel error", err);
+      setErrorModalMessage(err?.message || "Failed to cancel request");
+      setErrorModalOpen(true);
+      throw err;
+    }
+  };
+
   // Normalize status for a request and filter client-side to ensure tab
   // selection reliably matches regardless of backend inconsistencies.
   // Normalize status, preferring the event-level Status field when present.
@@ -714,6 +863,7 @@ export default function CampaignPage() {
           evStatus.includes("awaiting")
         )
           return "Pending";
+        if (evStatus.includes("cancel")) return "Cancelled";
         // If event.Status exists but is an unfamiliar token, map common aliases
         if (evStatus === "completed" || evStatus === "done") return "Approved";
       }
@@ -746,9 +896,35 @@ export default function CampaignPage() {
       joined.includes("awaiting")
     )
       return "Pending";
+    if (joined.includes("cancel")) return "Cancelled";
 
     return "Pending";
   };
+
+  const requestCounts = useMemo(() => {
+    const counts = {
+      approved: 0,
+      pending: 0,
+      rejected: 0,
+    };
+
+    requests.forEach((req) => {
+      const status = normalizeStatus(req);
+
+      if (status === "approved") {
+        counts.approved++;
+      } else if (status === "pending") {
+        counts.pending++;
+      } else if (status === "rejected") {
+        counts.rejected++;
+      }
+    });
+
+    return {
+      all: requests.length,
+      ...counts,
+    };
+  }, [requests]);
 
   const filteredRequests = requests.filter((r: any) => {
     // Tab/status filter (using event.Status preferred)
@@ -760,17 +936,57 @@ export default function CampaignPage() {
       if (selectedTab === "rejected" && s !== "Rejected") return false;
     }
 
-    // Quick filter: category (from toolbar)
-    if (quickFilterCategory) {
+    // Quick filter (from toolbar)
+    if (quickFilter) {
       const ev = r.event || {};
-      const rawCategory = ev.Category || ev.categoryType || ev.category || "";
-      const catKey = String(rawCategory || "").toLowerCase();
-      let categoryLabel = "Event";
 
-      if (catKey.includes("blood")) categoryLabel = "Blood Drive";
-      else if (catKey.includes("training")) categoryLabel = "Training";
-      else if (catKey.includes("advocacy")) categoryLabel = "Advocacy";
-      if (categoryLabel !== quickFilterCategory) return false;
+      // Category
+      if (quickFilter.category && quickFilter.category !== "all") {
+        const rawCategory = ev.Category || ev.categoryType || ev.category || "";
+        const catKey = String(rawCategory || "").toLowerCase();
+        let categoryLabel = "Event";
+
+        if (catKey.includes("blood")) categoryLabel = "Blood Drive";
+        else if (catKey.includes("training")) categoryLabel = "Training";
+        else if (catKey.includes("advocacy")) categoryLabel = "Advocacy";
+
+        if (categoryLabel !== quickFilter.category) return false;
+      }
+
+      // Date Range
+      if (quickFilter.startDate && quickFilter.endDate) {
+        const start = parseDate(quickFilter.startDate);
+        const end = parseDate(quickFilter.endDate);
+        const evStart = parseDate(ev.Start_Date || ev.date);
+
+        if (start && end && evStart) {
+          // Reset times for comparison (inclusive)
+          start.setHours(0, 0, 0, 0);
+          end.setHours(23, 59, 59, 999);
+          if (evStart < start || evStart > end) return false;
+        }
+      }
+
+      // Province
+      if (quickFilter.province) {
+        const pId = String(quickFilter.province);
+        // Check against various possible field names for province ID
+        const evPId = String(
+          ev.Province_ID || ev.province_id || ev.provinceId || "",
+        );
+
+        if (evPId && evPId !== pId) return false;
+      }
+
+      // District
+      if (quickFilter.district) {
+        const dId = String(quickFilter.district);
+        const evDId = String(
+          ev.District_ID || ev.district_id || ev.districtId || "",
+        );
+
+        if (evDId && evDId !== dId) return false;
+      }
     }
 
     // Search query (global search box) - match title or requester or coordinator
@@ -778,10 +994,39 @@ export default function CampaignPage() {
       const q = searchQuery.trim().toLowerCase();
       const ev = r.event || {};
       const title = (ev.Event_Title || ev.title || "").toString().toLowerCase();
-      // requester name
+      // requester name - check who actually created the request
       let requestee = "";
 
-      if (r.coordinator && r.coordinator.staff) {
+      if (
+        r.made_by_role === "Stakeholder" &&
+        r.stakeholder &&
+        r.stakeholder.staff
+      ) {
+        const s = r.stakeholder.staff;
+
+        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+          .trim()
+          .toLowerCase();
+      } else if (
+        (r.made_by_role === "Coordinator" ||
+          r.made_by_role === "SystemAdmin") &&
+        r.coordinator &&
+        r.coordinator.staff
+      ) {
+        const s = r.coordinator.staff;
+
+        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+          .trim()
+          .toLowerCase();
+      } else if (r.stakeholder && r.stakeholder.staff) {
+        // Fallback: stakeholder data exists
+        const s = r.stakeholder.staff;
+
+        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+          .trim()
+          .toLowerCase();
+      } else if (r.coordinator && r.coordinator.staff) {
+        // Final fallback: coordinator data
         const s = r.coordinator.staff;
 
         requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
@@ -808,7 +1053,36 @@ export default function CampaignPage() {
       if (advancedFilter.requester) {
         let requestee = "";
 
-        if (r.coordinator && r.coordinator.staff) {
+        if (
+          r.made_by_role === "Stakeholder" &&
+          r.stakeholder &&
+          r.stakeholder.staff
+        ) {
+          const s = r.stakeholder.staff;
+
+          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+            .trim()
+            .toLowerCase();
+        } else if (
+          (r.made_by_role === "Coordinator" ||
+            r.made_by_role === "SystemAdmin") &&
+          r.coordinator &&
+          r.coordinator.staff
+        ) {
+          const s = r.coordinator.staff;
+
+          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+            .trim()
+            .toLowerCase();
+        } else if (r.stakeholder && r.stakeholder.staff) {
+          // Fallback: stakeholder data exists
+          const s = r.stakeholder.staff;
+
+          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
+            .trim()
+            .toLowerCase();
+        } else if (r.coordinator && r.coordinator.staff) {
+          // Final fallback: coordinator data
           const s = r.coordinator.staff;
 
           requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
@@ -869,7 +1143,7 @@ export default function CampaignPage() {
     <div className="min-h-screen bg-white">
       {/* Page Header */}
       <div className="px-6 pt-6 pb-4">
-        <h1 className="text-2xl font-semibold text-gray-900">Campaign</h1>
+        <h1 className="text-2xl font-semibold">Campaign</h1>
       </div>
 
       {/* Topbar Component */}
@@ -882,12 +1156,20 @@ export default function CampaignPage() {
 
       {/* Campaign Toolbar Component */}
       <CampaignToolbar
+        counts={requestCounts}
+        currentPage={currentPage}
         defaultTab={selectedTab}
         onAdvancedFilter={handleAdvancedFilter}
         onCreateEvent={handleCreateEvent}
         onExport={handleExport}
+        onPageChange={setCurrentPage}
+        districts={districts}
+        provinces={provinces}
+        onDistrictFetch={fetchDistricts}
         onQuickFilter={handleQuickFilter}
         onTabChange={handleTabChange}
+        totalPages={totalPages}
+        totalRequests={totalRequests}
       />
 
       {/* Main Content Area */}
@@ -905,9 +1187,9 @@ export default function CampaignPage() {
               relative to this wrapper (keeps overlay fixed in the visible viewport while
               the inner content scrolls). */}
           <div className="overflow-y-auto h-full pb-12">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
               {requestsError && (
-                <div className="col-span-2 text-sm text-danger">
+                <div className="col-span-full text-sm text-danger">
                   {requestsError}
                 </div>
               )}
@@ -917,21 +1199,29 @@ export default function CampaignPage() {
               {paginatedRequests.map((req, index) => {
                 const event = req.event || {};
                 const title = event.Event_Title || event.title || "Untitled";
-                // Requestee name: prefer coordinator staff name, else stakeholder id
-                let requestee = "Unknown";
+                // Requestee name: check who actually created the request based on made_by_role
+                let requestee = req.createdByName || "Unknown";
+                let creatorDistrict = null;
 
-                if (req.coordinator && req.coordinator.staff) {
-                  const s = req.coordinator.staff;
-
-                  requestee =
-                    `${s.First_Name || ""} ${s.Last_Name || ""}`.trim();
-                } else if (
-                  req.MadeByStakeholderID ||
-                  event.MadeByStakeholderID
-                ) {
-                  requestee = (
-                    req.MadeByStakeholderID || event.MadeByStakeholderID
-                  ).toString();
+                // If creatorDistrict is still not set, try to get district based on stakeholder/coordinator presence
+                if (!creatorDistrict) {
+                  if (
+                    req.stakeholder &&
+                    (req.stakeholder.District_Number ||
+                      req.stakeholder.District_Name)
+                  ) {
+                    creatorDistrict =
+                      req.stakeholder.District_Number ||
+                      req.stakeholder.District_Name;
+                  } else if (
+                    req.coordinator &&
+                    (req.coordinator.District_Number ||
+                      req.coordinator.District_Name)
+                  ) {
+                    creatorDistrict =
+                      req.coordinator.District_Number ||
+                      req.coordinator.District_Name;
+                  }
                 }
 
                 const rawCategory =
@@ -954,13 +1244,18 @@ export default function CampaignPage() {
                     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
                     .join(" ");
                 }
-                // Map status to Approved/Pending/Rejected
+                // Map status to Approved/Pending/Rejected/Cancelled
                 const statusRaw = event.Status || req.Status || "Pending";
                 const status = statusRaw.includes("Reject")
                   ? "Rejected"
-                  : statusRaw.includes("Approved")
+                  : statusRaw.includes("Approved") ||
+                      statusRaw.includes("Complete") ||
+                      statusRaw.includes("Completed")
                     ? "Approved"
-                    : "Pending";
+                    : statusRaw.includes("Cancel") ||
+                        statusRaw.includes("Cancelled")
+                      ? "Cancelled"
+                      : "Pending";
 
                 const location = event.Location || event.location || "";
 
@@ -1002,7 +1297,7 @@ export default function CampaignPage() {
                   ? formatDateRange(start, end)
                   : event.date || "";
 
-                // Compute district display: prefer coordinator District_Number/Name and convert number to ordinal (1 -> 1st District)
+                // Compute district display: use the creator's district (stakeholder or coordinator)
                 const makeOrdinal = (n: number | string) => {
                   const num = parseInt(String(n), 10);
 
@@ -1017,14 +1312,9 @@ export default function CampaignPage() {
 
                 let displayDistrict = "";
 
-                if (
-                  req.coordinator &&
-                  (req.coordinator.District_Number ||
-                    req.coordinator.District_Name)
-                ) {
-                  const dn =
-                    req.coordinator.District_Number ||
-                    req.coordinator.District_Name;
+                // Use creator's district first (now properly set above)
+                if (creatorDistrict) {
+                  const dn = creatorDistrict;
                   // If district number looks numeric, convert to ordinal + ' District'
                   const parsed = parseInt(
                     String(dn).replace(/[^0-9]/g, ""),
@@ -1062,6 +1352,7 @@ export default function CampaignPage() {
                     request={req}
                     status={status as any}
                     title={title}
+                    onCancelEvent={() => handleCancelEvent(req)}
                     onEditEvent={() => handleOpenEdit(req)}
                     onRescheduleEvent={(
                       currentDate: string,
@@ -1075,50 +1366,7 @@ export default function CampaignPage() {
                 );
               })}
             </div>
-
             {/* Pagination controls (render after cards inside the scroll area) */}
-            {totalPages > 1 && (
-              <div className="col-span-2 mt-4">
-                <div className="bg-white/90 border-t border-default-200 py-3">
-                  <div className="max-w-full px-2 mx-auto flex items-center justify-between">
-                    <div className="text-sm text-default-600">
-                      Showing {(currentPage - 1) * pageSize + 1} -{" "}
-                      {Math.min(currentPage * pageSize, totalRequests)} of{" "}
-                      {totalRequests}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        className="px-3 py-1 border border-default-200 rounded shadow-sm hover:shadow focus:outline-none focus:ring-2 focus:ring-default-200 focus:ring-offset-0 disabled:opacity-50"
-                        disabled={currentPage === 1}
-                        onClick={() =>
-                          setCurrentPage((p) => Math.max(1, p - 1))
-                        }
-                      >
-                        Prev
-                      </button>
-                      {Array.from({ length: totalPages }).map((_, i) => (
-                        <button
-                          key={i}
-                          className={`px-3 py-1 border border-default-200 rounded shadow-sm hover:shadow focus:outline-none focus:ring-2 focus:ring-default-200 focus:ring-offset-0 ${currentPage === i + 1 ? "bg-default-800 text-white border-transparent" : "bg-white text-default-600"}`}
-                          onClick={() => setCurrentPage(i + 1)}
-                        >
-                          {i + 1}
-                        </button>
-                      ))}
-                      <button
-                        className="px-3 py-1 border border-default-200 rounded shadow-sm hover:shadow focus:outline-none focus:ring-2 focus:ring-default-200 focus:ring-offset-0 disabled:opacity-50"
-                        disabled={currentPage === totalPages}
-                        onClick={() =>
-                          setCurrentPage((p) => Math.min(totalPages, p + 1))
-                        }
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Overlay area positioned relative to wrapper. This keeps spinner / no-results

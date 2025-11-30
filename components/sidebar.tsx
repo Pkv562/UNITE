@@ -3,12 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Calendar,
-  Settings,
-  UsersRound,
+  Gear,
+  Persons,
   Ticket,
   Bell,
-  ContactRound,
-} from "lucide-react";
+  PersonPlanetEarth,
+} from "@gravity-ui/icons";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -16,6 +16,8 @@ import { getUserInfo } from "../utils/getUserInfo";
 import { fetchJsonWithAuth } from "../utils/fetchWithAuth";
 
 import { debug } from "@/utils/devLogger";
+import NotificationModal from "@/components/notification-modal";
+import SettingsModal from "@/components/settings-modal";
 
 interface SidebarProps {
   role?: string;
@@ -36,6 +38,9 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Prefer the `userInfo` prop when provided (it may be passed from the layout/server)
   // so both server and client render the same initial HTML and avoid hydration mismatches.
@@ -84,15 +89,17 @@ export default function Sidebar({
     role || (serverInfo && serverInfo.role)
       ? String(role || serverInfo.role).toLowerCase()
       : "";
-  const serverStaffTypeLower = serverStaffType ? String(serverStaffType).toLowerCase() : "";
-  // Only treat as system admin when server explicitly marks isAdmin, StaffType === 'Admin', 
+  const serverStaffTypeLower = serverStaffType
+    ? String(serverStaffType).toLowerCase()
+    : "";
+  // Only treat as system admin when server explicitly marks isAdmin, StaffType === 'Admin',
   // role === 'Admin', or role looks like a system admin.
   // Coerce to a boolean to avoid accidental string values leaking through the || operator
   // which can cause TypeScript to infer a union type (boolean | string).
   const serverIsSystemAdmin = Boolean(
     (serverInfo && serverInfo.isAdmin) ||
-      (serverStaffTypeLower === 'admin') ||
-      (serverRoleFromResolved === 'admin') ||
+      serverStaffTypeLower === "admin" ||
+      serverRoleFromResolved === "admin" ||
       (serverRoleFromResolved &&
         serverRoleFromResolved.includes("sys") &&
         serverRoleFromResolved.includes("admin")),
@@ -159,13 +166,15 @@ export default function Sidebar({
               rawLoaded.user.staff_type ||
               rawLoaded.user.staffType)) ||
           null;
-        const staffTypeLower = staffTypeLoaded ? String(staffTypeLoaded).toLowerCase() : "";
-        // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin', 
+        const staffTypeLower = staffTypeLoaded
+          ? String(staffTypeLoaded).toLowerCase()
+          : "";
+        // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin',
         // role === 'Admin', or system admin variant
         const loadedIsSystemAdmin =
           !!(loaded && loaded.isAdmin) ||
-          (staffTypeLower === 'admin') ||
-          (roleFromLoaded === 'admin') ||
+          staffTypeLower === "admin" ||
+          roleFromLoaded === "admin" ||
           (roleFromLoaded.includes("sys") && roleFromLoaded.includes("admin"));
         const loadedIsCoordinator =
           (!!staffTypeLoaded &&
@@ -239,14 +248,21 @@ export default function Sidebar({
             ? String(loaded.role).toLowerCase()
             : "";
           const rawLoaded = loaded?.raw || loaded || null;
-          const staffTypeFromLoaded = rawLoaded?.StaffType || rawLoaded?.Staff_Type || rawLoaded?.staff_type || rawLoaded?.staffType || roleFromLoaded;
-          const staffTypeLower = staffTypeFromLoaded ? String(staffTypeFromLoaded).toLowerCase() : "";
-          // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin', 
+          const staffTypeFromLoaded =
+            rawLoaded?.StaffType ||
+            rawLoaded?.Staff_Type ||
+            rawLoaded?.staff_type ||
+            rawLoaded?.staffType ||
+            roleFromLoaded;
+          const staffTypeLower = staffTypeFromLoaded
+            ? String(staffTypeFromLoaded).toLowerCase()
+            : "";
+          // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin',
           // role === 'Admin', or system admin variant
           let loadedIsSystemAdmin =
             !!(loaded && loaded.isAdmin) ||
-            (staffTypeLower === 'admin') ||
-            (roleFromLoaded === 'admin') ||
+            staffTypeLower === "admin" ||
+            roleFromLoaded === "admin" ||
             (roleFromLoaded.includes("sys") &&
               roleFromLoaded.includes("admin"));
 
@@ -273,13 +289,18 @@ export default function Sidebar({
                   parsedFallback?.staffType ||
                   null;
                 const fbLower = fbRole ? String(fbRole).toLowerCase() : "";
-                const fbStaffType = parsedFallback?.StaffType || parsedFallback?.staff_type || fbRole;
-                const fbStaffTypeLower = fbStaffType ? String(fbStaffType).toLowerCase() : "";
+                const fbStaffType =
+                  parsedFallback?.StaffType ||
+                  parsedFallback?.staff_type ||
+                  fbRole;
+                const fbStaffTypeLower = fbStaffType
+                  ? String(fbStaffType).toLowerCase()
+                  : "";
 
                 loadedIsSystemAdmin =
                   loadedIsSystemAdmin ||
-                  (fbStaffTypeLower === 'admin') ||
-                  (fbLower === 'admin') ||
+                  fbStaffTypeLower === "admin" ||
+                  fbLower === "admin" ||
                   (/sys|system/.test(fbLower) && /admin/.test(fbLower)) ||
                   !!parsedFallback?.isAdmin;
                 // dev-only debug removed
@@ -316,13 +337,15 @@ export default function Sidebar({
             (!!staffTypeLoaded &&
               String(staffTypeLoaded).toLowerCase() === "coordinator") ||
             roleFromLoaded2.includes("coordinator");
-          const staffTypeLower2 = staffTypeLoaded ? String(staffTypeLoaded).toLowerCase() : "";
-          // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin', 
+          const staffTypeLower2 = staffTypeLoaded
+            ? String(staffTypeLoaded).toLowerCase()
+            : "";
+          // Check if user is system admin: explicit isAdmin flag, StaffType === 'Admin',
           // role === 'Admin', or system admin variant
           const loadedIsSystemAdmin2 =
             !!(loaded && loaded.isAdmin) ||
-            (staffTypeLower2 === 'admin') ||
-            (roleFromLoaded2 === 'admin') ||
+            staffTypeLower2 === "admin" ||
+            roleFromLoaded2 === "admin" ||
             (roleFromLoaded2.includes("sys") &&
               roleFromLoaded2.includes("admin"));
 
@@ -336,24 +359,41 @@ export default function Sidebar({
         try {
           (async () => {
             try {
-              const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+              const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(
+                /\/$/,
+                "",
+              );
               const url = base ? `${base}/api/auth/me` : `/api/auth/me`;
               const body: any = await fetchJsonWithAuth(url).catch(() => ({}));
               const serverData = (body && (body.data || body)) || null;
+
               if (!serverData) return;
 
               const serverStaffType =
-                serverData?.StaffType || serverData?.staff_type || serverData?.role || null;
-              const serverRoleLower = serverStaffType ? String(serverStaffType).toLowerCase() : (serverData?.role || "").toString().toLowerCase();
+                serverData?.StaffType ||
+                serverData?.staff_type ||
+                serverData?.role ||
+                null;
+              const serverRoleLower = serverStaffType
+                ? String(serverStaffType).toLowerCase()
+                : (serverData?.role || "").toString().toLowerCase();
 
               const serverIsAdmin =
-                !!serverData?.isAdmin || serverRoleLower === 'admin' || (serverRoleLower.includes('sys') && serverRoleLower.includes('admin'));
+                !!serverData?.isAdmin ||
+                serverRoleLower === "admin" ||
+                (serverRoleLower.includes("sys") &&
+                  serverRoleLower.includes("admin"));
 
               const serverIsCoordinator =
-                (serverStaffType && String(serverStaffType).toLowerCase() === 'coordinator') || (String(serverData?.role || '').toLowerCase().includes('coordinator'));
+                (serverStaffType &&
+                  String(serverStaffType).toLowerCase() === "coordinator") ||
+                String(serverData?.role || "")
+                  .toLowerCase()
+                  .includes("coordinator");
 
               if (serverIsAdmin) setShowCoordinatorLink(true);
-              if (serverIsCoordinator || serverIsAdmin) setShowStakeholderLink(true);
+              if (serverIsCoordinator || serverIsAdmin)
+                setShowStakeholderLink(true);
             } catch (e) {
               // ignore network/fetch errors
             }
@@ -441,13 +481,13 @@ export default function Sidebar({
     // Only show stakeholder-management to system admins OR coordinators.
     {
       href: "/dashboard/stakeholder-management",
-      icon: ContactRound,
+      icon: PersonPlanetEarth,
       key: "stakeholder",
       visible: showStakeholderLink,
     },
     {
       href: "/dashboard/coordinator-management",
-      icon: UsersRound,
+      icon: Persons,
       key: "coordinator",
       visible: showCoordinatorLink,
     },
@@ -455,8 +495,8 @@ export default function Sidebar({
 
   const bottomLinks = [
     { href: "/dashboard/notification", icon: Bell },
-    // direct settings link so the sidebar navigates to the settings page
-    { href: "/dashboard/settings", icon: Settings },
+    // direct Gear link so the sidebar navigates to the Gear page
+    { href: "/dashboard/settings", icon: Gear },
   ];
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
 
@@ -534,7 +574,26 @@ export default function Sidebar({
     // optional: refresh count every 30s
     const id = setInterval(() => loadUnreadCount(), 30000);
 
-    return () => clearInterval(id);
+    const onRefresh = () => loadUnreadCount();
+    const onRead = (e: any) => {
+      if (e.detail && typeof e.detail.unread === "number") {
+        setUnreadCount(e.detail.unread);
+      } else {
+        loadUnreadCount();
+      }
+    };
+
+    window.addEventListener("unite:request-refresh-notifications", onRefresh);
+    window.addEventListener("unite:notifications-read", onRead);
+
+    return () => {
+      clearInterval(id);
+      window.removeEventListener(
+        "unite:request-refresh-notifications",
+        onRefresh,
+      );
+      window.removeEventListener("unite:notifications-read", onRead);
+    };
   }, [loadUnreadCount]);
 
   const renderButton = (
@@ -603,20 +662,19 @@ export default function Sidebar({
           // render unread badge for notifications link
           if (href === "/dashboard/notification") {
             // render custom button so we can show badge
-            const isActive = pathname === href;
+            const isActive = pathname === href || isNotificationOpen;
             const hiddenClasses = "";
 
             return (
-              <Link
+              <button
                 key={`bottom-${href}`}
-                aria-hidden={"false"}
-                className={`relative w-10 h-10 inline-flex items-center justify-center rounded-full transition-colors duration-200 ${
+                aria-label="Notifications"
+                className={`relative w-10 h-10 inline-flex items-center justify-center rounded-full transition-colors duration-200 cursor-pointer ${
                   isActive
                     ? "bg-danger text-white"
                     : "text-black border border-gray-300 hover:bg-gray-100"
                 }`}
-                href={href}
-                tabIndex={0}
+                onClick={() => setIsNotificationOpen(!isNotificationOpen)}
               >
                 {(() => {
                   const Icon = icon as any;
@@ -667,14 +725,51 @@ export default function Sidebar({
                     </span>
                   );
                 })()}
-              </Link>
+              </button>
+            );
+          }
+
+          if (href === "/dashboard/settings") {
+            const isActive = pathname === href || isSettingsOpen;
+
+            return (
+              <button
+                key={`bottom-${href}`}
+                aria-label="Settings"
+                className={`relative w-10 h-10 inline-flex items-center justify-center rounded-full transition-colors duration-200 cursor-pointer ${
+                  isActive
+                    ? "bg-black text-white border-black"
+                    : "text-black border border-gray-300 hover:bg-gray-100"
+                }`}
+                onClick={() => setIsSettingsOpen(true)}
+              >
+                {(() => {
+                  const Icon = icon as any;
+
+                  return (
+                    <Icon
+                      className="-translate-y-[0.5px]"
+                      size={16}
+                      strokeWidth={2}
+                    />
+                  );
+                })()}
+              </button>
             );
           }
 
           return renderButton(href, icon, `bottom-${href}`);
         })}
-        {/* Settings popover removed to avoid duplicate settings icon; use /dashboard/settings page for settings and logout */}
+        {/* Gear popover removed to avoid duplicate Gear icon; use /dashboard/Gear page for Gear and logout */}
       </div>
+      <NotificationModal
+        isOpen={isNotificationOpen}
+        onClose={() => setIsNotificationOpen(false)}
+      />
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
     </div>
   );
 }

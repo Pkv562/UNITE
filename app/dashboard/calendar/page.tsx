@@ -6,18 +6,16 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Clock as ClockIcon,
+  Clock,
   Calendar,
-  CalendarDays,
-  MoreVertical,
+  EllipsisVertical as MoreVertical,
   Eye,
-  Edit,
-  Users,
-  Trash2,
+  Pencil as Edit,
+  Persons as Users,
+  TrashBin as Trash2,
   Check,
-  X,
-  Menu,
-} from "lucide-react";
+  Xmark as X,
+} from "@gravity-ui/icons";
 import {
   Dropdown,
   DropdownTrigger,
@@ -42,6 +40,7 @@ import EventManageStaffModal from "@/components/calendar/event-manage-staff-moda
 import EventRescheduleModal from "@/components/calendar/event-reschedule-modal";
 import CalendarToolbar from "@/components/calendar/calendar-toolbar";
 import { fetchWithAuth } from "@/utils/fetchWithAuth";
+import { getUserInfo } from "@/utils/getUserInfo";
 
 export default function CalendarPage() {
   const pathname = usePathname();
@@ -57,6 +56,7 @@ export default function CalendarPage() {
   const [monthEventsByDate, setMonthEventsByDate] = useState<
     Record<string, any[]>
   >({});
+  const [detailedEvents, setDetailedEvents] = useState<Record<string, any>>({});
   const [eventsLoading, setEventsLoading] = useState(false);
   const [currentUserName, setCurrentUserName] = useState<string>(
     "Bicol Medical Center",
@@ -304,83 +304,50 @@ export default function CalendarPage() {
     return out;
   };
 
-  // Merge month multi-day events into a week map for the given currentDate
-  const mergeWeekWithMonth = (
-    normalizedWeek: Record<string, any[]>,
-    normalizedMonth: Record<string, any[]>,
-    currentDateParam: Date,
-  ) => {
+  // Fetch detailed information for events
+  const fetchEventDetails = async (eventIds: string[]) => {
+    if (!Array.isArray(eventIds) || eventIds.length === 0) return {};
+
+    // Filter out ids already cached
+    const idsToFetch = eventIds.filter((id) => id && !detailedEvents[id]);
+    if (idsToFetch.length === 0) return {};
+
+    const token =
+      typeof window !== "undefined" &&
+      (localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token"));
+
+    const headers: any = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
     try {
-      const wkStart = new Date(currentDateParam);
-      const dayOfWeek = wkStart.getDay();
-
-      wkStart.setDate(wkStart.getDate() - dayOfWeek);
-      wkStart.setHours(0, 0, 0, 0);
-      const wkEnd = new Date(wkStart);
-
-      wkEnd.setDate(wkStart.getDate() + 6);
-
-      const merged: Record<string, any[]> = {};
-
-      Object.keys(normalizedWeek || {}).forEach((k) => {
-        merged[k] = Array.isArray(normalizedWeek[k])
-          ? [...normalizedWeek[k]]
-          : [];
+      const res = await fetch(`${API_BASE}/api/events/batch`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ ids: idsToFetch }),
+        credentials: token ? undefined : "include",
       });
 
-      const addEventToDate = (localKey: string, ev: any) => {
-        if (!merged[localKey]) merged[localKey] = [];
-        const id = ev?.Event_ID ?? ev?.EventId ?? ev?._id ?? JSON.stringify(ev);
+      const body = await res.json();
 
-        if (
-          !merged[localKey].some(
-            (x) =>
-              (x?.Event_ID ?? x?.EventId ?? x?._id ?? JSON.stringify(x)) === id,
-          )
-        ) {
-          merged[localKey].push(ev);
+      if (res.ok && body && Array.isArray(body.data)) {
+        const result: Record<string, any> = {};
+        body.data.forEach((ev: any) => {
+          const id = ev.Event_ID || ev.EventId || ev.id;
+          if (id) result[String(id)] = ev;
+        });
+
+        if (Object.keys(result).length > 0) {
+          setDetailedEvents((prev) => ({ ...prev, ...result }));
         }
-      };
 
-      Object.keys(normalizedMonth || {}).forEach((k) => {
-        const arr = normalizedMonth[k] || [];
-
-        for (const ev of arr) {
-          let start: Date | null = null;
-          let end: Date | null = null;
-
-          try {
-            if (ev.Start_Date) start = parseServerDate(ev.Start_Date);
-          } catch (e) {
-            start = null;
-          }
-          try {
-            if (ev.End_Date) end = parseServerDate(ev.End_Date);
-          } catch (e) {
-            end = null;
-          }
-
-          if (!start) continue;
-          if (!end) end = start;
-
-          const cur = new Date(start);
-
-          cur.setHours(0, 0, 0, 0);
-          while (cur <= end) {
-            if (cur >= wkStart && cur <= wkEnd) {
-              const localKey = dateToLocalKey(new Date(cur));
-
-              addEventToDate(localKey, ev);
-            }
-            cur.setDate(cur.getDate() + 1);
-          }
-        }
-      });
-
-      return merged;
+        return result;
+      }
     } catch (e) {
-      return normalizedWeek || {};
+      // ignore batch fetch errors
     }
+
+    return {};
   };
 
   // Fetch real events from backend and populate week/month maps
@@ -388,152 +355,77 @@ export default function CalendarPage() {
     let mounted = true;
 
     const fetchData = async () => {
+      const startTime = Date.now();
       setEventsLoading(true);
-      // prepare holders so we can merge month multi-day events into week view if needed
-      let normalizedWeek: Record<string, any[]> = {};
+      // Fetch all public events and filter client-side for approved events in the current month
       let normalizedMonth: Record<string, any[]> = {};
 
       try {
-        // Week endpoint (passes currentDate as date param)
-        const weekUrl = `${API_BASE}/api/calendar/week?date=${encodeURIComponent(currentDate.toISOString())}&status=Approved`;
-        const weekResp = await fetch(weekUrl, { credentials: "include" });
-        const weekJson = await weekResp.json();
-        // Debug: raw week response received (logging removed)
-
-        if (
-          mounted &&
-          weekResp.ok &&
-          weekJson &&
-          weekJson.success &&
-          weekJson.data
-        ) {
-          // backend returns week object in `data` with `weekDays` map
-          const weekDaysRaw = weekJson.data.weekDays || {};
-          // Raw weekDays structure received (logging removed)
-
-          // Normalize keys to local YYYY-MM-DD so lookups match the frontend dates
-          normalizedWeek = normalizeEventsMap(weekDaysRaw);
-          setWeekEventsByDate(normalizedWeek);
-        } else if (mounted) {
-          setWeekEventsByDate({});
-        }
-
-        // Month endpoint (use year/month from currentDate)
+        // Fetch public events only for the current month range (server-side filtering)
         const year = currentDate.getFullYear();
-        const month = currentDate.getMonth() + 1; // service expects 1-12
-        const monthUrl = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
-        const monthResp = await fetch(monthUrl, { credentials: "include" });
-        const monthJson = await monthResp.json();
-        // Raw month response received (logging removed)
+        const monthIndex = currentDate.getMonth(); // 0-based month
+        const monthStart = new Date(year, monthIndex, 1);
+        const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+
+        const publicUrl = `${API_BASE}/api/public/events?date_from=${encodeURIComponent(monthStart.toISOString())}&date_to=${encodeURIComponent(monthEnd.toISOString())}`;
+        const publicResp = await fetch(publicUrl, { credentials: "include" });
+        const publicJson = await publicResp.json();
 
         if (
           mounted &&
-          monthResp.ok &&
-          monthJson &&
-          monthJson.success &&
-          monthJson.data
+          publicResp.ok &&
+          publicJson &&
+          Array.isArray(publicJson.data)
         ) {
-          // backend returns month object in `data` with `eventsByDate` map
-          const eventsByDateRaw = monthJson.data.eventsByDate || {};
+          const monthEvents = publicJson.data;
 
-          // Normalize keys to local YYYY-MM-DD so lookups match the frontend dates
-          normalizedMonth = normalizeEventsMap(eventsByDateRaw);
+          // Batch fetch detailed info for all events in the month (single request)
+          const eventIds = monthEvents
+            .map((e: any) => e.Event_ID || e.EventId)
+            .filter(Boolean);
+          if (eventIds.length > 0) {
+            await fetchEventDetails(eventIds);
+          }
+
+          // Group by date
+          const eventsByDate: Record<string, any[]> = {};
+          monthEvents.forEach((event: any) => {
+            const startDate = parseServerDate(event.Start_Date);
+            if (!startDate) return;
+            const dateKey = dateToLocalKey(startDate);
+            if (!eventsByDate[dateKey]) eventsByDate[dateKey] = [];
+            eventsByDate[dateKey].push(event);
+          });
+
+          // Normalize keys to local YYYY-MM-DD
+          normalizedMonth = normalizeEventsMap(eventsByDate);
           setMonthEventsByDate(normalizedMonth);
-        } else if (mounted) {
-          setMonthEventsByDate({});
-        }
 
-        // If the week data is sparse (multi-day events not expanded), merge month multi-day events into the week view.
-        try {
-          // Compute week range
+          // Create week view by filtering month events to current week
           const wkStart = new Date(currentDate);
           const dayOfWeek = wkStart.getDay();
-
           wkStart.setDate(wkStart.getDate() - dayOfWeek);
           wkStart.setHours(0, 0, 0, 0);
           const wkEnd = new Date(wkStart);
-
           wkEnd.setDate(wkStart.getDate() + 6);
 
-          // copy normalizedWeek into merged
-          const merged: Record<string, any[]> = {};
+          const weekEvents: Record<string, any[]> = {};
 
-          Object.keys(normalizedWeek || {}).forEach((k) => {
-            merged[k] = Array.isArray(normalizedWeek[k])
-              ? [...normalizedWeek[k]]
-              : [];
-          });
+          // First, collect all events that naturally fall within the current week dates
+          Object.keys(normalizedMonth).forEach((dateKey) => {
+            const events = normalizedMonth[dateKey] || [];
+            const eventDate = new Date(dateKey + "T00:00:00");
 
-          const addEventToDate = (localKey: string, ev: any) => {
-            if (!merged[localKey]) merged[localKey] = [];
-            // avoid duplicates by Event_ID
-            const id =
-              ev?.Event_ID ?? ev?.EventId ?? ev?._id ?? JSON.stringify(ev);
-
-            if (
-              !merged[localKey].some(
-                (x) =>
-                  (x?.Event_ID ?? x?.EventId ?? x?._id ?? JSON.stringify(x)) ===
-                  id,
-              )
-            ) {
-              merged[localKey].push(ev);
-            }
-          };
-
-          // iterate month events, expand multi-day events and add to merged if they overlap the week
-          Object.keys(normalizedMonth || {}).forEach((k) => {
-            const arr = normalizedMonth[k] || [];
-
-            for (const ev of arr) {
-              // parse start and end
-              let start: Date | null = null;
-              let end: Date | null = null;
-
-              try {
-                if (ev.Start_Date) start = parseServerDate(ev.Start_Date);
-              } catch (e) {
-                start = null;
-              }
-              try {
-                if (ev.End_Date) end = parseServerDate(ev.End_Date);
-              } catch (e) {
-                end = null;
-              }
-
-              if (!start) continue;
-              if (!end) end = start;
-
-              // iterate dates from start to end inclusive
-              const cur = new Date(start);
-
-              cur.setHours(0, 0, 0, 0);
-              while (cur <= end) {
-                if (cur >= wkStart && cur <= wkEnd) {
-                  const localKey = dateToLocalKey(new Date(cur));
-
-                  addEventToDate(localKey, ev);
-                }
-                cur.setDate(cur.getDate() + 1);
-              }
+            // Check if this date falls within the current week
+            if (eventDate >= wkStart && eventDate <= wkEnd) {
+              weekEvents[dateKey] = events;
             }
           });
 
-          // If merged contains more events than original normalizedWeek, update state
-          const mergedCount = Object.keys(merged).reduce(
-            (acc, k) => acc + (merged[k]?.length || 0),
-            0,
-          );
-          const origCount = Object.keys(normalizedWeek || {}).reduce(
-            (acc, k) => acc + ((normalizedWeek[k] || []).length || 0),
-            0,
-          );
-
-          if (mergedCount > origCount) {
-            setWeekEventsByDate(merged);
-          }
-        } catch (e) {
-          // ignore merge errors
+          setWeekEventsByDate(weekEvents);
+        } else if (mounted) {
+          setMonthEventsByDate({});
+          setWeekEventsByDate({});
         }
       } catch (error) {
         if (mounted) {
@@ -542,7 +434,17 @@ export default function CalendarPage() {
         }
         // Optionally log: console.error('Failed to fetch calendar data', error);
       } finally {
-        if (mounted) setEventsLoading(false);
+        if (mounted) {
+          // Ensure minimum 1.5 second loading time for better UX
+          const elapsed = Date.now() - startTime;
+          const minDuration = 1000; // shorten artificial minimum loading time
+          if (elapsed < minDuration) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, minDuration - elapsed),
+            );
+          }
+          setEventsLoading(false);
+        }
       }
     };
 
@@ -551,7 +453,7 @@ export default function CalendarPage() {
     return () => {
       mounted = false;
     };
-  }, [currentDate, activeView]);
+  }, [currentDate]);
 
   const navigateWeek = async (direction: "prev" | "next") => {
     setIsDateTransitioning(true);
@@ -680,6 +582,55 @@ export default function CalendarPage() {
     return `${num}${suffix}`;
   };
 
+  // Helper to convert Roman numerals to numbers
+  const romanToNumber = (roman: string): number => {
+    const romanMap: Record<string, number> = {
+      I: 1,
+      V: 5,
+      X: 10,
+      L: 50,
+      C: 100,
+      D: 500,
+      M: 1000,
+    };
+
+    let total = 0;
+    for (let i = 0; i < roman.length; i++) {
+      const current = romanMap[roman[i]];
+      const next = romanMap[roman[i + 1]];
+
+      if (next && current < next) {
+        total -= current;
+      } else {
+        total += current;
+      }
+    }
+
+    return total;
+  };
+
+  // Helper to extract district number from district name
+  const extractDistrictNumber = (districtName: string): number | null => {
+    if (!districtName || typeof districtName !== "string") return null;
+
+    // Try to match "District X" where X is Roman numeral or number
+    const match = districtName.match(/^District\s+(.+)$/i);
+    if (!match) return null;
+
+    const districtPart = match[1].trim();
+
+    // Try to parse as number first
+    const num = parseInt(districtPart, 10);
+    if (!isNaN(num)) return num;
+
+    // Try to convert Roman numeral
+    try {
+      return romanToNumber(districtPart.toUpperCase());
+    } catch {
+      return null;
+    }
+  };
+
   const getEventsForDate = (date: Date) => {
     const key = dateToLocalKey(date);
     const source =
@@ -698,14 +649,8 @@ export default function CalendarPage() {
 
     raw = Array.isArray(raw) ? raw : [];
 
-    // Only include events that are explicitly approved
-    const approved = raw.filter((e: any) => {
-      const status = (e && (e.Status ?? e.status ?? "")).toString
-        ? (e.Status ?? e.status ?? "").toString()
-        : "";
-
-      return status.toLowerCase() === "approved";
-    });
+    // Events from public API are already approved, no additional filtering needed
+    const approved = raw;
 
     // Deduplicate approved list just in case
     const deduped: any[] = [];
@@ -720,9 +665,8 @@ export default function CalendarPage() {
       deduped.push(e);
     }
 
-    // For month view, avoid showing multi-day events on every day: only show on the event Start_Date
-    const filterByStartDateForMonth = (ev: any) => {
-      if (activeView !== "month") return true;
+    // For both week and month views, avoid showing events on days other than their Start_Date
+    const filterByStartDate = (ev: any) => {
       let start: Date | null = null;
 
       try {
@@ -735,7 +679,7 @@ export default function CalendarPage() {
       return dateToLocalKey(start) === key;
     };
 
-    const finalList = deduped.filter(filterByStartDateForMonth);
+    const finalList = deduped.filter(filterByStartDate);
 
     // Apply quick / advanced filters
     const afterQuick = finalList
@@ -829,6 +773,9 @@ export default function CalendarPage() {
       });
 
     return afterQuick.map((e: any) => {
+      const eventId = e.Event_ID || e.EventId;
+      const detailedEvent = eventId ? detailedEvents[eventId] : null;
+
       // Start date may come in different shapes (ISO, number, or mongo export object)
       let start: Date | null = null;
 
@@ -874,27 +821,49 @@ export default function CalendarPage() {
         ? end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
         : "";
 
-      // Coordinator / stakeholder name — prefer createdByName from backend (stakeholder),
-      // then fall back to other fields used previously.
+      // Coordinator / stakeholder name — prioritize stakeholder over coordinator
       const coordinatorName =
-        e.createdByName ||
-        e.raw?.createdByName ||
-        e.coordinator?.name ||
+        detailedEvent?.stakeholder?.Stakeholder_Name ||
+        detailedEvent?.stakeholder?.name ||
+        detailedEvent?.Stakeholder_Name ||
+        detailedEvent?.createdByName ||
+        detailedEvent?.raw?.createdByName ||
         e.StakeholderName ||
+        e.stakeholder?.name ||
+        detailedEvent?.coordinator?.Coordinator_Name ||
+        detailedEvent?.coordinator?.name ||
+        detailedEvent?.Coordinator_Name ||
+        e.coordinator?.name ||
         e.MadeByCoordinatorName ||
         e.coordinatorName ||
         e.Email ||
-        "Local Government Unit";
+        "Coordinator";
 
-      // District number — prefer coordinator nested value but accept other shapes
+      // District number — prefer detailed event coordinator district, then stakeholder district, then fall back to basic event data
       const districtNumber =
+        detailedEvent?.coordinator?.district_number ??
+        detailedEvent?.stakeholder?.district_number ??
+        detailedEvent?.coordinator?.District_Number ??
+        (detailedEvent?.coordinator?.district?.name
+          ? extractDistrictNumber(detailedEvent.coordinator.district.name)
+          : null) ??
+        (detailedEvent?.stakeholder?.district?.name
+          ? extractDistrictNumber(detailedEvent.stakeholder.district.name)
+          : null) ??
         e.coordinator?.district_number ??
+        e.stakeholder?.district_number ??
         e.district_number ??
         e.DistrictNumber ??
-        e.district;
+        e.district ??
+        (e.coordinator?.district?.name
+          ? extractDistrictNumber(e.coordinator.district.name)
+          : null) ??
+        (e.stakeholder?.district?.name
+          ? extractDistrictNumber(e.stakeholder.district.name)
+          : null);
       const districtDisplay = districtNumber
         ? `${makeOrdinal(districtNumber)} District`
-        : "1st District";
+        : "District TBD";
 
       // Determine category (case-insensitive, check both Category and category)
       const rawCat = (e.Category ?? e.category ?? "").toString().toLowerCase();
@@ -906,6 +875,22 @@ export default function CalendarPage() {
 
       // Helper to find count values across shapes (main event or categoryData)
       const getVal = (keys: string[]) => {
+        // First check detailed event data
+        for (const k of keys) {
+          if (
+            detailedEvent &&
+            detailedEvent[k] !== undefined &&
+            detailedEvent[k] !== null
+          )
+            return detailedEvent[k];
+          if (
+            detailedEvent?.categoryData &&
+            detailedEvent.categoryData[k] !== undefined &&
+            detailedEvent.categoryData[k] !== null
+          )
+            return detailedEvent.categoryData[k];
+        }
+        // Then check basic event data
         for (const k of keys) {
           if (e[k] !== undefined && e[k] !== null) return e[k];
           if (
@@ -947,11 +932,11 @@ export default function CalendarPage() {
         countType = "Audience Count";
         count = `${expectedAudience} no.`;
       } else {
-        countType = "Audience Count";
-        count = "205 no.";
+        countType = "Details";
+        count = "View event";
       }
 
-      const baseTitle = e.Event_Title || e.title || "Lifesavers Blood Drive";
+      const baseTitle = e.Title || e.Event_Title || e.title || "Event Title";
       // For month view we keep the title as the event title only; tooltip will show times
       const displayTitle = baseTitle;
       // color codes: blood-drive -> red, advocacy -> yellow, training -> blue
@@ -968,9 +953,11 @@ export default function CalendarPage() {
         type: typeKey,
         district: districtDisplay,
         location:
+          detailedEvent?.Location ||
+          detailedEvent?.location ||
           e.Location ||
           e.location ||
-          "Ateneo Avenue, Bagumbayan Sur, Naga City, 4400 Camarines Sur, Philippine",
+          "Location to be determined",
         countType,
         count,
         coordinatorName,
@@ -984,22 +971,35 @@ export default function CalendarPage() {
   const handleExport = async () => {
     try {
       const year = currentDate.getFullYear();
-      const month = currentDate.getMonth() + 1;
-      const url = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
-      const res = await fetch(url, { credentials: "include" });
+      const month = currentDate.getMonth();
+      const publicUrl = `${API_BASE}/api/public/events`;
+      const res = await fetch(publicUrl, { credentials: "include" });
       const body = await res.json();
-      const blob = new Blob([JSON.stringify(body, null, 2)], {
-        type: "application/json",
-      });
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement("a");
 
-      a.href = href;
-      a.download = `calendar-${year}-${month}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(href);
+      if (res.ok && Array.isArray(body.data)) {
+        // Filter for events in the current month (public events are already approved)
+        const monthEvents = body.data.filter((event: any) => {
+          // Check if event is in current month
+          const startDate = parseServerDate(event.Start_Date);
+          if (!startDate) return false;
+          return (
+            startDate.getFullYear() === year && startDate.getMonth() === month
+          );
+        });
+
+        const blob = new Blob([JSON.stringify(monthEvents, null, 2)], {
+          type: "application/json",
+        });
+        const href = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+
+        a.href = href;
+        a.download = `calendar-${year}-${month + 1}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(href);
+      }
     } catch (e) {
       // ignore export failures silently
     }
@@ -1030,23 +1030,61 @@ export default function CalendarPage() {
 
   const refreshCalendarData = async () => {
     const year = currentDate.getFullYear();
-    const month = currentDate.getMonth() + 1;
+    const monthIndex = currentDate.getMonth();
 
     try {
-      const weekUrl = `${API_BASE}/api/calendar/week?date=${encodeURIComponent(currentDate.toISOString())}&status=Approved`;
-      const w = await fetch(weekUrl, { credentials: "include" });
-      const wj = await w.json();
-      const normalizedWeek = normalizeEventsMap(wj?.data?.weekDays || {});
+      const monthStart = new Date(year, monthIndex, 1);
+      const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
 
-      const monthUrl = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
-      const m = await fetch(monthUrl, { credentials: "include" });
-      const mj = await m.json();
-      const normalizedMonth = normalizeEventsMap(mj?.data?.eventsByDate || {});
+      const publicUrl = `${API_BASE}/api/public/events?date_from=${encodeURIComponent(monthStart.toISOString())}&date_to=${encodeURIComponent(monthEnd.toISOString())}`;
+      const publicResp = await fetch(publicUrl, { credentials: "include" });
+      const publicJson = await publicResp.json();
 
-      setMonthEventsByDate(normalizedMonth);
-      setWeekEventsByDate(
-        mergeWeekWithMonth(normalizedWeek, normalizedMonth, currentDate),
-      );
+      if (publicResp.ok && Array.isArray(publicJson.data)) {
+        const monthEvents = publicJson.data;
+
+        // Batch fetch detailed information for all events in the month
+        const eventIds = monthEvents
+          .map((e: any) => e.Event_ID || e.EventId)
+          .filter(Boolean);
+        if (eventIds.length > 0) {
+          await fetchEventDetails(eventIds);
+        }
+
+        // Group by date
+        const eventsByDate: Record<string, any[]> = {};
+        monthEvents.forEach((event: any) => {
+          const startDate = parseServerDate(event.Start_Date);
+          if (!startDate) return;
+          const dateKey = dateToLocalKey(startDate);
+          if (!eventsByDate[dateKey]) eventsByDate[dateKey] = [];
+          eventsByDate[dateKey].push(event);
+        });
+
+        const normalizedMonth = normalizeEventsMap(eventsByDate);
+        setMonthEventsByDate(normalizedMonth);
+
+        // Create week view by filtering month events to current week
+        const wkStart = new Date(currentDate);
+        const dayOfWeek = wkStart.getDay();
+        wkStart.setDate(wkStart.getDate() - dayOfWeek);
+        wkStart.setHours(0, 0, 0, 0);
+        const wkEnd = new Date(wkStart);
+        wkEnd.setDate(wkStart.getDate() + 6);
+
+        const weekEvents: Record<string, any[]> = {};
+
+        Object.keys(normalizedMonth).forEach((dateKey) => {
+          const events = normalizedMonth[dateKey] || [];
+          const eventDate = new Date(dateKey + "T00:00:00");
+
+          if (eventDate >= wkStart && eventDate <= wkEnd) {
+            weekEvents[dateKey] = events;
+          }
+        });
+
+        setWeekEventsByDate(weekEvents);
+      }
     } catch (e) {
       // ignore
     }
@@ -1132,17 +1170,30 @@ export default function CalendarPage() {
 
   const handleCreateEvent = async (eventType: string, data: any) => {
     try {
-      // Build the normalized event payload (no actor ids here)
+      const rawUser = localStorage.getItem("unite_user");
+      const user = rawUser ? JSON.parse(rawUser) : null;
+      const token =
+        localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token");
+      const headers: any = { "Content-Type": "application/json" };
+
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // Normalize event payload to match backend expectation
       const eventPayload: any = {
         Event_Title:
           data.eventTitle || data.eventDescription || `${eventType} event`,
         Location: data.location || "",
-        Event_Description:
-          data.eventDescription || data.Event_Description || undefined,
         Start_Date:
           data.startTime ||
           (data.date ? new Date(data.date).toISOString() : undefined),
         End_Date: data.endTime || undefined,
+        // Include description when provided (frontend modals use eventDescription)
+        Event_Description:
+          data.eventDescription ||
+          data.Event_Description ||
+          data.description ||
+          undefined,
         Email: data.email || undefined,
         Phone_Number: data.contactNumber || undefined,
         categoryType:
@@ -1153,6 +1204,7 @@ export default function CalendarPage() {
               : "Advocacy",
       };
 
+      // Category-specific mappings
       if (eventPayload.categoryType === "Training") {
         eventPayload.MaxParticipants = data.numberOfParticipants
           ? parseInt(data.numberOfParticipants, 10)
@@ -1167,112 +1219,95 @@ export default function CalendarPage() {
         eventPayload.TargetAudience =
           data.audienceType || data.targetAudience || undefined;
         eventPayload.Topic = data.topic || undefined;
+        // send expected audience size when provided from the advocacy modal
         eventPayload.ExpectedAudienceSize = data.numberOfParticipants
           ? parseInt(data.numberOfParticipants, 10)
           : undefined;
       }
 
-      if (data.coordinator) eventPayload.MadeByCoordinatorID = data.coordinator;
+      // If a coordinator was selected (admin or stakeholder flow), include it
+      if (data.coordinator) {
+        // For createEventRequest controller we need coordinatorId in body (coordinatorId param)
+        eventPayload.MadeByCoordinatorID = data.coordinator;
+      }
 
-      // If an auth token exists, prefer server-side identity resolution and
-      // omit client-supplied actor ids. If no token is present (legacy), keep
-      // sending the provided actor identifiers for backwards compatibility.
-      const rawUser =
-        typeof window !== "undefined"
-          ? localStorage.getItem("unite_user")
-          : null;
-      const user = rawUser ? JSON.parse(rawUser) : null;
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("unite_token") ||
-            sessionStorage.getItem("unite_token")
-          : null;
+      // If a stakeholder was selected, include it so server can assign and notify accordingly
+      if (data.stakeholder) {
+        eventPayload.MadeByStakeholderID = data.stakeholder;
+        // include explicit stakeholder reference (some controllers/validators accept this key)
+        eventPayload.stakeholder = data.stakeholder;
+      }
 
-      if (token) {
-        // Token present: send only the event payload (server derives user/role)
-        if (
-          user &&
-          (user.staff_type === "Admin" || user.staff_type === "Coordinator")
-        ) {
-          const res = await fetchWithAuth(`${API_BASE}/api/events/direct`, {
-            method: "POST",
-            body: JSON.stringify(eventPayload),
-          });
-          const resp = await res.json();
+      // Decide endpoint based on user role. Use getUserInfo helper for robust detection.
+      const info = getUserInfo();
+      const roleStr = String(
+        info.role || user?.staff_type || user?.role || "",
+      ).toLowerCase();
+      const isAdmin = !!(info.isAdmin || roleStr.includes("admin"));
+      const isCoordinator = !!roleStr.includes("coordinator");
 
-          if (!res.ok)
-            throw new Error(resp.message || "Failed to create event");
-          await refreshCalendarData();
+      if (isAdmin || isCoordinator) {
+        // Admin/Coordinator -> immediate publish endpoint
+        const creatorId =
+          user?.Admin_ID ||
+          user?.Coordinator_ID ||
+          user?.id ||
+          user?.ID ||
+          null;
+        const creatorRole =
+          info.role ||
+          user?.staff_type ||
+          user?.role ||
+          (isAdmin ? "Admin" : isCoordinator ? "Coordinator" : null);
 
-          return resp;
-        } else {
-          if (!data.coordinator)
-            throw new Error("Coordinator is required for requests");
-          const body = { coordinatorId: data.coordinator, ...eventPayload };
-          const res = await fetchWithAuth(`${API_BASE}/api/requests`, {
-            method: "POST",
-            body: JSON.stringify(body),
-          });
-          const resp = await res.json();
+        const body = {
+          creatorId,
+          creatorRole,
+          ...eventPayload,
+        };
 
-          if (!res.ok)
-            throw new Error(resp.message || "Failed to create request");
-          await refreshCalendarData();
+        const res = await fetch(`${API_BASE}/api/events/direct`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+        const resp = await res.json();
 
-          return resp;
-        }
+        if (!res.ok) throw new Error(resp.message || "Failed to create event");
+
+        // refresh requests list to show the newly created event
+        await refreshCalendarData();
+
+        return resp;
       } else {
-        // No token: legacy behavior - include actor ids if available
-        const headers: any = { "Content-Type": "application/json" };
+        // Stakeholder -> create request (needs coordinatorId)
+        if (!data.coordinator)
+          throw new Error("Coordinator is required for requests");
+        const stakeholderId =
+          user?.Stakeholder_ID || user?.StakeholderId || user?.id || null;
+        const body = {
+          coordinatorId: data.coordinator,
+          MadeByStakeholderID: stakeholderId,
+          ...eventPayload,
+        };
 
-        if (
-          user &&
-          (user.staff_type === "Admin" || user.staff_type === "Coordinator")
-        ) {
-          const body = {
-            creatorId: user.id,
-            creatorRole: user.staff_type,
-            ...eventPayload,
-          };
-          const res = await fetch(`${API_BASE}/api/events/direct`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(body),
-          });
-          const resp = await res.json();
+        const res = await fetch(`${API_BASE}/api/requests`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+        const resp = await res.json();
 
-          if (!res.ok)
-            throw new Error(resp.message || "Failed to create event");
-          await refreshCalendarData();
+        if (!res.ok)
+          throw new Error(resp.message || "Failed to create request");
 
-          return resp;
-        } else {
-          if (!data.coordinator)
-            throw new Error("Coordinator is required for requests");
-          const stakeholderId =
-            user?.Stakeholder_ID || user?.StakeholderId || user?.id || null;
-          const body = {
-            coordinatorId: data.coordinator,
-            MadeByStakeholderID: stakeholderId,
-            ...eventPayload,
-          };
-          const res = await fetch(`${API_BASE}/api/requests`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(body),
-          });
-          const resp = await res.json();
+        await refreshCalendarData();
 
-          if (!res.ok)
-            throw new Error(resp.message || "Failed to create request");
-          await refreshCalendarData();
-
-          return resp;
-        }
+        return resp;
       }
     } catch (err: any) {
-      // Do not log to console; propagate error to caller so the toolbar
-      // can set the modal error and render it without producing console warnings.
+      // Errors are already thrown with the API response message from lines 308 and 325
+      // Re-throw the error so it can be caught by the toolbar handler and displayed in modal
       throw err;
     }
   };
@@ -1366,81 +1401,164 @@ export default function CalendarPage() {
 
   // Build dropdown menus matching campaign design
   const getMenuByStatus = (event: any) => {
-    const statusRaw = event.raw?.Status || event.raw?.status || "";
-    const status = (statusRaw || "")
-      .toString()
-      .toLowerCase()
-      .includes("approve")
-      ? "Approved"
-      : (statusRaw || "").toString().toLowerCase().includes("reject")
-        ? "Rejected"
-        : "Pending";
+    // Calendar events are from public API; assume Approved for action availability
+    const status = "Approved";
 
-    // Helper: derive boolean flag for an action. Rules:
-    // - If the client is unauthenticated (no token), only allow 'view'.
-    // - If explicit boolean flag present on event or event.raw, use it.
-    // - Otherwise, if allowedActions array exists on event or event.raw, use that.
-    // - As a final fallback, allow admins/coordinators (detected from local user)
-    //   to perform admin actions.
-    const flagFor = (flagName: string, actionName?: string) => {
-      try {
-        // if no auth token, restrict to view-only
-        const token =
-          typeof window !== "undefined"
-            ? localStorage.getItem("unite_token") ||
-              sessionStorage.getItem("unite_token")
-            : null;
-        const isAuthenticated = !!token;
+    // Unauthenticated users: view-only
+    const token =
+      typeof window !== "undefined"
+        ? localStorage.getItem("unite_token") ||
+          sessionStorage.getItem("unite_token")
+        : null;
+    const isAuthenticated = !!token;
 
-        if (!isAuthenticated) {
-          return actionName === "view";
-        }
+    if (!isAuthenticated) {
+      return (
+        <DropdownMenu aria-label="Event actions menu" variant="faded">
+          <DropdownSection title="Actions">
+            <DropdownItem
+              key="view"
+              description="View this event"
+              startContent={<Eye />}
+              onPress={() => handleOpenViewEvent(event.raw)}
+            >
+              View Event
+            </DropdownItem>
+          </DropdownSection>
+        </DropdownMenu>
+      );
+    }
 
-        // event may have top-level flags (e.g., event.canEdit) or raw flags (event.raw.canEdit)
-        const explicit =
-          (event && (event as any)[flagName]) ??
-          (event && event.raw && event.raw[flagName]);
+    // Parse current user
+    const rawUserStr =
+      typeof window !== "undefined" ? localStorage.getItem("unite_user") : null;
+    let parsedUser: any = null;
+    try {
+      parsedUser = rawUserStr ? JSON.parse(rawUserStr) : null;
+    } catch (e) {
+      parsedUser = null;
+    }
 
-        if (explicit !== undefined && explicit !== null)
-          return Boolean(explicit);
+    const info = getUserInfo();
+    const userIsAdmin = !!info.isAdmin;
+    const userCoordinatorId =
+      parsedUser?.Coordinator_ID ||
+      parsedUser?.CoordinatorId ||
+      parsedUser?.CoordinatorId ||
+      parsedUser?.Coordinator ||
+      parsedUser?.Coordinator_ID;
+    const userStakeholderId =
+      parsedUser?.Stakeholder_ID ||
+      parsedUser?.StakeholderId ||
+      parsedUser?.StakeholderId ||
+      parsedUser?.Stakeholder ||
+      parsedUser?.Stakeholder_ID;
 
-        // fallback to allowedActions array
-        const allowed =
-          (event && event.allowedActions) ||
-          (event && event.raw && event.raw.allowedActions) ||
-          null;
-
-        if (Array.isArray(allowed) && actionName)
-          return allowed.includes(actionName);
-
-        // As a last resort, allow admins/coordinators broader access based on local user info
-        try {
-          const raw =
-            typeof window !== "undefined"
-              ? localStorage.getItem("unite_user")
-              : null;
-          const u = raw ? JSON.parse(raw as string) : null;
-          const roleStr = String(
-            u?.staff_type || u?.role || u?.staffRole || "",
-          ).toLowerCase();
-          const isAdmin = roleStr.includes("admin");
-          const isCoordinator = roleStr.includes("coordinator");
-
-          if (isAdmin || isCoordinator) return true;
-        } catch (e) {
-          // ignore
-        }
-
-        return false;
-      } catch (e) {
-        return false;
-      }
+    // Helpers to extract district/province objects from various shapes
+    const extractDistrictProvince = (obj: any) => {
+      if (!obj)
+        return { district_number: null, district_name: null, province: null };
+      return {
+        district_number:
+          obj.District_Number ||
+          obj.district_number ||
+          obj.District_ID ||
+          obj.DistrictId ||
+          null,
+        district_name:
+          obj.District_Name || obj.district_name || obj.district || null,
+        province: obj.Province || obj.province || obj.Province_Name || null,
+      };
     };
+
+    // Determine event ownership and related metadata (use detailedEvents when available)
+    const evRaw = event.raw || {};
+    const evId = evRaw.Event_ID || evRaw.EventId || evRaw.id;
+    const detailed = evId ? detailedEvents[evId] : null;
+
+    const eventCoordinatorId =
+      evRaw.MadeByCoordinatorID ||
+      evRaw.MadeByCoordinatorId ||
+      evRaw.coordinatorId ||
+      detailed?.coordinator?.id ||
+      detailed?.coordinator?.Coordinator_ID;
+    const eventStakeholderId =
+      evRaw.MadeByStakeholderID ||
+      evRaw.MadeByStakeholderId ||
+      evRaw.stakeholder ||
+      detailed?.stakeholder?.id ||
+      detailed?.stakeholder?.Stakeholder_ID;
+
+    const eventStakeholderMeta =
+      detailed?.stakeholder ||
+      evRaw.stakeholder ||
+      evRaw.MadeByStakeholder ||
+      evRaw.MadeByStakeholderMeta ||
+      null;
+    const stakeholderDP = extractDistrictProvince(eventStakeholderMeta);
+
+    const userDP = extractDistrictProvince(parsedUser || {});
+
+    const coordinatorOwns =
+      userCoordinatorId &&
+      eventCoordinatorId &&
+      String(userCoordinatorId) === String(eventCoordinatorId);
+    const stakeholderOwns =
+      userStakeholderId &&
+      eventStakeholderId &&
+      String(userStakeholderId) === String(eventStakeholderId);
+
+    // Coordinator may act if they own the event OR the event is owned by a stakeholder in the same district/province
+    const sameDistrictForCoordinator =
+      (userDP.district_number &&
+        stakeholderDP.district_number &&
+        String(userDP.district_number) ===
+          String(stakeholderDP.district_number)) ||
+      (userDP.district_name &&
+        stakeholderDP.district_name &&
+        String(userDP.district_name).toLowerCase() ===
+          String(stakeholderDP.district_name).toLowerCase());
+    const sameProvinceForCoordinator =
+      userDP.province &&
+      stakeholderDP.province &&
+      String(userDP.province).toLowerCase() ===
+        String(stakeholderDP.province).toLowerCase();
+
+    const userIsCoordinator = !!(
+      userCoordinatorId ||
+      String(info.role || "")
+        .toLowerCase()
+        .includes("coordinator")
+    );
+
+    const coordinatorHasFull =
+      userIsCoordinator &&
+      (coordinatorOwns ||
+        (eventStakeholderId &&
+          (sameDistrictForCoordinator || sameProvinceForCoordinator)) ||
+        stakeholderOwns);
+
+    const userIsStakeholder = !!(
+      userStakeholderId ||
+      String(info.role || "")
+        .toLowerCase()
+        .includes("stakeholder")
+    );
+    const stakeholderHasFull = userIsStakeholder && stakeholderOwns;
+
+    // Build allowed action flags
+    const allowView = true;
+    const allowEdit = userIsAdmin || coordinatorHasFull || stakeholderHasFull;
+    const allowManageStaff =
+      userIsAdmin || coordinatorHasFull || stakeholderHasFull;
+    const allowResched =
+      userIsAdmin || coordinatorHasFull || stakeholderHasFull;
+    const allowCancel = userIsAdmin || coordinatorHasFull || stakeholderHasFull;
 
     const approvedMenu = (
       <DropdownMenu aria-label="Event actions menu" variant="faded">
         <DropdownSection showDivider title="Actions">
-          {flagFor("canView", "view") ? (
+          {allowView ? (
             <DropdownItem
               key="view"
               description="View this event"
@@ -1450,7 +1568,7 @@ export default function CalendarPage() {
               View Event
             </DropdownItem>
           ) : null}
-          {flagFor("canEdit", "edit") ? (
+          {allowEdit ? (
             <DropdownItem
               key="edit"
               description="Edit an event"
@@ -1460,7 +1578,7 @@ export default function CalendarPage() {
               Edit Event
             </DropdownItem>
           ) : null}
-          {flagFor("canManageStaff", "manage-staff") ? (
+          {allowManageStaff ? (
             <DropdownItem
               key="manage-staff"
               description="Manage staff for this event"
@@ -1470,11 +1588,11 @@ export default function CalendarPage() {
               Manage Staff
             </DropdownItem>
           ) : null}
-          {flagFor("canReschedule", "resched") ? (
+          {allowResched ? (
             <DropdownItem
               key="reschedule"
               description="Reschedule this event"
-              startContent={<ClockIcon />}
+              startContent={<Clock className="w-3 h-3 text-gray-500" />}
               onPress={() => setRescheduleOpenId(event.raw.Event_ID)}
             >
               Reschedule Event
@@ -1482,7 +1600,7 @@ export default function CalendarPage() {
           ) : null}
         </DropdownSection>
         <DropdownSection title="Danger zone">
-          {flagFor("canAdminAction", "cancel") ? (
+          {allowCancel ? (
             <DropdownItem
               key="cancel"
               className="text-danger"
@@ -1500,63 +1618,6 @@ export default function CalendarPage() {
       </DropdownMenu>
     );
 
-    const pendingMenu = (
-      <DropdownMenu aria-label="Event actions menu" variant="faded">
-        <DropdownSection title="Actions">
-          {flagFor("canView", "view") ? (
-            <DropdownItem
-              key="view"
-              description="View this event"
-              startContent={<Eye />}
-              onPress={() => handleOpenViewEvent(event.raw)}
-            >
-              View Event
-            </DropdownItem>
-          ) : null}
-          {flagFor("canAccept", "accept") ? (
-            <DropdownItem
-              key="accept"
-              description="Accept this event"
-              startContent={<Check />}
-              onPress={() => setAcceptOpenId(event.raw.Event_ID)}
-            >
-              Accept Event
-            </DropdownItem>
-          ) : null}
-          {flagFor("canManageStaff", "manage-staff") ? (
-            <DropdownItem
-              key="manage-staff"
-              description="Manage staff for this event"
-              startContent={<Users />}
-              onPress={() => setManageStaffOpenId(event.raw.Event_ID)}
-            >
-              Manage Staff
-            </DropdownItem>
-          ) : null}
-          {flagFor("canReject", "reject") ? (
-            <DropdownItem
-              key="reject"
-              description="Reject this event"
-              startContent={<X />}
-              onPress={() => setRejectOpenId(event.raw.Event_ID)}
-            >
-              Reject Event
-            </DropdownItem>
-          ) : null}
-          {flagFor("canReschedule", "resched") ? (
-            <DropdownItem
-              key="reschedule"
-              description="Reschedule this event"
-              startContent={<ClockIcon />}
-              onPress={() => setRescheduleOpenId(event.raw.Event_ID)}
-            >
-              Reschedule Event
-            </DropdownItem>
-          ) : null}
-        </DropdownSection>
-      </DropdownMenu>
-    );
-
     const defaultMenu = (
       <DropdownMenu aria-label="Event actions menu" variant="faded">
         <DropdownSection title="Actions">
@@ -1564,9 +1625,7 @@ export default function CalendarPage() {
             key="view"
             description="View this event"
             startContent={<Eye />}
-            onPress={() =>
-              router.push(`/dashboard/events/${event.raw.Event_ID}`)
-            }
+            onPress={() => handleOpenViewEvent(event.raw)}
           >
             View Event
           </DropdownItem>
@@ -1575,8 +1634,6 @@ export default function CalendarPage() {
     );
 
     if (status === "Approved") return approvedMenu;
-    if (status === "Pending") return pendingMenu;
-
     return defaultMenu;
   };
 
@@ -1766,8 +1823,8 @@ export default function CalendarPage() {
                 }`}
                 onClick={() => handleViewChange("week")}
               >
-                <CalendarDays className="w-4 h-4" />
-                <span className="hidden xs:inline">Week</span>
+                <Calendar className="w-4 h-4" />
+                Week
               </button>
               <div className="w-px h-6 bg-gray-300" />
               <button
@@ -1861,8 +1918,45 @@ export default function CalendarPage() {
                   const dayEvents = getEventsForDate(day.fullDate);
 
                   return (
-                    <div key={index} className="min-h-[150px] sm:min-h-[500px]">
-                      {dayEvents.length === 0 ? (
+                    <div key={index} className="min-h-[500px]">
+                      {eventsLoading ? (
+                        // Skeleton loading for events
+                        <div className="space-y-3">
+                          {[...Array(3)].map((_, i) => (
+                            <div
+                              key={i}
+                              className="bg-white rounded-lg border border-gray-200 p-3 animate-pulse"
+                            >
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                                <div className="h-6 w-6 bg-gray-200 rounded"></div>
+                              </div>
+                              <div className="flex items-center gap-2 mb-3">
+                                <div className="h-6 w-6 bg-gray-200 rounded-full"></div>
+                                <div className="h-3 bg-gray-200 rounded w-20"></div>
+                              </div>
+                              <div className="flex gap-2 mb-3">
+                                <div className="h-6 bg-gray-200 rounded w-16"></div>
+                                <div className="h-6 bg-gray-200 rounded w-20"></div>
+                              </div>
+                              <div className="mb-2">
+                                <div className="h-3 bg-gray-200 rounded w-12 mb-1"></div>
+                                <div className="h-3 bg-gray-200 rounded w-16"></div>
+                              </div>
+                              <div className="mb-3">
+                                <div className="h-3 bg-gray-200 rounded w-14 mb-1"></div>
+                                <div className="h-3 bg-gray-200 rounded w-24"></div>
+                              </div>
+                              <div className="border-t border-gray-200 pt-2">
+                                <div className="flex justify-between items-center">
+                                  <div className="h-3 bg-gray-200 rounded w-16"></div>
+                                  <div className="h-5 bg-gray-200 rounded w-12"></div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : dayEvents.length === 0 ? (
                         <div className="h-20 flex items-center justify-center text-gray-400 text-xs">
                           No events
                         </div>
@@ -1914,9 +2008,9 @@ export default function CalendarPage() {
                               </div>
 
                               {/* Time and Type Badges */}
-                              <div className="flex flex-wrap gap-1 sm:gap-2 mb-2">
-                                <div className="bg-gray-100 rounded px-1.5 sm:px-2 py-0.5 sm:py-1 flex items-center gap-1">
-                                  <ClockIcon className="w-3 h-3 text-gray-500" />
+                              <div className="flex gap-2 mb-3">
+                                <div className="bg-gray-100 rounded px-2 py-1 flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-gray-500" />
                                   <span className="text-xs text-gray-700">
                                     {event.time}
                                   </span>
@@ -2012,38 +2106,53 @@ export default function CalendarPage() {
                         </div>
                       </div>
 
-                      <div className="space-y-0.5 sm:space-y-1">
-                        {day.events.map((event, eventIndex) => (
-                          <div
-                            key={eventIndex}
-                            className="text-xs p-0.5 sm:p-1 rounded font-medium truncate cursor-pointer transition-colors hover:shadow-sm"
-                            role="button"
-                            style={{
-                              backgroundColor: `${event.color}22`,
-                              color: event.color,
-                            }}
-                            tabIndex={0}
-                            title={`${eventLabelsMap[event.type as EventType]} : ${event.startTime || ""}${event.endTime ? ` - ${event.endTime}` : ""}`}
-                            onClick={() => handleOpenViewEvent(event.raw)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                handleOpenViewEvent(event.raw);
-                              }
-                            }}
-                          >
-                            <div className="flex items-center gap-1">
-                              <span className="truncate block text-xs">
-                                {event.title}
-                              </span>
-                              {event.startTime ? (
-                                <span className="text-xs font-semibold ml-0.5 hidden sm:inline">
-                                  {event.startTime}
+                      {eventsLoading ? (
+                        // Skeleton loading for month events
+                        <div className="space-y-1">
+                          {[...Array(Math.floor(Math.random() * 3) + 1)].map(
+                            (_, i) => (
+                              <div
+                                key={i}
+                                className="h-6 bg-gray-200 rounded animate-pulse"
+                                style={{ width: `${Math.random() * 40 + 60}%` }}
+                              ></div>
+                            ),
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {day.events.map((event, eventIndex) => (
+                            <div
+                              key={eventIndex}
+                              className="text-xs p-1 rounded font-medium truncate cursor-pointer transition-colors hover:shadow-sm"
+                              role="button"
+                              style={{
+                                backgroundColor: `${event.color}22`,
+                                color: event.color,
+                              }}
+                              tabIndex={0}
+                              title={`${eventLabelsMap[event.type as EventType]} : ${event.startTime || ""}${event.endTime ? ` - ${event.endTime}` : ""}`}
+                              onClick={() => handleOpenViewEvent(event.raw)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  handleOpenViewEvent(event.raw);
+                                }
+                              }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="truncate block">
+                                  {event.title}
                                 </span>
-                              ) : null}
+                                {event.startTime ? (
+                                  <span className="text-xs font-semibold ml-1">
+                                    {event.startTime}
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2069,31 +2178,8 @@ export default function CalendarPage() {
           setManageStaffOpenId(null);
         }}
         onSaved={async () => {
-          // refresh calendar after saving staff (preserve multi-day events by merging month into week)
-          const year = currentDate.getFullYear();
-          const month = currentDate.getMonth() + 1;
-
-          try {
-            const weekUrl = `${API_BASE}/api/calendar/week?date=${encodeURIComponent(currentDate.toISOString())}&status=Approved`;
-            const w = await fetch(weekUrl, { credentials: "include" });
-            const wj = await w.json();
-            const normalizedWeek = normalizeEventsMap(wj?.data?.weekDays || {});
-
-            const monthUrl = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
-            const m = await fetch(monthUrl, { credentials: "include" });
-            const mj = await m.json();
-            const normalizedMonth = normalizeEventsMap(
-              mj?.data?.eventsByDate || {},
-            );
-
-            // update both month and merged week maps
-            setMonthEventsByDate(normalizedMonth);
-            setWeekEventsByDate(
-              mergeWeekWithMonth(normalizedWeek, normalizedMonth, currentDate),
-            );
-          } catch (e) {
-            console.error(e);
-          }
+          // refresh calendar after saving staff
+          await refreshCalendarData();
         }}
       />
       <EventRescheduleModal
@@ -2103,30 +2189,8 @@ export default function CalendarPage() {
           setRescheduleOpenId(null);
         }}
         onSaved={async () => {
-          // refresh calendar after reschedule (preserve multi-day events by merging month into week)
-          const year = currentDate.getFullYear();
-          const month = currentDate.getMonth() + 1;
-
-          try {
-            const weekUrl = `${API_BASE}/api/calendar/week?date=${encodeURIComponent(currentDate.toISOString())}&status=Approved`;
-            const w = await fetch(weekUrl, { credentials: "include" });
-            const wj = await w.json();
-            const normalizedWeek = normalizeEventsMap(wj?.data?.weekDays || {});
-
-            const monthUrl = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
-            const m = await fetch(monthUrl, { credentials: "include" });
-            const mj = await m.json();
-            const normalizedMonth = normalizeEventsMap(
-              mj?.data?.eventsByDate || {},
-            );
-
-            setMonthEventsByDate(normalizedMonth);
-            setWeekEventsByDate(
-              mergeWeekWithMonth(normalizedWeek, normalizedMonth, currentDate),
-            );
-          } catch (e) {
-            console.error(e);
-          }
+          // refresh calendar after reschedule
+          await refreshCalendarData();
         }}
       />
       <EditEventModal
@@ -2137,32 +2201,10 @@ export default function CalendarPage() {
           setEditRequest(null);
         }}
         onSaved={async () => {
-          // refresh calendar after edit (preserve multi-day events by merging month into week)
+          // refresh calendar after edit
           setViewModalOpen(false);
           setEditModalOpen(false);
-          const year = currentDate.getFullYear();
-          const month = currentDate.getMonth() + 1;
-
-          try {
-            const weekUrl = `${API_BASE}/api/calendar/week?date=${encodeURIComponent(currentDate.toISOString())}&status=Approved`;
-            const w = await fetch(weekUrl, { credentials: "include" });
-            const wj = await w.json();
-            const normalizedWeek = normalizeEventsMap(wj?.data?.weekDays || {});
-
-            const monthUrl = `${API_BASE}/api/calendar/month?year=${year}&month=${month}&status=Approved`;
-            const m = await fetch(monthUrl, { credentials: "include" });
-            const mj = await m.json();
-            const normalizedMonth = normalizeEventsMap(
-              mj?.data?.eventsByDate || {},
-            );
-
-            setMonthEventsByDate(normalizedMonth);
-            setWeekEventsByDate(
-              mergeWeekWithMonth(normalizedWeek, normalizedMonth, currentDate),
-            );
-          } catch (e) {
-            console.error(e);
-          }
+          await refreshCalendarData();
         }}
       />
       {/* Accept confirmation modal */}
@@ -2189,14 +2231,14 @@ export default function CalendarPage() {
             </p>
             <div className="space-y-2">
               <label
-                htmlFor="accept-note"
                 className="text-sm font-medium text-default-900"
+                htmlFor="accept-note"
               >
                 Note (optional)
               </label>
               <textarea
-                id="accept-note"
                 className="w-full px-3 py-2 text-sm border border-default-300 rounded-lg"
+                id="accept-note"
                 rows={4}
                 value={acceptNote}
                 onChange={(e) =>
@@ -2276,14 +2318,14 @@ export default function CalendarPage() {
             </p>
             <div className="space-y-2">
               <label
-                htmlFor="reject-note"
                 className="text-sm font-medium text-default-900"
+                htmlFor="reject-note"
               >
                 Reason
               </label>
               <textarea
-                id="reject-note"
                 className="w-full px-3 py-2 text-sm border border-default-300 rounded-lg"
+                id="reject-note"
                 rows={4}
                 value={rejectNote}
                 onChange={(e) =>
