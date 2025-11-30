@@ -158,6 +158,10 @@ export default function CalendarPage() {
   // Mobile state
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Horizontal scroll refs for calendar views
+  const weekViewRef = useRef<HTMLDivElement>(null);
+  const monthViewRef = useRef<HTMLDivElement>(null);
+
   // Close create menu when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -175,6 +179,7 @@ export default function CalendarPage() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+
   // API base (allow override via NEXT_PUBLIC_API_URL)
   const API_BASE =
     typeof process !== "undefined" &&
@@ -1820,23 +1825,24 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* Views Container */}
-        <div className="relative min-h-[500px] sm:min-h-[700px]">
+        {/* Views Container - Fixed large size with horizontal scrolling */}
+        <div className="relative overflow-x-auto calendar-scroll-container">
           {/* Week View */}
           <div
-            className={`transition-all duration-500 ease-in-out ${getViewTransitionStyle("week")}`}
+            ref={weekViewRef}
+            className={`transition-all duration-500 ease-in-out w-[1200px] ${getViewTransitionStyle("week")}`}
           >
             <div>
               {/* Days of Week Header */}
-              <div className="grid grid-cols-7 gap-2 sm:gap-4 mb-4">
+              <div className="grid grid-cols-7 gap-4 mb-6 w-[1200px]">
                 {days.map((day, index) => (
                   <div key={`day-${index}`} className="text-center">
-                    <div className="text-xs sm:text-sm font-medium text-gray-500 mb-1 sm:mb-2">
+                    <div className="text-sm font-medium text-gray-500 mb-3">
                       {day.day}
                     </div>
                     <div className="flex justify-center">
                       <div
-                        className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-sm sm:text-lg font-semibold ${
+                        className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-semibold ${
                           day.isToday
                             ? "bg-red-500 text-white"
                             : "text-gray-900"
@@ -1850,26 +1856,26 @@ export default function CalendarPage() {
               </div>
 
               {/* Event Cards */}
-              <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4 mt-4 sm:mt-6">
+              <div className="grid grid-cols-7 gap-4 mt-8 w-[1200px]">
                 {days.map((day, index) => {
                   const dayEvents = getEventsForDate(day.fullDate);
 
                   return (
-                    <div key={index} className="min-h-[200px] sm:min-h-[500px]">
+                    <div key={index} className="min-h-[600px]">
                       {dayEvents.length === 0 ? (
-                        <div className="h-20 flex items-center justify-center text-gray-400 text-xs">
+                        <div className="h-32 flex items-center justify-center text-gray-400 text-sm">
                           No events
                         </div>
                       ) : (
-                        <div className="space-y-2 sm:space-y-3">
+                        <div className="space-y-4">
                           {dayEvents.map((event, eventIndex) => (
                             <div
                               key={eventIndex}
-                              className="bg-white rounded-lg border border-gray-200 p-2 sm:p-3 hover:shadow-md transition-shadow"
+                              className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow"
                             >
-                              {/* Three-dot menu */}
-                              <div className="flex justify-between items-start mb-1 sm:mb-2">
-                                <h4 className="font-semibold text-gray-900 text-xs sm:text-sm leading-tight pr-2 line-clamp-2">
+                              {/* Three-dot menu - Fixed centered container */}
+                              <div className="flex justify-between items-start mb-3">
+                                <h4 className="font-semibold text-gray-900 text-sm leading-tight pr-2 line-clamp-2 flex-1">
                                   {event.title}
                                 </h4>
                                 <Dropdown>
@@ -1877,11 +1883,13 @@ export default function CalendarPage() {
                                     <Button
                                       isIconOnly
                                       aria-label="Event actions"
-                                      className="hover:text-default-800 min-w-6 h-6"
+                                      className="hover:text-default-800 min-w-[32px] w-8 h-8 flex items-center justify-center rounded-md"
                                       size="sm"
                                       variant="light"
                                     >
-                                      <MoreVertical className="w-4 h-4" />
+                                      <div className="w-full h-full flex items-center justify-center">
+                                        <MoreVertical className="w-4 h-4 text-gray-600" />
+                                      </div>
                                     </Button>
                                   </DropdownTrigger>
                                   {getMenuByStatus(event)}
@@ -1889,66 +1897,66 @@ export default function CalendarPage() {
                               </div>
 
                               {/* Profile */}
-                              <div className="flex items-center gap-1 sm:gap-2 mb-2 sm:mb-3">
+                              <div className="flex items-center gap-3 mb-4">
                                 <div
-                                  className="h-5 w-5 sm:h-6 sm:w-6 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold"
+                                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold"
                                   style={{
                                     backgroundColor: getProfileColor(
                                       event.coordinatorName,
                                     ),
                                   }}
                                 >
-                                  <span className="text-white text-xs">
+                                  <span className="text-white">
                                     {getProfileInitial(event.coordinatorName)}
                                   </span>
                                 </div>
-                                <span className="text-xs text-gray-600 truncate">
+                                <span className="text-sm text-gray-600 truncate">
                                   {event.coordinatorName}
                                 </span>
                               </div>
 
                               {/* Time and Type Badges */}
-                              <div className="flex flex-wrap gap-1 sm:gap-2 mb-2 sm:mb-3">
-                                <div className="bg-gray-100 rounded px-1.5 sm:px-2 py-0.5 sm:py-1 flex items-center gap-1">
-                                  <ClockIcon className="w-3 h-3 text-gray-500" />
-                                  <span className="text-xs text-gray-700">
+                              <div className="flex flex-wrap gap-3 mb-4">
+                                <div className="bg-gray-100 rounded px-3 py-1 flex items-center gap-2">
+                                  <ClockIcon className="w-4 h-4 text-gray-500" />
+                                  <span className="text-sm text-gray-700">
                                     {event.time}
                                   </span>
                                 </div>
-                                <div className="bg-gray-100 rounded px-1.5 sm:px-2 py-0.5 sm:py-1">
-                                  <span className="text-xs text-gray-700">
+                                <div className="bg-gray-100 rounded px-3 py-1">
+                                  <span className="text-sm text-gray-700">
                                     {eventLabelsMap[event.type as EventType]}
                                   </span>
                                 </div>
                               </div>
 
                               {/* District */}
-                              <div className="mb-1 sm:mb-2">
-                                <div className="text-xs font-medium text-gray-700 mb-0.5">
+                              <div className="mb-3">
+                                <div className="text-sm font-medium text-gray-700 mb-1">
                                   District
                                 </div>
-                                <div className="text-xs text-gray-600 line-clamp-1">
+                                <div className="text-sm text-gray-600 line-clamp-1">
                                   {event.district}
                                 </div>
                               </div>
 
                               {/* Location */}
-                              <div className="mb-2 sm:mb-3">
-                                <div className="text-xs font-medium text-gray-700 mb-0.5">
+                              <div className="mb-4">
+                                <div className="text-sm font-medium text-gray-700 mb-1">
                                   Location
                                 </div>
-                                <div className="text-xs text-gray-600 line-clamp-2">
+                                <div className="text-sm text-gray-600 line-clamp-2">
                                   {event.location}
                                 </div>
                               </div>
 
                               {/* Count */}
-                              <div className="border-t border-gray-200 pt-1 sm:pt-2">
+                              <div className="border-t border-gray-200 pt-3">
                                 <div className="flex justify-between items-center">
-                                  <span className="text-xs text-gray-600">
+                                  <span className="text-sm text-gray-600">
                                     {event.countType}
                                   </span>
-                                  <span className="text-sm sm:text-lg font-bold text-red-500">
+                                  <span className="text-lg font-bold text-red-500">
                                     {event.count}
                                   </span>
                                 </div>
@@ -1966,34 +1974,35 @@ export default function CalendarPage() {
 
           {/* Month View */}
           <div
-            className={`transition-all duration-500 ease-in-out ${getViewTransitionStyle("month")}`}
+            ref={monthViewRef}
+            className={`transition-all duration-500 ease-in-out w-[1200px] ${getViewTransitionStyle("month")}`}
           >
             <div>
               {/* Days of Week Header */}
-              <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2 sm:mb-4">
+              <div className="grid grid-cols-7 gap-3 mb-4 w-[1200px]">
                 {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
                   <div key={day} className="text-center">
-                    <div className="text-xs sm:text-sm font-medium text-gray-500 mb-1 sm:mb-2">
+                    <div className="text-sm font-medium text-gray-500 mb-3">
                       {day}
                     </div>
-                    <div className="h-6 sm:h-10" />
+                    <div className="h-12" />
                   </div>
                 ))}
               </div>
 
               {/* Calendar Grid */}
-              <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+              <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden w-[1200px]">
                 <div className="grid grid-cols-7 gap-px bg-gray-200">
                   {generateMonthDays(currentDate).map((day, index) => (
                     <div
                       key={index}
-                      className={`min-h-[60px] sm:min-h-[100px] bg-white p-1 sm:p-2 ${
+                      className={`min-h-[120px] bg-white p-3 ${
                         !day.isCurrentMonth && "bg-gray-50 text-gray-400"
                       }`}
                     >
-                      <div className="flex justify-center mb-1 sm:mb-2">
+                      <div className="flex justify-center mb-3">
                         <div
-                          className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold ${
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
                             day.isToday
                               ? "bg-red-500 text-white"
                               : day.isCurrentMonth
@@ -2005,11 +2014,11 @@ export default function CalendarPage() {
                         </div>
                       </div>
 
-                      <div className="space-y-0.5 sm:space-y-1">
+                      <div className="space-y-2">
                         {day.events.map((event, eventIndex) => (
                           <div
                             key={eventIndex}
-                            className="text-xs p-0.5 sm:p-1 rounded font-medium truncate cursor-pointer transition-colors hover:shadow-sm"
+                            className="text-sm p-2 rounded font-medium truncate cursor-pointer transition-colors hover:shadow-sm"
                             role="button"
                             style={{
                               backgroundColor: `${event.color}22`,
@@ -2025,11 +2034,11 @@ export default function CalendarPage() {
                             }}
                           >
                             <div className="flex items-center gap-1">
-                              <span className="truncate block text-xs">
+                              <span className="truncate block">
                                 {event.title}
                               </span>
                               {event.startTime ? (
-                                <span className="text-xs font-semibold ml-0.5 hidden sm:inline">
+                                <span className="font-semibold ml-1">
                                   {event.startTime}
                                 </span>
                               ) : null}
@@ -2334,6 +2343,33 @@ export default function CalendarPage() {
           </ModalFooter>
         </ModalContent>
       </Modal>
+
+      <style jsx>{`
+        .calendar-scroll-container {
+          /* Custom scrollbar styles for better visibility */
+          scrollbar-width: thin;
+          scrollbar-color: #cbd5e0 #f7fafc;
+        }
+
+        .calendar-scroll-container::-webkit-scrollbar {
+          height: 12px;
+        }
+
+        .calendar-scroll-container::-webkit-scrollbar-track {
+          background: #f7fafc;
+          border-radius: 6px;
+        }
+
+        .calendar-scroll-container::-webkit-scrollbar-thumb {
+          background-color: #cbd5e0;
+          border-radius: 6px;
+          border: 2px solid #f7fafc;
+        }
+
+        .calendar-scroll-container::-webkit-scrollbar-thumb:hover {
+          background-color: #a0aec0;
+        }
+      `}</style>
     </div>
   );
 }
