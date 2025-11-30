@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
 import { Button } from "@heroui/button";
 import { Switch } from "@heroui/switch";
@@ -11,6 +11,17 @@ import { CheckboxGroup, Checkbox } from "@heroui/checkbox";
 import { Chip } from "@heroui/chip";
 import { Xmark, TrashBin } from "@gravity-ui/icons";
 import { parseDate } from "@internationalized/date";
+import { fetchJsonWithAuth } from "../utils/fetchWithAuth";
+
+interface Settings {
+  notificationsEnabled: boolean;
+  maxPendingRequests: number;
+  maxEventsPerDay: number;
+  maxBloodBagsPerDay: number;
+  advanceBookingDays: number;
+  blockedWeekdays: number[];
+  blockedDates: string[];
+}
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,29 +29,90 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [blockedDates, setBlockedDates] = useState<DateValue[]>([
-    parseDate("2026-01-26"),
-    parseDate("2026-01-14"),
-  ]);
+  const [settings, setSettings] = useState<Settings>({
+    notificationsEnabled: true,
+    maxPendingRequests: 100,
+    maxEventsPerDay: 3,
+    maxBloodBagsPerDay: 200,
+    advanceBookingDays: 30,
+    blockedWeekdays: [1, 0, 0, 0, 0, 0, 1], // Sun and Sat blocked
+    blockedDates: [],
+  });
+  const [loading, setLoading] = useState(false);
 
-  const removeBlockedDate = (dateToRemove: DateValue) => {
-    setBlockedDates(
-      blockedDates.filter(
-        (date) => date.toString() !== dateToRemove.toString(),
-      ),
-    );
-  };
+  useEffect(() => {
+    if (isOpen) {
+      loadSettings();
+    }
+  }, [isOpen]);
 
-  const handleDateChange = (date: DateValue | null) => {
-    // Prevent adding duplicate dates
-    if (date && !blockedDates.some((d) => d.toString() === date.toString())) {
-      setBlockedDates([...blockedDates, date]);
+  const loadSettings = async () => {
+    try {
+      setLoading(true);
+      const response = await fetchJsonWithAuth('/api/settings');
+      if (response.success) {
+        setSettings({
+          notificationsEnabled: response.data.notificationsEnabled ?? true,
+          maxPendingRequests: response.data.maxPendingRequests ?? 100,
+          maxEventsPerDay: response.data.maxEventsPerDay ?? 3,
+          maxBloodBagsPerDay: response.data.maxBloodBagsPerDay ?? 200,
+          advanceBookingDays: response.data.advanceBookingDays ?? 30,
+          blockedWeekdays: response.data.blockedWeekdays ?? [1, 0, 0, 0, 0, 0, 1],
+          blockedDates: response.data.blockedDates ?? [],
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    } finally {
+      setLoading(false);
     }
   };
+
+  const updateSettings = async (updates: Partial<Settings>) => {
+    try {
+      const newSettings = { ...settings, ...updates };
+      setSettings(newSettings);
+      await fetchJsonWithAuth('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify(updates),
+      });
+    } catch (error) {
+      console.error('Failed to update settings:', error);
+      // Revert on error
+      setSettings(settings);
+    }
+  };
+
+  const handleBlockedDateAdd = (date: DateValue | null) => {
+    if (date) {
+      const dateStr = `${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+      if (!settings.blockedDates.includes(dateStr)) {
+        updateSettings({ blockedDates: [...settings.blockedDates, dateStr] });
+      }
+    }
+  };
+
+  const handleBlockedDateRemove = (dateStr: string) => {
+    updateSettings({ blockedDates: settings.blockedDates.filter(d => d !== dateStr) });
+  };
+
+  const handleWeekdayChange = (selected: string[]) => {
+    const weekdays = [0, 1, 2, 3, 4, 5, 6].map(day => selected.includes(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][day]) ? 1 : 0);
+    updateSettings({ blockedWeekdays: weekdays });
+  };
+
+  const selectedWeekdays = settings.blockedWeekdays.map((blocked, index) => blocked ? ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][index] : null).filter(Boolean) as string[];
+
+  const blockedDateValues = settings.blockedDates.map(dateStr => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return parseDate(`${year}-${month}-${day}`);
+  });
 
   const renderField = (
     label: string,
     description: string,
+    value: number,
+    key: keyof Settings,
     hasRefresh = false,
   ) => (
     <div className="flex items-center justify-between py-4">
@@ -51,15 +123,16 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       <Input
         aria-label={label}
         className="w-48"
-        defaultValue="210"
+        type="number"
+        value={value.toString()}
+        onChange={(e) => updateSettings({ [key]: parseInt(e.target.value) || 0 })}
         endContent={
           hasRefresh ? (
             <Button isIconOnly size="sm" variant="light">
-                <TrashBin className="h-4 w-4 text-gray-500" />
+              <TrashBin className="h-4 w-4 text-gray-500" />
             </Button>
           ) : undefined
         }
-        type="number"
       />
     </div>
   );
@@ -108,7 +181,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           </p>
                         </div>
                         <Switch
-                          defaultSelected
+                          isSelected={settings.notificationsEnabled}
+                          onValueChange={(isSelected) => updateSettings({ notificationsEnabled: isSelected })}
                           aria-label="Enable notifications"
                         />
                       </div>
@@ -123,19 +197,27 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         {renderField(
                           "Maximum number of participants",
                           "Start providing your information by selecting your blood type. Add details below to proceed.",
+                          settings.maxPendingRequests,
+                          "maxPendingRequests",
                           true,
                         )}
                         {renderField(
                           "Maximum event slot",
                           "Start providing your information by selecting your blood type. Add details below to proceed.",
+                          settings.maxEventsPerDay,
+                          "maxEventsPerDay",
                         )}
                         {renderField(
                           "Maximum blood bags per day",
                           "Start providing your information by selecting your blood type. Add details below to proceed.",
+                          settings.maxBloodBagsPerDay,
+                          "maxBloodBagsPerDay",
                         )}
                         {renderField(
                           "Minimum days in advance for a request",
                           "Start providing your information by selecting your blood type. Add details below to proceed.",
+                          settings.advanceBookingDays,
+                          "advanceBookingDays",
                         )}
                       </div>
                     </section>
@@ -157,7 +239,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           </p>
                           <CheckboxGroup
                             className="mt-4"
-                            defaultValue={["sun", "sat"]}
+                            value={selectedWeekdays}
+                            onChange={handleWeekdayChange}
                             orientation="horizontal"
                           >
                             <Checkbox value="sun">Sun</Checkbox>
@@ -186,20 +269,19 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                               aria-label="Pick a date"
                               hideTimeZone
                               label={null}
-                              placeholder="Pick a date"
                               showMonthAndYearPickers
                               variant="bordered"
-                              onChange={handleDateChange}
+                              onChange={handleBlockedDateAdd}
                             />
                           </div>
                           <div className="mt-4 flex flex-wrap gap-2">
-                            {blockedDates.map((date) => (
+                            {blockedDateValues.map((date) => (
                               <Chip
                                 key={date.toString()}
                                 color="danger"
                                 endContent={<TrashBin className="h-4 w-4" />}
                                 variant="flat"
-                                onClose={() => removeBlockedDate(date)}
+                                onClose={() => handleBlockedDateRemove(`${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`)}
                               >
                                 {new Date(
                                   date.year,

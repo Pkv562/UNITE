@@ -157,3 +157,41 @@ notification:
   },
   "__v": 0
 }
+
+notification:
+
+/** 
+* Paste one or more documents here
+*/
+{
+  "__v": 0,
+  "advanceBookingDays": 0,
+  "allowCoordinatorStaffAssignment": false,
+  "allowWeekendEvents": false,
+  "blockedDates": [
+    "2025-11-27",
+    "2025-11-29"
+  ],
+  "blockedWeekdays": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ],
+  "createdAt": {
+    "$date": "2025-11-16T08:18:28.872Z"
+  },
+  "maxBloodBagsPerDay": 200,
+  "maxEventsPerDay": 3,
+  "maxPendingRequests": 5,
+  "notificationsEnabled": true,
+  "preventDoubleBooking": true,
+  "preventOverlappingRequests": true,
+  "requireStaffAssignment": false,
+  "updatedAt": {
+    "$date": "2025-11-21T16:37:22.233Z"
+  }
+}
