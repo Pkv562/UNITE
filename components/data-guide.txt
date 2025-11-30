@@ -130,3 +130,30 @@ municipality:
   },
   "__v": 0
 }
+
+notification:
+
+/** 
+* Paste one or more documents here
+*/
+{
+  "Notification_ID": "NOTIF_1763304625675_gv3p1e4fp",
+  "Recipient_ID": "STKH_1763287944642_5260wpf3e",
+  "RecipientType": "Stakeholder",
+  "Request_ID": "REQ_1763304625419_6041bsis6",
+  "Event_ID": "EVENT_1763304625273_xr5zfr71v",
+  "Title": "Event Request Accepted",
+  "Message": "Your event request has been accepted by the admin. Please review and approve.",
+  "NotificationType": "AdminAccepted",
+  "IsRead": false,
+  "ActionTaken": "Accepted",
+  "ActionNote": null,
+  "RescheduledDate": null,
+  "createdAt": {
+    "$date": "2025-11-16T14:50:25.677Z"
+  },
+  "updatedAt": {
+    "$date": "2025-11-16T14:50:25.677Z"
+  },
+  "__v": 0
+}

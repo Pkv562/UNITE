@@ -11,8 +11,14 @@ import {
   DropdownItem,
 } from "@heroui/dropdown";
 import { Select, SelectItem } from "@heroui/select";
-import { DateRangePicker, RangeValue } from "@heroui/date-picker";
+import { DateRangePicker } from "@heroui/date-picker";
 import { DateValue } from "@react-types/datepicker";
+
+// Define the RangeValue type inline
+type RangeValue<T> = {
+  start: T;
+  end: T;
+};
 import { today, getLocalTimeZone } from "@internationalized/date";
 import { Tabs, Tab } from "@heroui/tabs";
 import {
@@ -41,76 +47,6 @@ interface NotificationModalProps {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-// Sample data to match the design screenshot
-const SAMPLE_NOTIFICATIONS = [
-  {
-    _id: "sample-1",
-    NotificationType: "Reschedule",
-    Message: "You rescheduled a blood drive event from Local Government Unit",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-2",
-    NotificationType: "Request",
-    Message:
-      "Local Government Unit has requested a blood drive event on January 27, 2026",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-3",
-    NotificationType: "Assign",
-    Message: "You reassigned a coordinator",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-4",
-    NotificationType: "Request",
-    Message:
-      "Local Government Unit has requested a training event on January 27, 2026",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-5",
-    NotificationType: "Delete",
-    Message: "You deleted a coordinator",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-6",
-    NotificationType: "Delete",
-    Message: "You deleted a blood drive event by Local Government Unit",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-7",
-    NotificationType: "Delete",
-    Message: "You deleted a stakeholder",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-8",
-    NotificationType: "Request",
-    Message:
-      "Local Government Unit has requested an advocacy event on January 27, 2026",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: false,
-  },
-  {
-    _id: "sample-9",
-    NotificationType: "Approve",
-    Message: "You approved a blood drive event from Local Government Unit",
-    CreatedAt: new Date().setHours(8, 50),
-    IsRead: true, // Only this one is read in the list based on description
-  },
-];
 
 export default function NotificationModal({
   isOpen,
@@ -219,9 +155,8 @@ export default function NotificationModal({
     const recipientId = getRecipientId();
 
     if (!recipientId) {
-      // If no user context, just show samples for UI demo
-      setNotifications(SAMPLE_NOTIFICATIONS);
-
+      // If no user context, show empty state
+      setNotifications([]);
       return;
     }
 
@@ -236,27 +171,28 @@ export default function NotificationModal({
       params.append("limit", "50");
 
       const url = `${API_URL}/api/notifications?${params.toString()}`;
-      const body: any = await fetchJsonWithAuth(url);
+      const response: any = await fetchJsonWithAuth(url);
 
-      const items = body?.data?.notifications || body?.notifications || [];
+      if (response.success && response.data) {
+        const items = response.data;
 
-      // Sort by date desc
-      items.sort(
-        (a: any, b: any) =>
-          new Date(b.CreatedAt || b.created_at).getTime() -
-          new Date(a.CreatedAt || a.created_at).getTime(),
-      );
+        // Sort by date desc (should already be sorted by backend, but ensure)
+        items.sort(
+          (a: any, b: any) => {
+            const aDate = a.createdAt?.$date || a.createdAt || a.CreatedAt;
+            const bDate = b.createdAt?.$date || b.createdAt || b.CreatedAt;
+            return new Date(bDate).getTime() - new Date(aDate).getTime();
+          },
+        );
 
-      // FOR DEMO PURPOSES: If API returns empty, fill with samples so the user sees the design
-      if (items.length === 0) {
-        setNotifications(SAMPLE_NOTIFICATIONS);
-      } else {
         setNotifications(items);
+      } else {
+        setNotifications([]);
       }
     } catch (err) {
       console.error("Failed to load notifications", err);
-      // Fallback to samples on error for demo consistency
-      setNotifications(SAMPLE_NOTIFICATIONS);
+      setError("Failed to load notifications");
+      setNotifications([]);
     } finally {
       setLoading(false);
     }
@@ -278,7 +214,7 @@ export default function NotificationModal({
       const rType = getRecipientType();
 
       await fetchJsonWithAuth(`${API_URL}/api/notifications/mark-all-read`, {
-        method: "POST",
+        method: "PUT",
         body: JSON.stringify({ recipientId, recipientType: rType }),
       });
 
@@ -299,21 +235,6 @@ export default function NotificationModal({
   const markAsRead = async (n: any) => {
     if (n.IsRead || n.is_read) return;
     const nid = n.Notification_ID || n._id;
-
-    // Handle sample data click locally
-    if (String(nid).startsWith("sample-")) {
-      setNotifications((prev) =>
-        prev.map((item) => {
-          if ((item.Notification_ID || item._id) === nid) {
-            return { ...item, IsRead: true, is_read: true };
-          }
-
-          return item;
-        }),
-      );
-
-      return;
-    }
 
     if (!nid) return;
 
@@ -356,6 +277,7 @@ export default function NotificationModal({
 
     // If related to a request, open view modal
     const rid =
+      n.Request_ID ||
       n.RelatedEntityID ||
       n.RelatedEntityId ||
       n.related_entity_id ||
@@ -364,8 +286,8 @@ export default function NotificationModal({
     if (rid && n.NotificationType !== "System") {
       try {
         const url = `${API_URL}/api/requests/${encodeURIComponent(rid)}`;
-        const body: any = await fetchJsonWithAuth(url);
-        const data = body?.data || body?.request || body;
+        const response: any = await fetchJsonWithAuth(url);
+        const data = response?.data || response?.request || response;
 
         if (data) {
           setViewRequest(data);
@@ -394,14 +316,39 @@ export default function NotificationModal({
     if (selectedTab === "unread") {
       base = base.filter((n) => !(n.IsRead || n.is_read));
     } else if (selectedTab === "system") {
-      base = base.filter((n) => n.NotificationType === "System");
+      // System notifications might include signup requests, cancellations, etc.
+      base = base.filter((n) => {
+        const nType = (n.NotificationType || "").toLowerCase();
+        return nType.includes("signup") || nType.includes("cancel") || nType.includes("delete");
+      });
     }
 
     // Quick Filters
     if (qEventType && qEventType !== "all") {
       base = base.filter(
-        (n) =>
-          (n.NotificationType || "").toLowerCase() === qEventType.toLowerCase(),
+        (n) => {
+          const nType = (n.NotificationType || "").toLowerCase();
+          const filterType = qEventType.toLowerCase();
+          
+          // Map filter types to backend types
+          if (filterType === "request") {
+            return nType.includes("request") || nType.includes("newrequest") || nType.includes("newsignuprequest");
+          }
+          if (filterType === "reschedule") {
+            return nType.includes("reschedule") || nType.includes("adminrescheduled");
+          }
+          if (filterType === "approve") {
+            return nType.includes("approve") || nType.includes("accept") || nType.includes("adminaccepted") || nType.includes("coordinatorapproved") || nType.includes("requestcompleted") || nType.includes("signuprequestapproved");
+          }
+          if (filterType === "delete") {
+            return nType.includes("delete") || nType.includes("cancel") || nType.includes("requestdeleted") || nType.includes("requestcancelled");
+          }
+          if (filterType === "assign") {
+            return nType.includes("assign");
+          }
+          
+          return nType === filterType;
+        }
       );
     }
     if (qDateRange?.start && qDateRange?.end) {
@@ -411,7 +358,8 @@ export default function NotificationModal({
       end.setHours(23, 59, 59, 999);
 
       base = base.filter((n) => {
-        const date = new Date(n.CreatedAt || n.created_at);
+        const dateStr = n.CreatedAt?.$date || n.CreatedAt || n.createdAt;
+        const date = new Date(dateStr);
 
         return date >= start && date <= end;
       });
@@ -424,7 +372,8 @@ export default function NotificationModal({
     const groups: { [key: string]: any[] } = {};
 
     filteredNotifications.forEach((n) => {
-      const date = new Date(n.CreatedAt || n.created_at);
+      const dateStr = n.createdAt?.$date || n.createdAt || n.CreatedAt;
+      const date = new Date(dateStr);
       let key = "Older";
 
       if (isToday(date)) key = "Today";
@@ -453,7 +402,10 @@ export default function NotificationModal({
     const all = notifications.length;
     const unread = notifications.filter((n) => !(n.IsRead || n.is_read)).length;
     const system = notifications.filter(
-      (n) => n.NotificationType === "System",
+      (n) => {
+        const nType = (n.NotificationType || "").toLowerCase();
+        return nType.includes("signup") || nType.includes("cancel") || nType.includes("delete");
+      }
     ).length;
 
     return { all, unread, system };
@@ -471,14 +423,14 @@ export default function NotificationModal({
   const getIconAndStyle = (type: string) => {
     const t = (type || "").toLowerCase();
 
-    if (t.includes("reschedule")) {
+    if (t.includes("reschedule") || t.includes("adminrescheduled")) {
       return {
         icon: <Clock className="w-[18px] h-[18px]" />,
         bg: "bg-[#FFF8E1]", // Light yellow
         text: "text-[#F59E0B]", // Orange/Yellow
       };
     }
-    if (t.includes("delete") || t.includes("cancel") || t.includes("reject")) {
+    if (t.includes("delete") || t.includes("cancel") || t.includes("reject") || t.includes("requestrejected") || t.includes("requestcancelled") || t.includes("requestdeleted")) {
       return {
         icon: <TrashBin className="w-[18px] h-[18px]" />,
         bg: "bg-[#FFEAEA]", // Light red
@@ -488,7 +440,11 @@ export default function NotificationModal({
     if (
       t.includes("accept") ||
       t.includes("approve") ||
-      t.includes("confirm")
+      t.includes("confirm") ||
+      t.includes("adminaccepted") ||
+      t.includes("coordinatorapproved") ||
+      t.includes("requestcompleted") ||
+      t.includes("signuprequestapproved")
     ) {
       return {
         icon: <CircleCheck className="w-[18px] h-[18px]" />,
@@ -503,7 +459,7 @@ export default function NotificationModal({
         text: "text-[#4B5563]", // Gray text
       };
     }
-    if (t.includes("request")) {
+    if (t.includes("request") || t.includes("newrequest") || t.includes("newsignuprequest")) {
       return {
         // Using a gradient-like style for request reception
         icon: (
@@ -619,22 +575,22 @@ export default function NotificationModal({
                               variant="bordered"
                               onChange={(e) => setQEventType(e.target.value)}
                             >
-                              <SelectItem key="all" value="all">
+                              <SelectItem key="all">
                                 All
                               </SelectItem>
-                              <SelectItem key="Request" value="Request">
+                              <SelectItem key="Request">
                                 Request
                               </SelectItem>
-                              <SelectItem key="Reschedule" value="Reschedule">
+                              <SelectItem key="Reschedule">
                                 Reschedule
                               </SelectItem>
-                              <SelectItem key="Approve" value="Approve">
+                              <SelectItem key="Approve">
                                 Approve
                               </SelectItem>
-                              <SelectItem key="Delete" value="Delete">
+                              <SelectItem key="Delete">
                                 Delete
                               </SelectItem>
-                              <SelectItem key="Assign" value="Assign">
+                              <SelectItem key="Assign">
                                 Assign
                               </SelectItem>
                             </Select>
@@ -768,7 +724,7 @@ export default function NotificationModal({
                                       <Clock className="w-3 h-3 text-gray-400" />
                                       <span className="text-[10px] font-medium text-gray-600">
                                         {formatTime(
-                                          n.CreatedAt || n.created_at,
+                                          n.createdAt?.$date || n.createdAt || n.CreatedAt,
                                         )}
                                       </span>
                                     </div>
