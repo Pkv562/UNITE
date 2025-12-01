@@ -195,3 +195,50 @@ notification:
     "$date": "2025-11-21T16:37:22.233Z"
   }
 }
+
+training:
+
+{
+  "_id": { "$oid": "6912fd6ba5247cfc044951ca" },
+  "Training_ID": "EVENT_1762624202151_ahnifopau",
+  "TrainingType": "How to suck blood 2",
+  "MaxParticipants": { "$numberInt": "150" },
+  "createdAt": {
+    "$date": { "$numberLong": "1762624202166" }
+  },
+  "updatedAt": {
+    "$date": { "$numberLong": "1762632032816" }
+  },
+  "__v": { "$numberInt": "0" }
+}
+
+advocacy:
+
+{
+  "_id": { "$oid": "6912fd8ea5247cfc044951cb" },
+  "Advocacy_ID": "EVENT_1762628133544_4o91biuxt",
+  "TargetAudience": "Students",
+  "ExpectedAudienceSize": { "$numberInt": "120" }
+  "createdAt": {
+    "$date": { "$numberLong": "1762628133577" }
+  },
+  "updatedAt": {
+    "$date": { "$numberLong": "1762632002678" }
+  },
+  "__v": { "$numberInt": "0" }
+}
+
+blood drive:
+
+{
+  "_id": { "$oid": "6912fda4a5247cfc044951cc" },
+  "BloodDrive_ID": "EVENT_1762623648202_qqxgutqgb",
+  "Target_Donation": { "$numberInt": "25" },
+  "createdAt": {
+    "$date": { "$numberLong": "1762623648210" }
+  },
+  "updatedAt": {
+    "$date": { "$numberLong": "1762632138866" }
+  },
+  "__v": { "$numberInt": "0" }
+}

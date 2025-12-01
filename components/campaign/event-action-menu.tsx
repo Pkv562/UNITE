@@ -75,6 +75,24 @@ const EventActionMenu: React.FC<Props> = ({
       }
     }
 
+    // Edit action: show when allowed and handler provided
+    if (flagFor("canEdit", "edit") && typeof onEditEvent === "function") {
+      const k = "edit-event";
+      if (!seenKeys.has(k)) {
+        actions.push(
+          <DropdownItem
+            key={k}
+            description="Edit event"
+            startContent={<Pencil />}
+            onPress={onEditEvent}
+          >
+            Edit Event
+          </DropdownItem>,
+        );
+        seenKeys.add(k);
+      }
+    }
+
     if (flagFor("canManageStaff", "manage-staff")) {
       const k = "manage-staff";
       if (!seenKeys.has(k)) {
