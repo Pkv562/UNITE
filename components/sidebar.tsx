@@ -648,7 +648,7 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-16 h-screen bg-white flex flex-col items-center justify-between py-6 border-r border-default-300">
+    <div className="hidden md:flex w-16 h-screen bg-white flex-col items-center justify-between py-6 border-r border-default-300">
       {/* Top section */}
       <div className="flex flex-col items-center space-y-4">
         {links.map(({ href, icon, key, visible }) =>

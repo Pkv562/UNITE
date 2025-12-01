@@ -48,7 +48,7 @@ export default function Topbar({
     <div className="w-full bg-white border-default">
       <div className="flex items-center justify-between px-6 py-3">
         {/* Left side - User Profile */}
-        <div className="flex items-center gap-3">
+        <div className="hidden sm:flex items-center gap-3">
           <User
             avatarProps={{
               src: userAvatar,
@@ -71,10 +71,10 @@ export default function Topbar({
           </button>
         </div>
 
-        {/* Right side - Search Input */}
+        {/* Right side - Search Input (hidden on mobile) */}
         <div>
           <Button
-            className=" text-default bg-gray-100 borderursor-pointer text-xs"
+            className=" hidden sm:inline-flex text-default bg-gray-100 borderursor-pointer text-xs"
             radius="lg"
             size="md"
             id="topbar-search-button"
@@ -89,6 +89,7 @@ export default function Topbar({
             </Kbd>
           </Button>
         </div>
+        {/* Mobile drawer moved to parent page for centralized control */}
       </div>
     </div>
   );
