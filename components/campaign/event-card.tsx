@@ -1129,6 +1129,222 @@ const EventCard: React.FC<EventCardProps> = ({
     }
   })();
 
+  // Header status label: shows pending subtypes (unless the subtype is 'completed'),
+  // or base statuses like Approved/Rejected/Cancelled as fallback.
+  const headerStatusLabel = (() => {
+    try {
+      const pendingLabel = getPendingStageLabel();
+      const r = resolvedRequest || request || {};
+      const rawStatus = String(r?.Status || r?.status || status || "").toLowerCase();
+
+      // If pending subtype indicates 'completed', don't show it
+      if (rawStatus.includes("pending") && pendingLabel) {
+        const low = String(pendingLabel).toLowerCase();
+        if (low.includes("complete")) return null;
+        return pendingLabel;
+      }
+
+      if (rawStatus.includes("approve") || rawStatus.includes("approved")) return "Approved";
+      if (rawStatus.includes("reject") || rawStatus.includes("rejected")) return "Rejected";
+      if (rawStatus.includes("cancel")) return "Cancelled";
+
+      return (r?.statusLabel || r?.StatusLabel || r?.status || r?.Status || status) || null;
+    } catch (e) {
+      return null;
+    }
+  })();
+
+  // Helper to safely extract numeric counts from various backend shapes
+  const extractNumber = (v: any): number | null => {
+    try {
+      if (v === undefined || v === null) return null;
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      }
+      if (typeof v === "object") {
+        // Mongo Extended JSON shapes
+        if (v.$numberInt !== undefined) return Number(v.$numberInt);
+        if (v.$numberLong !== undefined) return Number(v.$numberLong);
+        if (v.$numberDecimal !== undefined) return Number(v.$numberDecimal);
+        // direct numeric-like keys
+        for (const k of Object.keys(v)) {
+          const maybe = (v as any)[k];
+          if (typeof maybe === "number") return maybe;
+          if (typeof maybe === "string" && /^[0-9]+(\.|$)/.test(maybe))
+            return Number(maybe);
+        }
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  // Derive goal count and label from the request/event object
+  const goalInfo = useMemo(() => {
+    const r = resolvedRequest || request || {};
+    const ev = r.event || r || {};
+
+    const categoryCandidate =
+      (ev?.Category || ev?.category || r?.Category || r?.category || category || "")
+        .toString()
+        .toLowerCase();
+
+    // Candidate fields for each type (try multiple casings)
+    const bloodTargets = [
+      ev?.BloodDrive?.Target_Donation,
+      ev?.bloodDrive?.Target_Donation,
+      ev?.BloodDrive?.TargetDonation,
+      ev?.bloodDrive?.TargetDonation,
+      ev?.Target_Donation,
+      ev?.TargetDonation,
+      r?.Target_Donation,
+      r?.TargetDonation,
+    ];
+
+    const trainingTargets = [
+      ev?.Training?.MaxParticipants,
+      ev?.training?.MaxParticipants,
+      ev?.Training?.Max_Participants,
+      ev?.training?.Max_Participants,
+      ev?.MaxParticipants,
+      ev?.Max_Participants,
+      r?.MaxParticipants,
+      r?.Max_Participants,
+    ];
+
+    const advocacyTargets = [
+      ev?.Advocacy?.ExpectedAudienceSize,
+      ev?.advocacy?.ExpectedAudienceSize,
+      ev?.Advocacy?.Expected_Audience_Size,
+      ev?.advocacy?.Expected_Audience_Size,
+      ev?.ExpectedAudienceSize,
+      ev?.Expected_Audience_Size,
+      r?.ExpectedAudienceSize,
+      r?.Expected_Audience_Size,
+    ];
+
+    const pickNumberFrom = (arr: any[]) => {
+      for (const a of arr) {
+        const n = extractNumber(a);
+        if (n !== null) return n;
+      }
+      return null;
+    };
+
+    if (categoryCandidate.includes("blood")) {
+      let n = pickNumberFrom(bloodTargets);
+      // Fallback: try to parse number from reviewSummary text
+      if (n === null) {
+        const txt =
+          String(ev?.reviewSummary || ev?.reviewMessage || r?.reviewSummary || r?.reviewMessage || "");
+        const m = txt.match(/target\s+donation\s+of\s+(\d+)/i) || txt.match(/target\s+donation[^\d]*(\d+)/i) || txt.match(/target\s+(?:donation|donations)[^\d]*(\d+)/i);
+        if (m && m[1]) n = extractNumber(m[1]);
+      }
+      return { count: n, label: "u.", isBlood: true };
+    }
+
+    if (categoryCandidate.includes("training")) {
+      let n = pickNumberFrom(trainingTargets);
+      if (n === null) {
+        const txt = String(ev?.reviewSummary || r?.reviewSummary || "");
+        const m = txt.match(/max(?:imum)?\s+participants?\s+of\s+(\d+)/i) || txt.match(/participants?[^\d]*(\d+)/i);
+        if (m && m[1]) n = extractNumber(m[1]);
+      }
+      return { count: n, label: "Participants", isBlood: false };
+    }
+
+    if (categoryCandidate.includes("advoc") || categoryCandidate.includes("advocacy")) {
+      let n = pickNumberFrom(advocacyTargets);
+      if (n === null) {
+        const txt = String(ev?.reviewSummary || r?.reviewSummary || "");
+        const m = txt.match(/expected\s+audience\s+size\s+of\s+(\d+)/i) || txt.match(/audience[^\d]*(\d+)/i) || txt.match(/participants?[^\d]*(\d+)/i);
+        if (m && m[1]) n = extractNumber(m[1]);
+      }
+      return { count: n, label: "Participants", isBlood: false };
+    }
+
+    // Fallback: try any known fields
+    const fallback = pickNumberFrom([
+      ...bloodTargets,
+      ...trainingTargets,
+      ...advocacyTargets,
+    ]);
+
+    return { count: fallback, label: fallback !== null ? "" : "", isBlood: false };
+  }, [resolvedRequest, request, fullRequest, category]);
+
+  // Format the date/time for the card footer area (e.g. "Dec 1 8:00 AM - 4:00 PM")
+  const cardDateRange = useMemo(() => {
+    const r = resolvedRequest || request || {};
+
+    const pick = (...cands: any[]) => {
+      for (const c of cands) {
+        if (c !== undefined && c !== null && c !== "") return c;
+      }
+      return null;
+    };
+
+    const startVal = pick(
+      r?.Start_Date,
+      r?.Start,
+      r?.start,
+      r?.StartTime,
+      r?.event?.Start_Date,
+      r?.event?.Start,
+      r?.event?.StartTime,
+    );
+
+    const endVal = pick(
+      r?.End_Date,
+      r?.End,
+      r?.end,
+      r?.EndTime,
+      r?.event?.End_Date,
+      r?.event?.End,
+      r?.event?.EndTime,
+    );
+
+    const formatDateShort = (d?: any) => {
+      if (!d) return null;
+      try {
+        const dt = new Date(d);
+        if (isNaN(dt.getTime())) return String(d);
+        return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      } catch (e) {
+        return String(d);
+      }
+    };
+
+    const formatTimeShort = (t?: any) => {
+      if (!t) return null;
+      try {
+        const dt = new Date(t);
+        if (isNaN(dt.getTime())) return String(t);
+        return dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      } catch (e) {
+        return String(t);
+      }
+    };
+
+    const datePart = formatDateShort(startVal) || formatDateShort(endVal) || null;
+    const startTime = formatTimeShort(startVal);
+    const endTime = formatTimeShort(endVal);
+
+    if (!datePart && !startTime && !endTime) return null;
+
+    if (datePart && startTime) {
+      return `${datePart} ${startTime}${endTime ? " - " + endTime : ""}`;
+    }
+
+    // Fallbacks
+    if (startTime && endTime) return `${startTime} - ${endTime}`;
+    if (startTime) return `${startTime}`;
+    if (datePart) return datePart;
+
+    return null;
+  }, [resolvedRequest, request, fullRequest]);
+
   return (
     <>
       <Card className="w-full rounded-xl border border-gray-200 shadow-none bg-white">
@@ -1138,13 +1354,18 @@ const EventCard: React.FC<EventCardProps> = ({
             <h3 className="text-lg font-semibold">{title}</h3>
             <div className="flex items-center gap-2 mt-1">
               <Avatar className="w-6 h-6" />
-              <p className="text-xs text-default-800">
-                {(request &&
-                  (request.createdByName ||
-                    (request.event && request.event.createdByName))) ||
-                  organization ||
-                  organizationType}
-              </p>
+              <div className="flex flex-col">
+                <p className="text-xs text-default-800">
+                  {(request &&
+                    (request.createdByName ||
+                      (request.event && request.event.createdByName))) ||
+                    organization ||
+                    organizationType}
+                </p>
+                {headerStatusLabel ? (
+                  <p className="text-xs text-default-400 mt-1">{headerStatusLabel}</p>
+                ) : null}
+              </div>
             </div>
           </div>
           <Dropdown>
@@ -1264,15 +1485,33 @@ const EventCard: React.FC<EventCardProps> = ({
                 {location}
               </p>
             </div>
+            <div className="flex justify-between items-center">
+              <p className="text-xs">Date</p>
+              <p className="text-xs text-default-800 font-medium text-right">
+                {cardDateRange || "—"}
+              </p>
+            </div>
           </div>
         </CardBody>
         <CardFooter className="pt-4 flex-col items-stretch gap-3">
           <div className="h-px w-full bg-default-200"></div>
           <div className="flex justify-between w-full items-center">
             <span className="text-xs">Goal Count</span>
-            <span className="text-2xl font-bold text-default-800">
-              {request?.event?.Target_Donation || "N/A"}{" "}
-              <span className="text-xs font-normal">u.</span>
+            <span
+              className={`text-2xl font-bold ${
+                goalInfo?.isBlood ? "text-danger" : "text-default-800"
+              }`}
+            >
+              {goalInfo?.count !== null && goalInfo?.count !== undefined
+                ? goalInfo.count
+                : "N/A"}
+              {goalInfo && goalInfo.count !== null ? (
+                goalInfo.isBlood ? (
+                  <span className="text-xs font-normal ml-2">{goalInfo.label}</span>
+                ) : (
+                  <span className="text-xs font-normal ml-2">{goalInfo.label}</span>
+                )
+              ) : null}
             </span>
           </div>
         </CardFooter>
@@ -1489,6 +1728,59 @@ const EventCard: React.FC<EventCardProps> = ({
               provinceVal = provinceVal || "—";
               municipalityVal = municipalityVal || "—";
               locationVal = locationVal || "—";
+
+                          // Helper to format date/time for the card: "Dec 1 8:00 AM - 4:00 PM"
+                          const formatDateShort = (d?: any) => {
+                            if (!d) return null;
+                            try {
+                              const dt = new Date(d);
+                              if (isNaN(dt.getTime())) return String(d);
+                              return dt.toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                              });
+                            } catch (e) {
+                              return String(d);
+                            }
+                          };
+
+                          const formatTimeShort = (t?: any) => {
+                            if (!t) return null;
+                            try {
+                              const dt = new Date(t);
+                              if (isNaN(dt.getTime())) return String(t);
+                              return dt.toLocaleTimeString("en-US", {
+                                hour: "numeric",
+                                minute: "2-digit",
+                              });
+                            } catch (e) {
+                              return String(t);
+                            }
+                          };
+
+                          const startVal = pick(
+                            r?.Start_Date,
+                            r?.Start,
+                            r?.start,
+                            r?.StartTime,
+                            r?.event?.Start_Date,
+                            r?.event?.Start,
+                            null,
+                          );
+
+                          const endVal = pick(
+                            r?.End_Date,
+                            r?.End,
+                            r?.end,
+                            r?.EndTime,
+                            r?.event?.End_Date,
+                            r?.event?.End,
+                            null,
+                          );
+
+                          const startDateShort = formatDateShort(startVal);
+                          const startTimeShort = formatTimeShort(startVal);
+                          const endTimeShort = formatTimeShort(endVal);
 
               return (
                 <div className="space-y-3 mb-4">

@@ -15,13 +15,7 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from "@heroui/popover";
 import { Select, SelectItem } from "@heroui/select";
 import { Avatar } from "@heroui/avatar";
-import {
-  ArrowDownToSquare,
-  Funnel,
-  Ticket,
-  ChevronDown,
-  Wrench,
-} from "@gravity-ui/icons";
+import { ArrowDownToSquare, Funnel, Ticket, ChevronDown, Wrench } from "@gravity-ui/icons";
 import {
   Modal,
   ModalContent,
@@ -55,6 +49,7 @@ interface CampaignToolbarProps {
   municipalities?: any[];
   onDistrictFetch?: (provinceId: string | number) => void;
   counts?: { all: number; approved: number; pending: number; rejected: number };
+  totalRequests?: number;
 }
 
 export default function CampaignToolbar({
@@ -239,10 +234,11 @@ export default function CampaignToolbar({
   return (
     <>
       <div className="w-full bg-white">
-        <div className="flex items-center justify-between px-6 py-3">
+        <div className="flex flex-row flex-wrap items-center justify-between px-6 py-3 gap-3 overflow-visible pr-6 z-20">
           {/* Left side: Tabs and Pagination group */}
-          <div className="flex items-center gap-4">
+          <div className="flex-1 min-w-0 flex items-center gap-4">
             {/* Status Tabs */}
+            <div className="min-w-0 overflow-x-auto">
             <Tabs
               classNames={{
                 tabList: "bg-gray-100 p-1",
@@ -283,6 +279,7 @@ export default function CampaignToolbar({
                 }
               />
             </Tabs>
+          </div>
 
             {/* Pagination and its buttons */}
             {totalPages > 1 && (
@@ -300,7 +297,7 @@ export default function CampaignToolbar({
           </div>
 
           {/* Right side - Action Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0 overflow-visible pr-2">
             {/* Export Button */}
             {/*<Button
               <Button
@@ -319,7 +316,7 @@ export default function CampaignToolbar({
             <Popover offset={10} placement="bottom" showArrow>
               <PopoverTrigger>
                 <Button
-                  className=" border-default-200 bg-white font-medium text-xs"
+                  className=" border-default-200 bg-white font-medium text-xs hidden sm:inline-flex"
                   endContent={<ChevronDown className="w-3 h-3" />}
                   radius="md"
                   size="sm"
@@ -480,7 +477,7 @@ export default function CampaignToolbar({
 
             {/* Advanced Filter opens modal */}
             <Button
-              className=" border-default-200 bg-white font-medium text-xs"
+              className=" border-default-200 bg-white font-medium text-xs hidden sm:inline-flex"
               endContent={<ChevronDown className="w-3 h-3" />}
               radius="md"
               size="sm"
@@ -491,18 +488,51 @@ export default function CampaignToolbar({
               Advanced Filter
             </Button>
 
+            {/* Removed separate mobile funnel icon to free space on small screens */}
+
             {/* Create Event Button Group with Dropdown Menu*/}
-            <ButtonGroup radius="md" size="sm" variant="solid">
+            <ButtonGroup radius="md" size="sm" variant="solid" className="flex-shrink-0 overflow-visible mr-3 relative z-50">
+              {/* Full button for desktop/tablet */}
               <Button
                 color="primary"
+                className="hidden sm:inline-flex items-center gap-2 rounded-l-md"
+                radius="md"
+                size="sm"
                 startContent={<Ticket className="w-4 h-4" />}
                 onPress={handleCreateEventClick}
+                style={{ borderTopLeftRadius: "0.75rem", borderBottomLeftRadius: "0.75rem", borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
               >
                 {currentEventLabel}
               </Button>
+
+              {/* Compact icon-only button for small screens */}
+              <Button
+                color="primary"
+                isIconOnly
+                radius="md"
+                size="sm"
+                className="inline-flex sm:hidden h-8 w-8 items-center justify-center rounded-l-md"
+                onPress={handleCreateEventClick}
+                aria-label={`Create ${currentEventLabel}`}
+                style={{ borderTopLeftRadius: "0.75rem", borderBottomLeftRadius: "0.75rem", borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+              >
+                <svg
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </Button>
               <Dropdown placement="bottom-end">
                 <DropdownTrigger>
-                  <Button isIconOnly color="primary">
+                  <Button isIconOnly color="primary" className="h-8 w-8 rounded-r-md" size="sm" style={{ borderTopRightRadius: "0.75rem", borderBottomRightRadius: "0.75rem", borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}>
                     <ChevronDown className="w-4 h-4" />
                   </Button>
                 </DropdownTrigger>

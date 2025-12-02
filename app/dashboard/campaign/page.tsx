@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { Ticket, Calendar as CalIcon, PersonPlanetEarth, Persons, Bell, Gear } from "@gravity-ui/icons";
 import { Modal } from "@heroui/modal";
 
 import { getUserInfo } from "../../../utils/getUserInfo";
@@ -25,6 +26,7 @@ export default function CampaignPage() {
   // Defer initializing selectedDate to after hydration to avoid any
   // server/client time differences during initial render.
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const { setIsLoading } = useLoading();
 
@@ -901,11 +903,11 @@ export default function CampaignPage() {
     requests.forEach((req) => {
       const status = normalizeStatus(req);
 
-      if (status === "approved") {
+      if (status === "Approved") {
         counts.approved++;
-      } else if (status === "pending") {
+      } else if (status === "Pending") {
         counts.pending++;
-      } else if (status === "rejected") {
+      } else if (status === "Rejected") {
         counts.rejected++;
       }
     });
@@ -1152,8 +1154,26 @@ export default function CampaignPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Page Header */}
-      <div className="px-6 pt-6 pb-4">
+      <div className="px-6 pt-6 pb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Campaign</h1>
+        {/* Mobile hamburger at top-right next to Campaign title */}
+        <button
+          aria-label="Open navigation"
+          className="inline-flex items-center justify-center p-2 rounded-md md:hidden"
+          onClick={() => setMobileNavOpen(true)}
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M3 5H17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <path d="M3 10H17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            <path d="M3 15H17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
       </div>
 
       {/* Topbar Component */}
@@ -1184,21 +1204,23 @@ export default function CampaignPage() {
       />
 
       {/* Main Content Area */}
-      <div className="px-6 py-6 flex gap-4">
-        {/* Calendar Section */}
-        <CampaignCalendar
-          events={approvedEvents}
-          selectedDate={selectedDate}
-          onDateSelect={handleDateSelect}
-        />
+      <div className="px-6 py-6 flex flex-col md:flex-row gap-4">
+        {/* Calendar Section (on mobile appears after cards) */}
+        <div className="md:order-1 order-2 md:w-[480px] w-full">
+          <CampaignCalendar
+            events={approvedEvents}
+            selectedDate={selectedDate}
+            onDateSelect={handleDateSelect}
+          />
+        </div>
 
-        {/* Event / Request Cards Section - Scrollable */}
-        <div className="flex-1 h-[calc(106vh-300px)] pr-2 relative">
+        {/* Event / Request Cards Section - Scrollable (prioritized on mobile) */}
+        <div className="flex-1 pr-2 relative md:order-2 order-1 h-auto md:h-[calc(106vh-300px)]">
           {/* Scrollable content is nested so overlay can be absolutely positioned and centered
               relative to this wrapper (keeps overlay fixed in the visible viewport while
               the inner content scrolls). */}
           <div className="overflow-y-auto h-full pb-12">
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
               {requestsError && (
                 <div className="col-span-full text-sm text-danger">
                   {requestsError}
@@ -1457,6 +1479,58 @@ export default function CampaignPage() {
           await fetchRequests();
         }}
       />
+
+      {/* Mobile Navigation Drawer (right-side) */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          <div className="ml-auto w-3/4 max-w-sm bg-white h-full shadow-lg p-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="text-sm font-semibold">{currentUserName || "User"}</div>
+                <div className="text-xs text-default-500">{currentUserEmail || ""}</div>
+              </div>
+              <button
+                aria-label="Close navigation"
+                onClick={() => setMobileNavOpen(false)}
+                className="p-2 text-xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            <nav className="flex flex-col gap-3">
+              <a className="flex items-center gap-3 text-sm" href="/dashboard/campaign">
+                <Ticket className="w-5 h-5" />
+                Campaign
+              </a>
+              <a className="flex items-center gap-3 text-sm" href="/dashboard/calendar">
+                <CalIcon className="w-5 h-5" />
+                Calendar
+              </a>
+              <a className="flex items-center gap-3 text-sm" href="/dashboard/stakeholder-management">
+                <PersonPlanetEarth className="w-5 h-5" />
+                Stakeholders
+              </a>
+              <a className="flex items-center gap-3 text-sm" href="/dashboard/coordinator-management">
+                <Persons className="w-5 h-5" />
+                Coordinators
+              </a>
+              <a className="flex items-center gap-3 text-sm" href="/dashboard/notification">
+                <Bell className="w-5 h-5" />
+                Notifications
+              </a>
+              <a className="flex items-center gap-3 text-sm" href="/dashboard/settings">
+                <Gear className="w-5 h-5" />
+                Settings
+              </a>
+              <a className="flex items-center gap-3 text-sm text-danger" href="/auth/login">
+                Logout
+              </a>
+            </nav>
+          </div>
+          <div className="flex-1" onClick={() => setMobileNavOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }

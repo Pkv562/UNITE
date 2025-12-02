@@ -625,7 +625,7 @@ export default function Sidebar({
         href={href}
         tabIndex={visible ? 0 : -1}
       >
-        <Icon className="-translate-y-[0.5px]" size={16} strokeWidth={2} />
+        <Icon className="-translate-y-[0.5px] w-4 h-4" strokeWidth={2} />
       </Link>
     );
   };
@@ -648,7 +648,7 @@ export default function Sidebar({
   };
 
   return (
-    <div className="w-16 h-screen bg-white flex flex-col items-center justify-between py-6 border-r border-default-300">
+    <div className="hidden md:flex w-16 h-screen bg-white flex-col items-center justify-between py-6 border-r border-default-300">
       {/* Top section */}
       <div className="flex flex-col items-center space-y-4">
         {links.map(({ href, icon, key, visible }) =>
@@ -680,11 +680,7 @@ export default function Sidebar({
                   const Icon = icon as any;
 
                   return (
-                    <Icon
-                      className="-translate-y-[0.5px]"
-                      size={16}
-                      strokeWidth={2}
-                    />
+                    <Icon className="-translate-y-[0.5px] w-4 h-4" strokeWidth={2} />
                   );
                 })()}
                 {(() => {
@@ -738,7 +734,7 @@ export default function Sidebar({
                 aria-label="Settings"
                 className={`relative w-10 h-10 inline-flex items-center justify-center rounded-full transition-colors duration-200 cursor-pointer ${
                   isActive
-                    ? "bg-black text-white border-black"
+                    ? "bg-danger text-white"
                     : "text-black border border-gray-300 hover:bg-gray-100"
                 }`}
                 onClick={() => setIsSettingsOpen(true)}
@@ -746,13 +742,9 @@ export default function Sidebar({
                 {(() => {
                   const Icon = icon as any;
 
-                  return (
-                    <Icon
-                      className="-translate-y-[0.5px]"
-                      size={16}
-                      strokeWidth={2}
-                    />
-                  );
+                    return (
+                      <Icon className="-translate-y-[0.5px] w-4 h-4" strokeWidth={2} />
+                    );
                 })()}
               </button>
             );
