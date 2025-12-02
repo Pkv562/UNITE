@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getUserInfo } from "../../../utils/getUserInfo";
-import { Search, Download, Filter, Plus, ChevronDown, X } from "lucide-react";
+import { Search, Download, Filter, Plus, ChevronDown, X, MoreHorizontal, ThumbsUp, Share, ArrowUpRight } from "lucide-react";
 import Topbar from "@/components/topbar";
 import {
   Dropdown,
@@ -23,7 +23,7 @@ import {
 interface RequisitionFormData {
   bloodType: string;
   units: number;
-  requestDate: string; // Change to string for input type="date"
+  requestDate: string;
   location: string;
   status: string;
   bloodbankLocation: string;
@@ -36,11 +36,11 @@ interface Requisition {
   department: string;
   units: number;
   bloodType: string;
-  priority: "New-Urgent" | "Emergent" | "Urgent" | "Normal";
+  priority: "Non-urgent" | "Emergent" | "Urgent" | "Normal";
   requestDate: string;
   requiredDate: string;
   eta?: string;
-  status: "Created" | "Open" | "Completed" | "Cancelled";
+  status: "Open" | "Closed";
 }
 
 export default function RequisitionManagement() {
@@ -53,7 +53,6 @@ export default function RequisitionManagement() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Tab filters
   const [directionFilter, setDirectionFilter] = useState<"All" | "Incoming" | "Outgoing">("All");
   const [statusFilter, setStatusFilter] = useState<"All" | "Open" | "Closed">("All");
   
@@ -71,7 +70,6 @@ export default function RequisitionManagement() {
   const [displayEmail, setDisplayEmail] = useState("bmc@gmail.com");
   const [canManageRequisitions, setCanManageRequisitions] = useState(false);
 
-  // Helper function to format date as YYYY-MM-DD
   const formatDateForInput = (date: Date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -79,11 +77,10 @@ export default function RequisitionManagement() {
     return `${year}-${month}-${day}`;
   };
 
-  // Form state for "Make a Request" modal - USING string for date input
   const [formData, setFormData] = useState<RequisitionFormData>({
     bloodType: "",
     units: 1,
-    requestDate: formatDateForInput(new Date()), // Initialize with today's date
+    requestDate: formatDateForInput(new Date()),
     location: "",
     status: "",
     bloodbankLocation: "",
@@ -120,7 +117,6 @@ export default function RequisitionManagement() {
   };
 
   const handleExport = () => {
-    // Export data logic
     const dataStr = JSON.stringify(filteredRequisitions, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(dataBlob);
@@ -138,7 +134,6 @@ export default function RequisitionManagement() {
   };
 
   const handleAdvancedFilter = () => {
-    // Implement advanced filter logic
     console.log("Advanced filter clicked");
   };
 
@@ -161,7 +156,6 @@ export default function RequisitionManagement() {
   const handleModalSubmit = async () => {
     setIsCreating(true);
     try {
-      // API call to create requisition
       const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
       const token = typeof window !== "undefined"
         ? localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token")
@@ -181,7 +175,7 @@ export default function RequisitionManagement() {
         orderId: `ORDER-${Date.now().toString().slice(-6)}`,
         hospital: "Bicol Medical Center",
         department: "ER",
-        priority: formData.status === "Emergent" ? "Emergent" : "New-Urgent",
+        priority: formData.status === "Emergent" ? "Emergent" : "Non-urgent",
         requiredDate: new Date(requestDate.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         eta: new Date(requestDate.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       };
@@ -238,9 +232,14 @@ export default function RequisitionManagement() {
     }
   };
 
-  const handleActionClick = (id: string) => {
-    // Handle specific actions for requisition
-    console.log("Action clicked for requisition:", id);
+  const handleAcceptRequest = (id: string) => {
+    console.log("Accept request for requisition:", id);
+    // Add accept request logic here
+  };
+
+  const handleRedirectRequest = (id: string) => {
+    console.log("Redirect request for requisition:", id);
+    // Add redirect request logic here
   };
 
   const fetchRequisitions = async () => {
@@ -249,7 +248,6 @@ export default function RequisitionManagement() {
     setError(null);
     
     try {
-      // Mock data based on the image
       const mockRequisitions: Requisition[] = [
         {
           id: "1",
@@ -258,50 +256,50 @@ export default function RequisitionManagement() {
           department: "ER",
           units: 1,
           bloodType: "A",
-          priority: "New-Urgent",
+          priority: "Non-urgent",
           requestDate: "October 28, 2025",
           requiredDate: "October 28, 2025",
           eta: "October 29, 2025",
-          status: "Created"
+          status: "Open"
         },
         {
           id: "2",
-          orderId: "ORDER 1234",
+          orderId: "ORDER 1235",
           hospital: "Bicol Medical Center",
-          department: "ER",
-          units: 1,
-          bloodType: "A",
+          department: "ICU",
+          units: 2,
+          bloodType: "O+",
           priority: "Emergent",
           requestDate: "October 28, 2025",
           requiredDate: "October 28, 2025",
           eta: "October 29, 2025",
-          status: "Open"
+          status: "Closed"
         },
         {
           id: "3",
-          orderId: "ORDER 1234",
+          orderId: "ORDER 1236",
           hospital: "Bicol Medical Center",
-          department: "ER",
-          units: 1,
-          bloodType: "A",
-          priority: "New-Urgent",
-          requestDate: "October 28, 2025",
-          requiredDate: "October 28, 2025",
-          eta: "October 29, 2025",
-          status: "Created"
-        },
-        {
-          id: "4",
-          orderId: "ORDER 1234",
-          hospital: "Bicol Medical Center",
-          department: "ER",
-          units: 1,
-          bloodType: "A",
-          priority: "Emergent",
+          department: "Pediatrics",
+          units: 3,
+          bloodType: "B+",
+          priority: "Non-urgent",
           requestDate: "October 28, 2025",
           requiredDate: "October 28, 2025",
           eta: "October 29, 2025",
           status: "Open"
+        },
+        {
+          id: "4",
+          orderId: "ORDER 1237",
+          hospital: "Bicol Medical Center",
+          department: "Surgery",
+          units: 4,
+          bloodType: "AB+",
+          priority: "Emergent",
+          requestDate: "October 28, 2025",
+          requiredDate: "October 28, 2025",
+          eta: "October 29, 2025",
+          status: "Closed"
         },
       ];
 
@@ -320,11 +318,9 @@ export default function RequisitionManagement() {
     }
   };
 
-  // Apply filters whenever requisitions or filters change
   useEffect(() => {
     let filtered = [...requisitions];
 
-    // Apply text search
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(r =>
@@ -337,22 +333,18 @@ export default function RequisitionManagement() {
       );
     }
 
-    // Apply tab filters
     if (directionFilter === "Incoming") {
-      // Filter for incoming requisitions
-      filtered = filtered.filter(r => r.status === "Created" || r.status === "Open");
+      filtered = filtered.filter(r => r.status === "Open");
     } else if (directionFilter === "Outgoing") {
-      // Filter for outgoing requisitions
-      filtered = filtered.filter(r => r.status === "Completed");
+      filtered = filtered.filter(r => r.status === "Closed");
     }
 
     if (statusFilter === "Open") {
-      filtered = filtered.filter(r => r.status === "Created" || r.status === "Open");
+      filtered = filtered.filter(r => r.status === "Open");
     } else if (statusFilter === "Closed") {
-      filtered = filtered.filter(r => r.status === "Completed" || r.status === "Cancelled");
+      filtered = filtered.filter(r => r.status === "Closed");
     }
 
-    // Apply other filters
     if (filters.hospital) {
       filtered = filtered.filter(r => r.hospital === filters.hospital);
     }
@@ -398,7 +390,6 @@ export default function RequisitionManagement() {
     setStatusFilter("All");
   };
 
-  // Blood types for dropdown
   const bloodTypes = [
     { key: "A", label: "A" },
     { key: "B", label: "B" },
@@ -414,15 +405,13 @@ export default function RequisitionManagement() {
     { key: "O-", label: "O-" },
   ];
 
-  // Status options
   const statusOptions = [
-    { key: "New-Urgent", label: "New-Urgent" },
+    { key: "Non-urgent", label: "Non-urgent" },
     { key: "Emergent", label: "Emergent" },
     { key: "Urgent", label: "Urgent" },
     { key: "Normal", label: "Normal" },
   ];
 
-  // Bloodbank locations
   const bloodbankLocations = [
     { key: "main", label: "Main Blood Bank" },
     { key: "north", label: "North Wing Blood Bank" },
@@ -430,235 +419,214 @@ export default function RequisitionManagement() {
     { key: "emergency", label: "Emergency Blood Bank" },
   ];
 
+  const directionTabWidths = {
+    "All": 65,
+    "Incoming": 85,
+    "Outgoing": 85,
+  };
+
+  const directionTotalWidth = 65 + 85 + 85;
+
+  const statusTabWidths = {
+    "All": 65,
+    "Open": 70,
+    "Closed": 75,
+  };
+
+  const statusTotalWidth = 65 + 70 + 75;
+
   return (
     <div className="min-h-screen bg-white">
-      {/* Page Header */}
       <div className="px-6 pt-6 pb-4">
         <h1 className="text-2xl font-semibold text-gray-900">
           Requisition Management
         </h1>
       </div>
 
-      {/* Topbar Component */}
       <Topbar
         userEmail={displayEmail}
         userName={displayName}
         onUserClick={handleUserClick}
       />
 
-      {/* Toolbar with Search, Filter Tabs, and Action Buttons - ALL ON SAME LINE */}
       <div className="px-6 py-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          {/* Left side - Filter Tabs and Compact Search */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4 flex-1">
-            {/* Direction filter tabs */}
-            <div className="flex bg-gray-100 rounded-lg p-1 transition-all duration-300">
-              {["All", "Incoming", "Outgoing"].map((tab) => (
-                <button
-                  key={tab}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ease-in-out transform hover:scale-105 ${
-                    directionFilter === tab
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                  }`}
-                  onClick={() => setDirectionFilter(tab as any)}
-                >
-                  {tab}
-                </button>
-              ))}
+          <div className="flex items-center gap-4">
+            <div className="relative bg-gray-100 rounded-lg p-1 overflow-hidden">
+              <div className="flex relative" style={{ width: `${directionTotalWidth}px`, height: '40px' }}>
+                {["All", "Incoming", "Outgoing"].map((tab) => (
+                  <button
+                    key={tab}
+                    className={`relative text-sm font-medium rounded-md z-10 transition-all duration-300 flex items-center justify-center ${
+                      directionFilter === tab
+                        ? "text-gray-900"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                    }`}
+                    style={{ width: `${directionTabWidths[tab as keyof typeof directionTabWidths]}px`, height: '100%' }}
+                    onClick={() => setDirectionFilter(tab as any)}
+                  >
+                    {tab}
+                  </button>
+                ))}
+                <div 
+                  className="absolute top-0 h-full bg-white shadow-sm rounded-md transition-all duration-300 ease-in-out"
+                  style={{
+                    width: `${directionFilter === "All" ? directionTabWidths["All"] : 
+                            directionFilter === "Incoming" ? directionTabWidths["Incoming"] : 
+                            directionTabWidths["Outgoing"]}px`,
+                    height: '100%',
+                    left: directionFilter === "All" ? "0px" : 
+                          directionFilter === "Incoming" ? `${directionTabWidths["All"]}px` : 
+                          `${directionTabWidths["All"] + directionTabWidths["Incoming"]}px`
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Status filter tabs */}
-            <div className="flex bg-gray-100 rounded-lg p-1 transition-all duration-300">
-              {["All", "Open", "Closed"].map((tab) => (
-                <button
-                  key={tab}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-all duration-300 ease-in-out transform hover:scale-105 ${
-                    statusFilter === tab
-                      ? "bg-white text-gray-900 shadow-sm"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                  }`}
-                  onClick={() => setStatusFilter(tab as any)}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-
-            {/* Compact Search - After tabs */}
-            <div className="relative flex-1 max-w-xs">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search files..."
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-              />
+            <div className="relative bg-gray-100 rounded-lg p-1 overflow-hidden">
+              <div className="flex relative" style={{ width: `${statusTotalWidth}px`, height: '40px' }}>
+                {["All", "Open", "Closed"].map((tab) => (
+                  <button
+                    key={tab}
+                    className={`relative text-sm font-medium rounded-md z-10 transition-all duration-300 flex items-center justify-center ${
+                      statusFilter === tab
+                        ? "text-gray-900"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                    }`}
+                    style={{ width: `${statusTabWidths[tab as keyof typeof statusTabWidths]}px`, height: '100%' }}
+                    onClick={() => setStatusFilter(tab as any)}
+                  >
+                    {tab}
+                  </button>
+                ))}
+                <div 
+                  className="absolute top-0 h-full bg-white shadow-sm rounded-md transition-all duration-300 ease-in-out"
+                  style={{
+                    width: `${statusFilter === "All" ? statusTabWidths["All"] : 
+                            statusFilter === "Open" ? statusTabWidths["Open"] : 
+                            statusTabWidths["Closed"]}px`,
+                    height: '100%',
+                    left: statusFilter === "All" ? "0px" : 
+                          statusFilter === "Open" ? `${statusTabWidths["All"]}px` : 
+                          `${statusTabWidths["All"] + statusTabWidths["Open"]}px`
+                  }}
+                />
+              </div>
             </div>
           </div>
 
-          {/* Right side - Action Buttons */}
-          <div className="flex items-center gap-3">
-            {/* Export Button */}
-            <Button
-              variant="bordered"
-              className="border-gray-300 text-gray-700 transition-all duration-300 hover:bg-gray-50"
-              startContent={<Download className="w-4 h-4" />}
-              onPress={handleExport}
-            >
-              Export
-            </Button>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search files..."
+                  className="w-full sm:w-64 pl-10 pr-4 h-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                />
+              </div>
 
-            {/* Quick Filter Button */}
-            <Button
-              variant="bordered"
-              className="border-gray-300 text-gray-700 transition-all duration-300 hover:bg-gray-50"
-              startContent={<Filter className="w-4 h-4" />}
-              onPress={handleQuickFilter}
-            >
-              Quick Filter
-            </Button>
+              <Button
+                variant="bordered"
+                className="border-gray-300 text-gray-700 transition-all duration-300 hover:bg-gray-50 h-10"
+                startContent={<Download className="w-4 h-4" />}
+                onPress={handleExport}
+              >
+                Export
+              </Button>
+            </div>
 
-            {/* Advanced Filter Button */}
-            <Button
-              variant="bordered"
-              className="border-gray-300 text-gray-700 transition-all duration-300 hover:bg-gray-50"
-              startContent={<Filter className="w-4 h-4" />}
-              onPress={handleAdvancedFilter}
-            >
-              Advanced Filter
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="bordered"
+                className="border-gray-300 text-gray-700 transition-all duration-300 hover:bg-gray-50 h-10"
+                startContent={<Filter className="w-4 h-4" />}
+                onPress={handleQuickFilter}
+              >
+                Quick Filter
+              </Button>
 
-            {/* Make a Request Button */}
-            <Button
-              className="bg-black text-white transition-all duration-300 hover:bg-gray-800 hover:scale-105"
-              startContent={<Plus className="w-4 h-4" />}
-              onPress={handleAddRequisition}
-            >
-              Make a request
-            </Button>
+              <Button
+                variant="bordered"
+                className="border-gray-300 text-gray-700 transition-all duration-300 hover:bg-gray-50 h-10"
+                startContent={<Filter className="w-4 h-4" />}
+                onPress={handleAdvancedFilter}
+              >
+                Advanced Filter
+              </Button>
+
+              <Button
+                className="bg-black text-white transition-all duration-300 hover:bg-gray-800 hover:scale-105 h-10"
+                startContent={<Plus className="w-4 h-4" />}
+                onPress={handleAddRequisition}
+              >
+                Make a request
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Active Filters Display */}
-      {(filters.hospital || filters.department || filters.bloodType || filters.priority || filters.status || directionFilter !== "All" || statusFilter !== "All") && (
-        <div className="px-6 py-2 bg-blue-50 border-b border-blue-100">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="font-medium text-blue-900">Active Filters:</span>
-            
-            {directionFilter !== "All" && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-md transition-all duration-300 hover:bg-blue-200">
-                {directionFilter}
-              </span>
-            )}
-            
-            {statusFilter !== "All" && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-md transition-all duration-300 hover:bg-blue-200">
-                {statusFilter}
-              </span>
-            )}
-            
-            {filters.hospital && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-md transition-all duration-300 hover:bg-blue-200">
-                Hospital: {filters.hospital}
-              </span>
-            )}
-            
-            {filters.department && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-md transition-all duration-300 hover:bg-blue-200">
-                Department: {filters.department}
-              </span>
-            )}
-            
-            {filters.bloodType && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-md transition-all duration-300 hover:bg-blue-200">
-                Blood Type: {filters.bloodType}
-              </span>
-            )}
-            
-            {filters.priority && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-md transition-all duration-300 hover:bg-blue-200">
-                Priority: {filters.priority}
-              </span>
-            )}
-            
-            {filters.status && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-md transition-all duration-300 hover:bg-blue-200">
-                Status: {filters.status}
-              </span>
-            )}
-            
-            <button
-              onClick={handleClearFilters}
-              className="ml-2 text-blue-600 hover:text-blue-800 underline transition-colors duration-300"
-            >
-              Clear all
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Table Content */}
+      {/* Fixed Table Content with proper alignment */}
       <div className="px-6 py-4">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gray-50">
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                  <div className="flex items-center">
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
-                      className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 transition-all duration-300"
+                      className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                       onChange={(e) => handleSelectAll(e.target.checked)}
                       checked={selectedRequisitions.length === filteredRequisitions.length && filteredRequisitions.length > 0}
                     />
-                    <span className="ml-2">ORDER ID</span>
+                    <span className="font-medium">ORDER ID</span>
                   </div>
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   HOSPITAL
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider text-center">
                   DEPARTMENT
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider text-center">
                   UNITS
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider text-center">
                   BLOOD TYPE
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider text-center">
                   PRIORITY
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                  RD
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  REQUEST DATE
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   ETA
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   STATUS
                 </th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                <th className="py-3 px-6 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   ACTION
                 </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
-                // Loading skeleton
                 [...Array(4)].map((_, index) => (
                   <tr key={index} className="animate-pulse">
-                    <td className="py-4 px-4">
-                      <div className="flex items-center">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-3">
                         <div className="h-4 bg-gray-200 rounded w-4"></div>
-                        <div className="ml-2 h-4 bg-gray-200 rounded w-24"></div>
+                        <div className="h-4 bg-gray-200 rounded w-24"></div>
                       </div>
                     </td>
                     {[...Array(9)].map((_, cellIndex) => (
-                      <td key={cellIndex} className="py-4 px-4">
+                      <td key={cellIndex} className="py-4 px-6">
                         <div className="h-4 bg-gray-200 rounded w-20"></div>
                       </td>
                     ))}
@@ -666,112 +634,113 @@ export default function RequisitionManagement() {
                 ))
               ) : error ? (
                 <tr>
-                  <td colSpan={10} className="py-8 px-4 text-center text-red-600">
+                  <td colSpan={10} className="py-8 px-6 text-center text-red-600">
                     {error}
                   </td>
                 </tr>
               ) : filteredRequisitions.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-8 px-4 text-center text-gray-500">
+                  <td colSpan={10} className="py-8 px-6 text-center text-gray-500">
                     No requisitions found
                   </td>
                 </tr>
               ) : (
                 filteredRequisitions.map((requisition) => (
-                  <tr key={requisition.id} className="hover:bg-gray-50 transition-colors duration-300">
-                    <td className="py-4 px-4">
-                      <div className="flex items-center">
+                  <tr key={requisition.id} className="hover:bg-gray-50">
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-3">
                         <input
                           type="checkbox"
-                          className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 transition-all duration-300"
+                          className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                           checked={selectedRequisitions.includes(requisition.id)}
                           onChange={(e) => handleSelectRequisition(requisition.id, e.target.checked)}
                         />
-                        <span className="ml-2 font-medium text-gray-900">
+                        <span className="font-medium text-gray-900">
                           {requisition.orderId}
                         </span>
                       </div>
                     </td>
-                    <td className="py-4 px-4 text-sm text-gray-900">
+                    <td className="py-4 px-6 text-sm text-left text-gray-900">
                       {requisition.hospital}
                     </td>
-                    <td className="py-4 px-4 text-sm text-gray-900">
+                    <td className="py-4 px-14 text-sm text-left text-gray-900 text-center">
                       {requisition.department}
                     </td>
-                    <td className="py-4 px-4 text-sm text-gray-900">
+                    <td className="py-4 px-10 text-sm text-left text-gray-900 text-center">
                       {requisition.units}
                     </td>
-                    <td className="py-4 px-4 text-sm text-gray-900">
+                    <td className="py-4 px-14 text-sm text-left text-gray-900 text-center">
                       {requisition.bloodType}
                     </td>
-                    <td className="py-4 px-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-all duration-300 ${
+                    <td className="py-4 px-6 text-left">
+                      <span className={`inline-flex items-left px-3 py-1 rounded-full text-xs font-medium ${
                         requisition.priority === "Emergent" 
-                          ? "bg-red-100 text-red-800 hover:bg-red-200"
-                          : requisition.priority === "New-Urgent"
-                          ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-200"
-                          : requisition.priority === "Urgent"
-                          ? "bg-orange-100 text-orange-800 hover:bg-orange-200"
-                          : "bg-green-100 text-green-800 hover:bg-green-200"
+                          ? "bg-red-100 text-red-800 border border-red-200"
+                          : "bg-gray-100 text-gray-800 border border-gray-200"
                       }`}>
-                        {requisition.priority === "New-Urgent" ? "Non-urgent" : requisition.priority}
+                        {requisition.priority}
                       </span>
                     </td>
-                    <td className="py-4 px-4 text-sm text-gray-900">
+                    <td className="py-4 px-6 text-sm text-gray-900">
                       {requisition.requestDate}
                     </td>
-                    <td className="py-4 px-4 text-sm text-gray-900">
+                    <td className="py-4 px-6 text-sm text-gray-900">
                       {requisition.eta}
                     </td>
-                    <td className="py-4 px-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-all duration-300 ${
-                        requisition.status === "Created" 
-                          ? "bg-blue-100 text-blue-800 hover:bg-blue-200"
-                          : requisition.status === "Open"
-                          ? "bg-green-100 text-green-800 hover:bg-green-200"
-                          : requisition.status === "Completed"
-                          ? "bg-gray-100 text-gray-800 hover:bg-gray-200"
-                          : "bg-red-100 text-red-800 hover:bg-red-200"
+                    <td className="py-4 px-5">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                        requisition.status === "Open" 
+                          ? "bg-green-100 text-green-800 border border-green-200"
+                          : "bg-red-100 text-red-800 border border-red-200"
                       }`}>
                         {requisition.status}
                       </span>
                     </td>
-                    <td className="py-4 px-4">
-                      <Dropdown>
-                        <DropdownTrigger>
-                          <Button
-                            variant="light"
-                            size="sm"
-                            className="text-gray-600 hover:text-gray-900 transition-all duration-300 hover:scale-110"
+                    <td className="py-4 px-8">
+                      <div className="flex justify-start">
+                        <Dropdown>
+                          <DropdownTrigger>
+                            <Button
+                              variant="light"
+                              size="sm"
+                              className="min-w-0 p-2 bg-gray-100 hover:bg-gray-200 rounded-md"
+                            >
+                              <MoreHorizontal className="w-4 h-4 text-gray-600" />
+                            </Button>
+                          </DropdownTrigger>
+                          <DropdownMenu 
+                            aria-label="Requisition actions"
+                            className="min-w-[180px] p-2 bg-white shadow-lg rounded-lg border border-gray-200"
                           >
-                            <span className="sr-only">Actions</span>
-                            •••
-                          </Button>
-                        </DropdownTrigger>
-                        <DropdownMenu aria-label="Requisition actions">
-                          <DropdownItem 
-                            key="view" 
-                            onPress={() => handleActionClick(requisition.id)}
-                            className="transition-colors duration-300"
-                          >
-                            View Details
-                          </DropdownItem>
-                          <DropdownItem 
-                            key="edit" 
-                            onPress={() => handleActionClick(requisition.id)}
-                            className="transition-colors duration-300"
-                          >
-                            Edit
-                          </DropdownItem>
-                          <DropdownItem 
-                            key="cancel" 
-                            className="text-danger transition-colors duration-300" 
-                            color="danger"
-                          >
-                            Cancel
-                          </DropdownItem>
-                        </DropdownMenu>
-                      </Dropdown>
+                            <DropdownItem 
+                              key="accept"
+                              className="px-3 py-2 hover:bg-gray-50"
+                              onPress={() => handleAcceptRequest(requisition.id)}
+                            >
+                              <div className="flex items-center gap-2">
+                                <ThumbsUp className="w-4 h-4 text-gray-700" />
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-gray-900">Accept Request</span>
+                                  <span className="text-xs text-gray-500">Accept request</span>
+                                </div>
+                              </div>
+                            </DropdownItem>
+                            <DropdownItem 
+                              key="redirect"
+                              className="px-3 py-2 hover:bg-gray-50"
+                              onPress={() => handleRedirectRequest(requisition.id)}
+                            >
+                              <div className="flex items-center gap-2">
+                                <ArrowUpRight className="w-4 h-4 text-gray-700" />
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-gray-900">Redirect Request</span>
+                                  <span className="text-xs text-gray-500">Redirect Request</span>
+                                </div>
+                              </div>
+                            </DropdownItem>
+                          </DropdownMenu>
+                        </Dropdown>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -903,7 +872,6 @@ export default function RequisitionManagement() {
         </ModalContent>
       </Modal>
 
-      {/* Quick Filter Modal */}
       <Modal 
         isOpen={openQuickFilter} 
         onClose={() => setOpenQuickFilter(false)}
@@ -989,10 +957,8 @@ export default function RequisitionManagement() {
                   selectedKeys={filters.status ? [filters.status] : []}
                   onChange={(e) => handleApplyFilters({...filters, status: e.target.value})}
                 >
-                  <SelectItem key="Created">Created</SelectItem>
                   <SelectItem key="Open">Open</SelectItem>
-                  <SelectItem key="Completed">Completed</SelectItem>
-                  <SelectItem key="Cancelled">Cancelled</SelectItem>
+                  <SelectItem key="Closed">Closed</SelectItem>
                 </Select>
               </div>
             </div>
