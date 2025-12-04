@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 
 import { getUserInfo } from "../../../utils/getUserInfo";
@@ -85,6 +85,60 @@ export default function StakeholderManagement() {
   const [openUserDistrictId, setOpenUserDistrictId] = useState<string | null>(
     null,
   );
+  // Add Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10; // Or whatever size you prefer
+
+  // Reset to page 1 when search or tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedTab, filters]);
+
+  // 1. Determine the source data based on the selected tab
+  const rawData = useMemo(() => {
+    if (selectedTab === "pending") return signupRequests;
+    
+    // Filter base list for approved/all tabs
+    return stakeholders.filter((s: any) => {
+      const statusRaw = s.Status || s.status || s.Approval || s.approval || "";
+      const st = String(statusRaw || "").toLowerCase();
+      
+      if (selectedTab === "approved") {
+        return st.includes("approve") || st.includes("completed");
+      }
+      return true; // 'all' tab
+    });
+  }, [selectedTab, signupRequests, stakeholders]);
+
+  // 2. Apply Search Filtering (Lifted from Table)
+  const filteredData = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    if (!q) return rawData;
+
+    return rawData.filter((coordinator: any) => {
+      return (
+        (coordinator.name || "").toLowerCase().includes(q) ||
+        (coordinator.email || "").toLowerCase().includes(q) ||
+        (coordinator.organization || coordinator.entity || "").toLowerCase().includes(q) ||
+        (coordinator.province || "").toLowerCase().includes(q) ||
+        (coordinator.district || "").toLowerCase().includes(q) ||
+        (
+          (municipalityCache && municipalityCache[String(coordinator.municipality)]) ||
+          coordinator.municipality ||
+          ""
+        ).toLowerCase().includes(q)
+      );
+    });
+  }, [rawData, searchQuery, municipalityCache]);
+
+  // 3. Calculate Pagination
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    return filteredData.slice(start, end);
+  }, [filteredData, currentPage, itemsPerPage]);
   const router = useRouter();
 
   const ordinalSuffix = (n: number | string) => {
@@ -1943,31 +1997,17 @@ export default function StakeholderManagement() {
         onQuickFilter={handleQuickFilter}
         onSearch={handleSearch}
         onTabChange={(t) => setSelectedTab(t)}
+        // Pass pagination props
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={setCurrentPage}
       />
 
       {/* Table Content */}
       <div className="px-6 py-4 bg-gray-50">
         <StakeholderTable
-          coordinators={
-            selectedTab === "pending"
-              ? signupRequests
-              : selectedTab === "all"
-              ? stakeholders
-              : stakeholders.filter((s: any) => {
-                  const statusRaw =
-                    s.Status || s.status || s.Approval || s.approval || "";
-                  const st = String(statusRaw || "").toLowerCase();
-
-                  if (selectedTab === "approved")
-                    return (
-                      st.includes("approve") ||
-                      st.includes("completed") ||
-                      st.includes("approved")
-                    );
-
-                  return true;
-                })
-          }
+          // Pass the SLICED data here
+          coordinators={paginatedData} 
           municipalityCache={municipalityCache}
           selectedCoordinators={selectedStakeholders}
           onActionClick={handleActionClick}
@@ -1975,9 +2015,11 @@ export default function StakeholderManagement() {
           onSelectAll={handleSelectAll}
           onSelectCoordinator={handleSelectStakeholder}
           onUpdateCoordinator={handleUpdateStakeholder}
-          searchQuery={searchQuery}
+          // We still pass searchQuery to the table so it can highlight if implemented, 
+          // or we can remove it if the table's internal filtering is no longer needed.
+          // Since we filter outside, the table's internal filter will just match everything in the slice.
+          searchQuery={searchQuery} 
           loading={loading}
-          // Pass true only when user is both a system admin and has StaffType='Admin'
           isAdmin={canManageStakeholders}
           isRequests={selectedTab === "pending"}
           onAcceptRequest={handleAcceptRequest}
