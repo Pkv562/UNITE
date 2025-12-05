@@ -246,9 +246,17 @@ export default function StakeholderManagement() {
 
       // Allow management when the user is a system admin OR has StaffType 'admin'.
       // Previous logic required both which could incorrectly block sys-admin users.
-      setCanManageStakeholders(
-        !!(isSystemAdmin || isStaffAdmin || roleLower === "admin"),
-      );
+      const resolvedCanManage = !!(isSystemAdmin || isStaffAdmin || roleLower === "admin");
+      setCanManageStakeholders(resolvedCanManage);
+      // If user is not authorized to manage stakeholders, redirect to error page
+      if (!resolvedCanManage) {
+        try {
+          router.replace('/error');
+        } catch (e) {
+          /* ignore navigation errors during SSR */
+        }
+        return;
+      }
       setDisplayName(info?.displayName || "Bicol Medical Center");
       setDisplayEmail(info?.email || "bmc@gmail.com");
       // determine logged-in user's district id (if any)
