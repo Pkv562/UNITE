@@ -154,6 +154,7 @@ export default function CampaignPage() {
       // Build query params for server-side filtering
       const params = new URLSearchParams();
 
+      // Use normal paging parameters — server now returns prioritized pages.
       params.set("page", String(currentPage));
       params.set("limit", String(pageSize));
       if (searchQuery && searchQuery.trim())
