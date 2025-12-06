@@ -61,6 +61,8 @@ export default function CampaignPage() {
     title?: string;
     requester?: string;
     municipality?: string;
+    coordinator?: string;
+    stakeholder?: string;
   }>({});
   const [errorModalOpen, setErrorModalOpen] = useState(false);
   const [errorModalMessage, setErrorModalMessage] = useState("");

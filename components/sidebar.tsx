@@ -492,12 +492,12 @@ export default function Sidebar({
       key: "coordinator",
       visible: showCoordinatorLink,
     },
-    // Add requisition management link - always visible or conditionally based on user role
+    // Add requisition management link - only visible to system admins
     {
       href: "/dashboard/requisition",
       icon: ClipboardList, 
       key: "requisition",
-      visible: true, // Set to true to always show, or add conditional logic
+      visible: showCoordinatorLink,
     },
   ];
 
