@@ -55,6 +55,16 @@ export default function SignUp() {
   const inputClass =
     "text-sm h-10 bg-white border border-gray-200 rounded-lg placeholder-gray-400 px-3 shadow-sm";
 
+  // Helper to move priority-named items to the top of a list while preserving
+  // the relative order of the remaining items.
+  const prioritize = (items: any[], priorities: string[] = []) => {
+    if (!Array.isArray(items) || items.length === 0) return items;
+    const set = new Set(priorities);
+    const first = items.filter((i) => set.has(i?.name));
+    const rest = items.filter((i) => !set.has(i?.name));
+    return [...first, ...rest];
+  };
+
   const validateStep = () => {
     if (step === 0) {
       return !!(
@@ -337,11 +347,11 @@ export default function SignUp() {
                 </Select>
               </div>
               <div>
-                <label className="text-sm font-medium block mb-1" htmlFor="district">District <span className="text-danger-500">*</span></label>
+                <label className="text-sm font-medium block mb-1" htmlFor="district">District / Category (or Sector) <span className="text-danger-500">*</span></label>
                 <Select
                   id="district"
                   className="h-10"
-                  placeholder="Select District"
+                  placeholder="Select District / Category"
                   selectedKeys={formData.District ? [formData.District] : []}
                   radius="md"
                   size="sm"
@@ -352,17 +362,17 @@ export default function SignUp() {
                     update({ District: val, Municipality: "" });
                   }}
                 >
-                  {districts.map((dist) => (
+                  {prioritize(districts, ["Blood Service Facilities", "NGO's & Gov't Agencies"]).map((dist) => (
                     <SelectItem key={dist._id}>{dist.name}</SelectItem>
                   ))}
                 </Select>
               </div>
               <div>
-                <label className="text-sm font-medium block mb-1" htmlFor="municipality">Municipality <span className="text-danger-500">*</span></label>
+                <label className="text-sm font-medium block mb-1" htmlFor="municipality">City / Municipality / Type <span className="text-danger-500">*</span></label>
                 <Select
                   id="municipality"
                   className="h-10"
-                  placeholder="Select Municipality"
+                  placeholder="Select City / Municipality / Type"
                   selectedKeys={formData.Municipality ? [formData.Municipality] : []}
                   radius="md"
                   size="sm"
