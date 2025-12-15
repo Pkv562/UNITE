@@ -129,7 +129,7 @@ export default function AddCoordinatorModal({
   return (
     <Modal
       classNames={{
-        base: "max-w-[580px]",
+        base: "max-h-[95vh] max-w-[580px]",
         backdrop: "bg-black/50"
       }}
       isOpen={isOpen}
@@ -138,7 +138,7 @@ export default function AddCoordinatorModal({
       hideCloseButton
       onClose={onClose}
     >
-      <ModalContent className="max-h-[90vh]">
+      <ModalContent>
         {(onClose) => (
           <form onSubmit={handleSubmit} className="flex flex-col h-full">
             {/* Custom Header with Close Button */}
@@ -163,7 +163,7 @@ export default function AddCoordinatorModal({
               </button>
             </div>
 
-            <ModalBody className="gap-3.5 px-6 py-4 overflow-y-auto flex-1">
+            <ModalBody className="gap-3.5 px-6 py-4 max-h-[70vh] overflow-y-auto flex-1">
               {/* Coordinator Name - 3 columns */}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">
@@ -243,73 +243,74 @@ export default function AddCoordinatorModal({
                 />
               </div>
 
-              {/* Set Password */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-700">
-                  Set Password <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  isRequired
-                  classNames={{
-                    inputWrapper: "border-gray-300 bg-white shadow-sm h-10",
-                    input: "text-sm placeholder:text-gray-400"
-                  }}
-                  endContent={
-                    <button 
-                      className="focus:outline-none" 
-                      type="button" 
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="w-4 h-4 text-gray-400" />
-                      ) : (
-                        <Eye className="w-4 h-4 text-gray-400" />
-                      )}
-                    </button>
-                  }
-                  name="password"
-                  placeholder="Set password"
-                  radius="lg"
-                  type={showPassword ? "text" : "password"}
-                  variant="bordered"
-                />
-              </div>
+              {/* Set Password and Retype Password - 2 columns */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">
+                    Set Password <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    isRequired
+                    classNames={{
+                      inputWrapper: "border-gray-300 bg-white shadow-sm h-10",
+                      input: "text-sm placeholder:text-gray-400"
+                    }}
+                    endContent={
+                      <button 
+                        className="focus:outline-none" 
+                        type="button" 
+                        onClick={() => setShowPassword(!showPassword)}
+                      >
+                        {showPassword ? (
+                          <EyeOff className="w-4 h-4 text-gray-400" />
+                        ) : (
+                          <Eye className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    }
+                    name="password"
+                    placeholder="Set password"
+                    radius="lg"
+                    type={showPassword ? "text" : "password"}
+                    variant="bordered"
+                  />
+                </div>
 
-              {/* Retype Password */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-700">
-                  Retype Password <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  isRequired
-                  classNames={{
-                    inputWrapper: "border-gray-300 bg-white shadow-sm h-10",
-                    input: "text-sm placeholder:text-gray-400"
-                  }}
-                  endContent={
-                    <button
-                      className="focus:outline-none"
-                      type="button"
-                      onClick={() => setShowRetypePassword(!showRetypePassword)}
-                    >
-                      {showRetypePassword ? (
-                        <EyeOff className="w-4 h-4 text-gray-400" />
-                      ) : (
-                        <Eye className="w-4 h-4 text-gray-400" />
-                      )}
-                    </button>
-                  }
-                  name="retypePassword"
-                  placeholder="Retype password"
-                  radius="lg"
-                  type={showRetypePassword ? "text" : "password"}
-                  variant="bordered"
-                />
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">
+                    Retype Password <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    isRequired
+                    classNames={{
+                      inputWrapper: "border-gray-300 bg-white shadow-sm h-10",
+                      input: "text-sm placeholder:text-gray-400"
+                    }}
+                    endContent={
+                      <button
+                        className="focus:outline-none"
+                        type="button"
+                        onClick={() => setShowRetypePassword(!showRetypePassword)}
+                      >
+                        {showRetypePassword ? (
+                          <EyeOff className="w-4 h-4 text-gray-400" />
+                        ) : (
+                          <Eye className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    }
+                    name="retypePassword"
+                    placeholder="Retype password"
+                    radius="lg"
+                    type={showRetypePassword ? "text" : "password"}
+                    variant="bordered"
+                  />
+                </div>
               </div>
 
               {/* Account Type */}
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-700">Account Type <span className="text-red-500">*</span></label>
+                <label className="text-sm font-medium text-gray-700">Assignment <span className="text-red-500">*</span></label>
                 <Select
                   isRequired
                   classNames={{
@@ -317,7 +318,7 @@ export default function AddCoordinatorModal({
                     value: "text-sm text-gray-900"
                   }}
                   name="accountType"
-                  placeholder="Choose Account Type"
+                  placeholder="Choose Assignment"
                   radius="lg"
                   selectedKeys={selectedAccountType ? [selectedAccountType] : []}
                   variant="bordered"

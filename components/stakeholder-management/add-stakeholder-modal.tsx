@@ -605,62 +605,65 @@ export default function AddStakeholderModal({
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-900">
-                  Set Password <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  isRequired
-                  classNames={{
-                    inputWrapper: "border-gray-300",
-                  }}
-                  endContent={
-                    <button className="focus:outline-none" type="button" onClick={() => setShowPassword(!showPassword)}>
-                      {showPassword ? (
-                        <EyeOff className="w-4 h-4 text-gray-400" />
-                      ) : (
-                        <Eye className="w-4 h-4 text-gray-400" />
-                      )}
-                    </button>
-                  }
-                  placeholder="Set password"
-                  name="password"
-                  radius="md"
-                  size="md"
-                  type={showPassword ? "text" : "password"}
-                  variant="bordered"
-                />
-              </div>
+              {/* Set Password and Retype Password - 2 columns */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-900">
+                    Set Password <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    isRequired
+                    classNames={{
+                      inputWrapper: "border-gray-300",
+                    }}
+                    endContent={
+                      <button className="focus:outline-none" type="button" onClick={() => setShowPassword(!showPassword)}>
+                        {showPassword ? (
+                          <EyeOff className="w-4 h-4 text-gray-400" />
+                        ) : (
+                          <Eye className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    }
+                    placeholder="Set password"
+                    name="password"
+                    radius="md"
+                    size="md"
+                    type={showPassword ? "text" : "password"}
+                    variant="bordered"
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-900">
-                  Retype Password <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  isRequired
-                  classNames={{
-                    inputWrapper: "border-gray-300",
-                  }}
-                  endContent={
-                    <button
-                      className="focus:outline-none"
-                      type="button"
-                      onClick={() => setShowRetypePassword(!showRetypePassword)}
-                    >
-                      {showRetypePassword ? (
-                        <EyeOff className="w-4 h-4 text-gray-400" />
-                      ) : (
-                        <Eye className="w-4 h-4 text-gray-400" />
-                      )}
-                    </button>
-                  }
-                  placeholder="Retype password"
-                  name="retypePassword"
-                  radius="md"
-                  size="md"
-                  type={showRetypePassword ? "text" : "password"}
-                  variant="bordered"
-                />
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-900">
+                    Retype Password <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    isRequired
+                    classNames={{
+                      inputWrapper: "border-gray-300",
+                    }}
+                    endContent={
+                      <button
+                        className="focus:outline-none"
+                        type="button"
+                        onClick={() => setShowRetypePassword(!showRetypePassword)}
+                      >
+                        {showRetypePassword ? (
+                          <EyeOff className="w-4 h-4 text-gray-400" />
+                        ) : (
+                          <Eye className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    }
+                    placeholder="Retype password"
+                    name="retypePassword"
+                    radius="md"
+                    size="md"
+                    type={showRetypePassword ? "text" : "password"}
+                    variant="bordered"
+                  />
+                </div>
               </div>
 
               {/* Account Type */}
@@ -853,6 +856,7 @@ export default function AddStakeholderModal({
                       selectedKeys={selectedMunicipalityId ? new Set([selectedMunicipalityId]) : new Set()}
                       size="md"
                       variant="bordered"
+                      isDisabled={!selectedDistrictId || !selectedAccountType}
                       onSelectionChange={(keys: any) => {
                         const val = Array.from(keys)[0] as string
                         if (municipalities && municipalities.length > 0) {
