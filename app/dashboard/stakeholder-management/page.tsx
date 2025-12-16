@@ -2105,7 +2105,6 @@ export default function StakeholderManagement() {
         onExport={handleExport}
         onQuickFilter={handleQuickFilter}
         onSearch={handleSearch}
-        isMobile={isMobile}
         onTabChange={(t) => setSelectedTab(t)}
         // Pass pagination props
         currentPage={currentPage}
