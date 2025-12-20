@@ -16,6 +16,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useRoles, Role } from "@/hooks/useRoles";
 import RoleManagementTable from "@/components/settings/role-management-table";
 import RoleFormModal from "@/components/settings/role-form-modal";
+import LocationManagement from "@/components/settings/location-management";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -511,16 +512,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       {/* Location Settings Tab */}
                       {activeTab === "location" && permissions.canEditLocation && (
                         <section className="min-h-[600px] w-full">
-                          <h3 className="text-base font-semibold text-gray-900 mb-6">
-                            Location Settings
-                          </h3>
-                          <div className="divide-y divide-gray-200 w-full">
-                            <div className="py-4 w-full">
-                              <p className="text-sm text-gray-500">
-                                Location management settings will be available here.
-                              </p>
-                            </div>
-                          </div>
+                          <LocationManagement isOpen={isOpen} />
                         </section>
                       )}
 

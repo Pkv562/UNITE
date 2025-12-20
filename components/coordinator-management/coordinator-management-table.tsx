@@ -6,6 +6,7 @@ import {
 } from "@gravity-ui/icons";
 import { Checkbox } from "@heroui/checkbox";
 import { Button } from "@heroui/button";
+import { Chip } from "@heroui/chip";
 import {
   Dropdown,
   DropdownTrigger,
@@ -13,20 +14,10 @@ import {
   DropdownSection,
   DropdownItem,
 } from "@heroui/dropdown";
-import { useState } from "react";
-
-interface Coordinator {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  province: string;
-  district: string;
-  accountType?: string;
-}
+import type { StaffListItem } from "@/types/coordinator.types";
 
 interface CoordinatorTableProps {
-  coordinators: Coordinator[];
+  coordinators: StaffListItem[];
   selectedCoordinators: string[];
   onSelectAll: (checked: boolean) => void;
   onSelectCoordinator: (id: string, checked: boolean) => void;
@@ -50,50 +41,8 @@ export default function CoordinatorTable({
   isAdmin,
   loading,
 }: CoordinatorTableProps) {
-  const [, /*unused*/ setUnused] = useState(false);
-  // debug logs removed
-  // Filter coordinators based on search query
-  const normalizeProvince = (c: any) => {
-    if (!c) return "";
-    // coordinator.province can be a string (name or id) or an object
-    const prov =
-      c.province || c.Province || c.Province_Name || c.provinceName || null;
-
-    if (!prov) return "";
-    if (typeof prov === "string") return prov;
-
-    // object
-    return prov.name || prov.Name || prov.Province_Name || prov.province || "";
-  };
-
-  const normalizeDistrict = (c: any) => {
-    if (!c) return "";
-    const dist = c.district || c.District || c.District_ID || null;
-
-    if (!dist) return "";
-    if (typeof dist === "string") return dist;
-
-    return (
-      dist.name ||
-      dist.District_Name ||
-      dist.District_Number ||
-      dist.district ||
-      ""
-    );
-  };
-
-  const filteredCoordinators = coordinators.filter((coordinator) => {
-    const q = searchQuery.toLowerCase();
-    const prov = (normalizeProvince(coordinator) || "").toLowerCase();
-    const dist = (normalizeDistrict(coordinator) || "").toLowerCase();
-
-    return (
-      (coordinator.name || "").toLowerCase().includes(q) ||
-      (coordinator.email || "").toLowerCase().includes(q) ||
-      prov.includes(q) ||
-      dist.includes(q)
-    );
-  });
+  // Filter is already handled by the hook, but we can do additional client-side filtering if needed
+  const filteredCoordinators = coordinators;
 
   const isAllSelected =
     filteredCoordinators.length > 0 &&
@@ -119,13 +68,13 @@ export default function CoordinatorTable({
                   Phone Number
                 </th>
                 <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Assignment
+                  Roles
                 </th>
                 <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Province
+                  Coverage Areas
                 </th>
                 <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  District
+                  Organization
                 </th>
                 <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Action
@@ -148,13 +97,13 @@ export default function CoordinatorTable({
                     <div className="h-4 bg-gray-200 rounded w-32"></div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="h-4 bg-gray-200 rounded w-20"></div>
-                  </td>
-                  <td className="px-6 py-4">
                     <div className="h-4 bg-gray-200 rounded w-24"></div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="h-4 bg-gray-200 rounded w-28"></div>
+                    <div className="h-4 bg-gray-200 rounded w-32"></div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="h-4 bg-gray-200 rounded w-20"></div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="bg-gray-200 rounded w-8 h-8"></div>
@@ -193,15 +142,15 @@ export default function CoordinatorTable({
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Phone Number
               </th>
-              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Assignment
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Province
-              </th>
-              <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                District
-              </th>
+                <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Roles
+                </th>
+                <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Coverage Areas
+                </th>
+                <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Organization
+                </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Action
               </th>
@@ -226,22 +175,79 @@ export default function CoordinatorTable({
                   />
                 </td>
                 <td className="px-6 py-4 text-sm font-normal text-gray-900">
-                  {coordinator.name}
+                  {coordinator.fullName}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
                   {coordinator.email}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {coordinator.phone}
+                  {coordinator.phoneNumber || "—"}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {coordinator.accountType || "—"}
+                  <div className="flex flex-wrap gap-1">
+                    {coordinator.roles && coordinator.roles.length > 0 ? (
+                      coordinator.roles.length <= 2 ? (
+                        coordinator.roles.map((role) => (
+                          <Chip key={role.id} size="sm" variant="flat" color="primary">
+                            {role.name}
+                          </Chip>
+                        ))
+                      ) : (
+                        <Chip size="sm" variant="flat" color="primary" title={coordinator.roles.map(r => r.name).join(", ")}>
+                          {coordinator.roles.length} roles
+                        </Chip>
+                      )
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {normalizeProvince(coordinator) || "—"}
+                  <div className="flex flex-wrap gap-1">
+                    {coordinator.coverageAreas && coordinator.coverageAreas.length > 0 ? (
+                      coordinator.coverageAreas.length <= 2 ? (
+                        coordinator.coverageAreas.map((ca) => (
+                          <Chip
+                            key={ca.id}
+                            size="sm"
+                            variant="flat"
+                            color={ca.isPrimary ? "primary" : "default"}
+                            title={
+                              ca.geographicUnits.length > 0
+                                ? ca.geographicUnits.map((unit) => unit.name).join(", ")
+                                : ca.name
+                            }
+                          >
+                            {ca.name}
+                            {ca.isPrimary && " (Primary)"}
+                          </Chip>
+                        ))
+                      ) : (
+                        <Chip
+                          size="sm"
+                          variant="flat"
+                          color="default"
+                          title={coordinator.coverageAreas.map(ca => ca.name).join(", ")}
+                        >
+                          {coordinator.coverageAreas.length} coverage areas
+                        </Chip>
+                      )
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {normalizeDistrict(coordinator) || "—"}
+                  {coordinator.organizationType ? (
+                    <div>
+                      <div className="font-medium">{coordinator.organizationType}</div>
+                      {coordinator.organizationName && (
+                        <div className="text-xs text-gray-500">{coordinator.organizationName}</div>
+                      )}
+                    </div>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-6 py-4">
                   {/** Only show actions to admins. Non-admins get no action menu. */}

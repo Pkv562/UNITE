@@ -11,11 +11,11 @@ import {
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 
-interface DeleteCoordinatorModalProps {
+interface DeleteStaffModalProps {
   isOpen: boolean;
   onClose: () => void;
-  coordinatorId: string | null;
-  coordinatorName: string | null;
+  coordinatorId: string | null; // Keep prop name for backward compatibility
+  coordinatorName: string | null; // Keep prop name for backward compatibility
   onConfirmDelete: (id: string) => Promise<void>;
 }
 
@@ -25,7 +25,7 @@ export default function DeleteCoordinatorModal({
   coordinatorId,
   coordinatorName,
   onConfirmDelete,
-}: DeleteCoordinatorModalProps) {
+}: DeleteStaffModalProps) {
   const [typedName, setTypedName] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +79,7 @@ export default function DeleteCoordinatorModal({
           <div>
             <h2 className="text-lg font-semibold">Confirm delete</h2>
             <p className="text-xs text-default-500">
-              Type the full name of the coordinator to confirm deletion.
+              Type the full name of the staff member to confirm deletion.
             </p>
           </div>
         </ModalHeader>
@@ -87,7 +87,7 @@ export default function DeleteCoordinatorModal({
         <ModalBody>
           <div className="space-y-3">
             <div>
-              <p className="text-sm">Coordinator</p>
+              <p className="text-sm">Staff Member</p>
               <div className="text-sm font-medium text-gray-900">
                 {coordinatorName || "—"}
               </div>
@@ -98,9 +98,7 @@ export default function DeleteCoordinatorModal({
                 Irreversible action
               </p>
               <p className="text-xs text-danger">
-                Deleting a coordinator is permanent and cannot be undone. All
-                associated account data will be removed. Proceed only if you are
-                sure.
+                Deleting a staff member is permanent and cannot be undone. The account will be deactivated. Proceed only if you are sure.
               </p>
             </div>
 
@@ -133,7 +131,7 @@ export default function DeleteCoordinatorModal({
             disabled={!matches() || isDeleting}
             onPress={handleDelete}
           >
-            {isDeleting ? "Deleting..." : "Delete coordinator"}
+            {isDeleting ? "Deleting..." : "Delete Staff"}
           </Button>
         </ModalFooter>
       </ModalContent>
