@@ -268,9 +268,9 @@ export default function StakeholderTable({
 
           {/* Table Body */}
           <tbody className="bg-white divide-y divide-gray-100">
-            {filteredCoordinators.map((coordinator) => (
+            {filteredCoordinators.map((coordinator, index) => (
               <tr
-                key={coordinator.id}
+                key={coordinator.id || coordinator._id || `coordinator-${index}`}
                 className="hover:bg-gray-50/50 transition-colors"
               >
                 <td className="px-6 py-4 w-12">

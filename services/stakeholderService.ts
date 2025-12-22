@@ -1,0 +1,282 @@
+/**
+ * Stakeholder Service
+ * API client for stakeholder management operations
+ * Handles all backend communication for the stakeholder management page
+ */
+
+import { fetchJsonWithAuth } from '@/utils/fetchWithAuth';
+
+export interface CreateStakeholderData {
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+  email: string;
+  phoneNumber?: string;
+  password: string;
+  roleCode: string;
+  organizationId?: string;
+  organizationType?: string;
+  organizationInstitution?: string;
+  coverageAreaId?: string;
+  field?: string;
+}
+
+export interface UpdateStakeholderData {
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  email?: string;
+  phoneNumber?: string;
+  password?: string;
+  roleCode?: string;
+  organizationId?: string;
+  organizationType?: string;
+  organizationInstitution?: string;
+  coverageAreaId?: string;
+  field?: string;
+}
+
+export interface StakeholderListItem {
+  id: string;
+  _id: string;
+  fullName: string;
+  email: string;
+  phoneNumber?: string;
+  roles: Array<{
+    _id: string;
+    code: string;
+    name: string;
+    description?: string;
+  }>;
+  organization?: {
+    _id: string;
+    name: string;
+    type: string;
+  };
+  coverageAreas: Array<{
+    id: string;
+    _id: string;
+    name: string;
+  }>;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateStakeholderResponse {
+  success: boolean;
+  message?: string;
+  data?: any;
+}
+
+export interface UpdateStakeholderResponse {
+  success: boolean;
+  message?: string;
+  data?: any;
+}
+
+export interface ListStakeholdersResponse {
+  success: boolean;
+  data: any[];
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+/**
+ * Create a new stakeholder
+ * @param data - Stakeholder creation data
+ * @returns Created stakeholder data
+ */
+export async function createStakeholder(
+  data: CreateStakeholderData
+): Promise<CreateStakeholderResponse> {
+  try {
+    const payload: any = {
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      password: data.password,
+      roles: ['stakeholder'], // Always stakeholder for stakeholder-management page
+    };
+
+    if (data.middleName) payload.middleName = data.middleName;
+    if (data.phoneNumber) payload.phoneNumber = data.phoneNumber;
+    if (data.organizationId) payload.organizationId = data.organizationId;
+    if (data.organizationType) payload.organizationType = data.organizationType;
+    if (data.organizationInstitution) payload.organizationInstitution = data.organizationInstitution;
+    if (data.coverageAreaId) payload.coverageAreaId = data.coverageAreaId;
+    if (data.field) payload.field = data.field;
+
+    const response = await fetchJsonWithAuth('/api/users', {
+      method: 'POST',
+      headers: {
+        'x-page-context': 'stakeholder-management',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    return {
+      success: true,
+      data: response.data,
+    };
+  } catch (error: any) {
+    console.error('Failed to create stakeholder:', error);
+    return {
+      success: false,
+      message: error.message || error.body?.message || 'Failed to create stakeholder',
+    };
+  }
+}
+
+/**
+ * Update an existing stakeholder
+ * @param userId - User ID
+ * @param data - Update data
+ * @returns Updated stakeholder data
+ */
+export async function updateStakeholder(
+  userId: string,
+  data: UpdateStakeholderData
+): Promise<UpdateStakeholderResponse> {
+  try {
+    const payload: any = {};
+
+    if (data.firstName !== undefined) payload.firstName = data.firstName;
+    if (data.middleName !== undefined) payload.middleName = data.middleName;
+    if (data.lastName !== undefined) payload.lastName = data.lastName;
+    if (data.email !== undefined) payload.email = data.email;
+    if (data.phoneNumber !== undefined) payload.phoneNumber = data.phoneNumber;
+    if (data.password !== undefined) payload.password = data.password;
+    if (data.organizationId !== undefined) payload.organizationId = data.organizationId;
+    if (data.organizationType !== undefined) payload.organizationType = data.organizationType;
+    if (data.organizationInstitution !== undefined) payload.organizationInstitution = data.organizationInstitution;
+    if (data.coverageAreaId !== undefined) payload.coverageAreaId = data.coverageAreaId;
+    if (data.field !== undefined) payload.field = data.field;
+
+    // If role is being updated, include it
+    if (data.roleCode) {
+      payload.roles = [data.roleCode];
+    }
+
+    const response = await fetchJsonWithAuth(`/api/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+
+    return {
+      success: true,
+      data: response.data,
+    };
+  } catch (error: any) {
+    console.error('Failed to update stakeholder:', error);
+    return {
+      success: false,
+      message: error.message || error.body?.message || 'Failed to update stakeholder',
+    };
+  }
+}
+
+/**
+ * Get a stakeholder by ID
+ * @param userId - User ID
+ * @returns Stakeholder data
+ */
+export async function getStakeholder(userId: string): Promise<any> {
+  try {
+    const response = await fetchJsonWithAuth(`/api/users/${userId}`);
+    if (response.success && response.data) {
+      return response.data;
+    }
+    throw new Error(response.message || 'Failed to get stakeholder');
+  } catch (error: any) {
+    console.error('Failed to get stakeholder:', error);
+    throw error;
+  }
+}
+
+/**
+ * List stakeholders (users with request.review capability)
+ * @param filters - Optional filters
+ * @returns List of stakeholders
+ */
+export async function listStakeholders(filters?: {
+  search?: string;
+  organizationType?: string;
+  isActive?: boolean;
+  page?: number;
+  limit?: number;
+}): Promise<ListStakeholdersResponse> {
+  try {
+    const params = new URLSearchParams();
+    
+    // Use capability-based endpoint
+    params.append('capability', 'request.review');
+    
+    if (filters?.isActive !== undefined) {
+      params.append('isActive', String(filters.isActive));
+    }
+    
+    if (filters?.organizationType) {
+      params.append('organizationType', filters.organizationType);
+    }
+    
+    if (filters?.page) {
+      params.append('page', String(filters.page));
+    }
+    
+    if (filters?.limit) {
+      params.append('limit', String(filters.limit));
+    }
+
+    const queryString = params.toString();
+    const url = `/api/users/by-capability${queryString ? `?${queryString}` : ''}`;
+    
+    const response = await fetchJsonWithAuth(url);
+    
+    if (response.success) {
+      return {
+        success: true,
+        data: response.data || [],
+        pagination: response.pagination,
+      };
+    }
+    
+    throw new Error(response.message || 'Failed to list stakeholders');
+  } catch (error: any) {
+    console.error('Failed to list stakeholders:', error);
+    return {
+      success: false,
+      data: [],
+      message: error.message || error.body?.message || 'Failed to list stakeholders',
+    };
+  }
+}
+
+/**
+ * Delete a stakeholder (soft delete)
+ * @param userId - User ID
+ * @returns Success status
+ */
+export async function deleteStakeholder(userId: string): Promise<{ success: boolean; message?: string }> {
+  try {
+    const response = await fetchJsonWithAuth(`/api/users/${userId}`, {
+      method: 'DELETE',
+    });
+
+    return {
+      success: response.success || true,
+      message: response.message,
+    };
+  } catch (error: any) {
+    console.error('Failed to delete stakeholder:', error);
+    return {
+      success: false,
+      message: error.message || error.body?.message || 'Failed to delete stakeholder',
+    };
+  }
+}
+

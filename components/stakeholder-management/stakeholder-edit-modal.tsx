@@ -6,395 +6,185 @@ import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from "@herou
 import { Button } from "@heroui/button"
 import { Input } from "@heroui/input"
 import { Select, SelectItem } from "@heroui/select"
+import { useStakeholderManagement } from "@/hooks/useStakeholderManagement"
+import { updateStakeholder, getStakeholder } from "@/services/stakeholderService"
 
 interface EditStakeholderModalProps {
   isOpen: boolean
   onClose: () => void
-  coordinator: any | null
-  isSysAdmin?: boolean
-  userDistrictId?: string | null
+  stakeholder: any | null
   onSaved?: () => void
-  districtsProp?: any[]
 }
 
 export default function EditStakeholderModal({
   isOpen,
   onClose,
-  coordinator,
-  isSysAdmin = false,
-  userDistrictId = null,
+  stakeholder,
   onSaved,
-  districtsProp = [],
 }: EditStakeholderModalProps) {
+  const {
+    coverageOptions,
+    organizationOptions,
+    canChooseCoverage,
+    canChooseOrganization,
+    isSystemAdmin,
+    loading: hookLoading,
+    // Legacy compatibility
+    creatorCoverageAreas,
+    allowedOrganizations,
+  } = useStakeholderManagement()
+
   const [firstName, setFirstName] = useState("")
   const [middleName, setMiddleName] = useState("")
   const [lastName, setLastName] = useState("")
   const [email, setEmail] = useState("")
   const [phoneNumber, setPhoneNumber] = useState("")
   const [organization, setOrganization] = useState("")
-  const [cityMunicipality, setCityMunicipality] = useState("")
+  const [organizationId, setOrganizationId] = useState<string>("")
+  const [coverageAreaId, setCoverageAreaId] = useState<string>("")
+  const [selectedRole, setSelectedRole] = useState<string>("")
   const [newPassword, setNewPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
-  
-  const [districts, setDistricts] = useState<any[]>([])
-  const [districtId, setDistrictId] = useState<string | null>(null)
-  const [province, setProvince] = useState<string>("")
-  const [selectedProvince, setSelectedProvince] = useState<string>("")
-  const [municipalities, setMunicipalities] = useState<any[]>([])
-  const [provinces, setProvinces] = useState<any[]>([])
-  const [provincesLoading, setProvincesLoading] = useState(false)
-  const [selectedProvinceId, setSelectedProvinceId] = useState<string | null>(null)
-  const [districtsLoading, setDistrictsLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
-  const [accountType, setAccountType] = useState<string | null>(null)
-
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || ""
-  // preload districts if parent passed them and fetch provinces
+  const [stakeholderData, setStakeholderData] = useState<any>(null)
+  // Fetch stakeholder data when modal opens
   useEffect(() => {
-    if (Array.isArray(districtsProp) && districtsProp.length > 0) {
-      setDistricts(districtsProp)
-    }
-
-    const fetchProvinces = async () => {
-      setProvincesLoading(true)
-      try {
-        const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "")
-        const url = base ? `${base}/api/locations/provinces` : `/api/locations/provinces`
-        let token = null
+    if (isOpen && stakeholder) {
+      const fetchStakeholderData = async () => {
         try {
-          token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token")
-        } catch (e) {
-          token = null
-        }
-        const headers: any = {}
-        if (token) headers["Authorization"] = `Bearer ${token}`
-        const res = await fetch(url, { headers })
-        const bodyText = await res.text()
-        let body: any = null
-        try {
-          body = bodyText ? JSON.parse(bodyText) : null
-        } catch {
-          throw new Error("Invalid JSON from provinces endpoint")
-        }
-        if (!res.ok) throw new Error(body?.message || `Failed to fetch provinces (status ${res.status})`)
-        const items = body.data || body || []
-        setProvinces(Array.isArray(items) ? items : [])
-      } catch (err: any) {
-        // ignore; leave provinces empty
-      } finally {
-        setProvincesLoading(false)
-      }
-    }
-    fetchProvinces()
-  }, [districtsProp])
-
-  // when a province id/name is available, try to resolve selectedProvinceId
-  useEffect(() => {
-    if (!provinces || provinces.length === 0) return
-    const provKey = selectedProvince || province
-    if (!provKey) return
-    const match = provinces.find((p: any) => String(p.id) === String(provKey) || String(p._id) === String(provKey) || String(p.name) === String(provKey) || String(p.Province_Name) === String(provKey))
-    if (match) setSelectedProvinceId(String(match.id || match._id || match.id))
-  }, [provinces, selectedProvince, province])
-
-  // Try to resolve districtId from loaded `districts` when possible (match by name or district id)
-  useEffect(() => {
-    if ((!districts || districts.length === 0) || districtId) return
-    const coordDistrictCandidates = [
-      coordinator?.District?.District_Name,
-      coordinator?.District?.name,
-      coordinator?.District_Name,
-      coordinator?.districtName,
-      coordinator?.District,
-      coordinator?.district,
-    ].filter(Boolean)
-    if (coordDistrictCandidates.length === 0) return
-    for (const cand of coordDistrictCandidates) {
-      const found = districts.find((d: any) => {
-        const name = String(d.District_Name || d.name || d.District || d.District_Number || d.District_ID || d.id || d._id)
-        return String(name) === String(cand) || String(d.District_ID) === String(cand) || String(d._id) === String(cand) || String(d.id) === String(cand)
-      })
-      if (found) {
-        setDistrictId(String(found._id || found.id || found.District_ID))
-        break
-      }
-    }
-  }, [districts, coordinator, districtId])
-
-  // fetch districts for selected province if not provided
-  useEffect(() => {
-    const fetchDistrictsForProvince = async () => {
-      if (!selectedProvinceId) return
-      setDistrictsLoading(true)
-      try {
-        const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "")
-        const url = base
-          ? `${base}/api/locations/provinces/${encodeURIComponent(selectedProvinceId)}/districts`
-          : `/api/locations/provinces/${encodeURIComponent(selectedProvinceId)}/districts`
-        let token = null
-        try {
-          token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token")
-        } catch (e) {
-          token = null
-        }
-        const headers: any = {}
-        if (token) headers["Authorization"] = `Bearer ${token}`
-        const res = await fetch(url, { headers })
-        const bodyText = await res.text()
-        let body: any = null
-        try {
-          body = bodyText ? JSON.parse(bodyText) : null
-        } catch {
-          throw new Error("Invalid JSON from districts endpoint")
-        }
-        if (!res.ok) throw new Error(body?.message || `Failed to fetch districts (status ${res.status})`)
-        const items = body.data || body || []
-        setDistricts(Array.isArray(items) ? items : [])
-      } catch (err: any) {
-        // ignore
-      } finally {
-        setDistrictsLoading(false)
-      }
-    }
-    fetchDistrictsForProvince()
-  }, [selectedProvinceId])
-
-  // fetch municipalities for district
-  useEffect(() => {
-    const loadMunicipalities = async () => {
-      if (!districtId) {
-        setMunicipalities([])
-        return
-      }
-      try {
-        const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "")
-        const url = base
-          ? `${base}/api/locations/districts/${encodeURIComponent(String(districtId))}/municipalities`
-          : `/api/locations/districts/${encodeURIComponent(String(districtId))}/municipalities`
-        let token = null
-        try {
-          token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token")
-        } catch (e) {
-          token = null
-        }
-        const headers: any = {}
-        if (token) headers["Authorization"] = `Bearer ${token}`
-        const res = await fetch(url, { headers })
-        const bodyText = await res.text()
-        let body: any = null
-        try {
-          body = bodyText ? JSON.parse(bodyText) : null
-        } catch {
-          throw new Error("Invalid JSON from municipalities endpoint")
-        }
-        if (!res.ok) throw new Error(body?.message || `Failed to fetch municipalities (status ${res.status})`)
-        const items = body.data || body || []
-        setMunicipalities(Array.isArray(items) ? items : [])
-      } catch (err: any) {
-        setMunicipalities([])
-      }
-    }
-    loadMunicipalities()
-  }, [districtId])
-
-  // When municipalities load, try to resolve coordinator's municipality to an id so Select shows it
-  useEffect(() => {
-    if (!Array.isArray(municipalities) || municipalities.length === 0) return
-    const coordMuniId = coordinator?.Municipality_ID || coordinator?.municipalityId || coordinator?.municipality || null
-    const coordMuniName = coordinator?.City_Municipality || coordinator?.cityMunicipality || coordinator?.City || coordinator?.Municipality || null
-    if (coordMuniId) {
-      const found = municipalities.find((m: any) =>
-        String(m._id || m.id || m.Municipality_ID || m.MunicipalityId) === String(coordMuniId),
-      )
-      if (found) {
-        setCityMunicipality(String(found._id || found.id || found.Municipality_ID || found.MunicipalityId))
-        return
-      }
-    }
-    if (coordMuniName) {
-      const found = municipalities.find((m: any) => {
-        const name = String(m.name || m.Name || m.City_Municipality || m.City || m.CityMunicipality || m).toLowerCase()
-        return name === String(coordMuniName).toLowerCase()
-      })
-      if (found) setCityMunicipality(String(found._id || found.id || found.Municipality_ID || found.MunicipalityId))
-    }
-  }, [municipalities, coordinator])
-
-  useEffect(() => {
-    if (isOpen && coordinator) {
-      // Populate name fields
-      setFirstName(coordinator.First_Name || coordinator.firstName || "")
-      setMiddleName(coordinator.Middle_Name || coordinator.middleName || "")
-      setLastName(coordinator.Last_Name || coordinator.lastName || "")
-
-      // Populate contact information
-      setEmail(coordinator.Email || coordinator.email || "")
-      setPhoneNumber(coordinator.Phone_Number || coordinator.phoneNumber || "")
-
-      // Populate organization from multiple possible shapes (mirror page resolution)
-      const resolveOrg = (() => {
-        const s: any = coordinator || {}
-        const tryValues = [
-          s.Organization_Institution,
-          s.Organization,
-          s.organization,
-          s.OrganizationName,
-          s.Organization_Name,
-            s.organization_institution,
-            s.organizationInstitution,
-          s.Organisation,
-          s.organisation,
-          s.OrganizationInstitution,
-          s.data && s.data.Organization_Institution,
-          s.data && s.data.organization,
-          s.stakeholder && s.stakeholder.Organization_Institution,
-          s.stakeholder && s.stakeholder.organization,
-          s.result && s.result.Organization_Institution,
-          s.details && s.details.Organization_Institution,
-        ]
-        for (const v of tryValues) {
-          if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim()
-        }
-        for (const k of Object.keys(s || {})) {
-          const key = String(k).toLowerCase()
-          if (key.includes("organ") || key.includes("institut") || key.includes("organisation")) {
-            const v = s[k]
-            if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim()
+          const stakeholderId = stakeholder._id || stakeholder.id || stakeholder.Stakeholder_ID || stakeholder.StakeholderId
+          if (stakeholderId) {
+            const data = await getStakeholder(String(stakeholderId))
+            setStakeholderData(data)
+            
+            // Populate form fields
+            setFirstName(data.firstName || data.First_Name || "")
+            setMiddleName(data.middleName || data.Middle_Name || "")
+            setLastName(data.lastName || data.Last_Name || "")
+            setEmail(data.email || data.Email || "")
+            setPhoneNumber(data.phoneNumber || data.Phone_Number || "")
+            setOrganization(data.organizationInstitution || data.Organization_Institution || "")
+            
+            // Set organization ID if available
+            if (data.organizationId) {
+              const orgId = typeof data.organizationId === 'object' ? data.organizationId._id : data.organizationId
+              setOrganizationId(String(orgId))
+            } else if (data.organization) {
+              // Fallback: try to get org ID from organization object
+              const orgId = typeof data.organization === 'object' ? data.organization._id : data.organization
+              if (orgId) {
+                setOrganizationId(String(orgId))
+              }
+            }
+            
+            // Ensure organizationId is set even if not in data (for coordinators viewing their own org)
+            // This will be used to display the organization name
+            if (!organizationId && !canChooseOrganization && organizationOptions.length > 0) {
+              const orgId = organizationOptions[0]._id
+              if (orgId) {
+                setOrganizationId(String(orgId))
+              }
+            }
+            
+            // Set coverage area ID if available
+            if (data.coverageAreas && data.coverageAreas.length > 0) {
+              const ca = data.coverageAreas[0]
+              const caId = typeof ca === 'object' && ca.coverageAreaId
+                ? (typeof ca.coverageAreaId === 'object' ? ca.coverageAreaId._id : ca.coverageAreaId)
+                : (typeof ca === 'object' ? ca._id : ca)
+              if (caId) {
+                setCoverageAreaId(String(caId))
+              }
+            }
+            
+            // Set role if available (should always be stakeholder)
+            if (data.roles && data.roles.length > 0) {
+              const role = data.roles[0]
+              const roleCode = typeof role === 'object' ? role.code : role
+              if (roleCode) {
+                setSelectedRole(String(roleCode))
+              } else {
+                // Default to stakeholder if no role found
+                setSelectedRole('stakeholder')
+              }
+            } else {
+              // Default to stakeholder
+              setSelectedRole('stakeholder')
+            }
+          } else {
+            // Fallback: use stakeholder prop directly
+            setStakeholderData(stakeholder)
+            setFirstName(stakeholder.firstName || stakeholder.First_Name || "")
+            setMiddleName(stakeholder.middleName || stakeholder.Middle_Name || "")
+            setLastName(stakeholder.lastName || stakeholder.Last_Name || "")
+            setEmail(stakeholder.email || stakeholder.Email || "")
+            setPhoneNumber(stakeholder.phoneNumber || stakeholder.Phone_Number || "")
+            setOrganization(stakeholder.organizationInstitution || stakeholder.Organization_Institution || "")
           }
+        } catch (error) {
+          console.error('Failed to fetch stakeholder data:', error)
+          // Fallback: use stakeholder prop directly
+          setStakeholderData(stakeholder)
         }
-        return ""
-      })()
-      setOrganization(resolveOrg)
-      setCityMunicipality(
-        coordinator.City_Municipality || coordinator.cityMunicipality || coordinator.City || coordinator.Municipality || coordinator.Municipality_Name || "",
-      )
-
-
-      // Populate province and district (support multiple shapes)
-      let provName = ""
-      if (coordinator.Province_Name) provName = coordinator.Province_Name
-      else if (coordinator.province) provName = coordinator.province
-      else if (coordinator.Province) {
-        if (typeof coordinator.Province === "string") provName = coordinator.Province
-        else provName = coordinator.Province.Province_Name || coordinator.Province.name || coordinator.Province.province || ""
       }
-      setProvince(provName)
-      setSelectedProvince(provName)
-
-      const distId =
-        coordinator.District_ID || coordinator.districtId || coordinator.District?.District_ID || coordinator.District?.id || coordinator.District?._id || null
-      setDistrictId(distId ? String(distId) : null)
-
-      // Try to pick a municipality id if present on the coordinator (prefer ids over names)
-      const muniId =
-        coordinator.Municipality_ID || coordinator.municipalityId || coordinator.municipality || coordinator.Municipality || null
-      if (muniId) setCityMunicipality(String(muniId))
-
-      // Populate account type (assignment)
-      setAccountType(coordinator.Account_Type || coordinator.accountType || null)
-
-      // Clear password field for edit mode
-      setNewPassword("")
-
-      // Clear validation errors
-      setValidationErrors([])
+      
+      fetchStakeholderData()
     }
-  }, [isOpen, coordinator])
+  }, [isOpen, stakeholder])
 
-  // Accept districtsProp and preload provinces/districts similar to AddStakeholderModal
-  useEffect(() => {
-    // @ts-ignore
-    const propsAny: any = ({} as any)
-    try {
-      // read via the actual variable name from the outer scope
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-    } catch (e) {
-      /* noop */
-    }
-  }, [])
 
   const handleSave = async () => {
-    if (!coordinator) return
+    if (!stakeholder && !stakeholderData) return
 
     setIsSubmitting(true)
     setValidationErrors([])
 
     try {
-      const coordId = coordinator.Stakeholder_ID || coordinator.StakeholderId || coordinator.id || coordinator._id
-      if (!coordId) throw new Error("Stakeholder id not available")
+      const stakeholderId = stakeholder?._id || stakeholder?.id || stakeholder?.Stakeholder_ID || stakeholder?.StakeholderId
+        || stakeholderData?._id || stakeholderData?.id
+      if (!stakeholderId) throw new Error("Stakeholder id not available")
 
-      const token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token")
-      const headers: any = { "Content-Type": "application/json" }
-      if (token) headers["Authorization"] = `Bearer ${token}`
-
-      const payload: any = {}
-      if (firstName) payload.First_Name = firstName
-      if (middleName !== undefined) payload.Middle_Name = middleName
-      if (lastName) payload.Last_Name = lastName
-      if (email) payload.Email = email
-      if (phoneNumber) payload.Phone_Number = phoneNumber
-      // Only sysadmin may change province/district/accountType
-      if (isSysAdmin) {
-        if (districtId) payload.District_ID = districtId
-        payload.Province_Name = (selectedProvince || province) as any
+      const payload: any = {
+        firstName: firstName || undefined,
+        middleName: middleName || undefined,
+        lastName: lastName || undefined,
+        email: email || undefined,
+        phoneNumber: phoneNumber || undefined,
+        organizationInstitution: organization || undefined,
       }
-      if (organization !== undefined) payload.Organization_Institution = organization || null
-      if (cityMunicipality !== undefined) payload.City_Municipality = cityMunicipality || null
 
+      // Only system admin can change organization and coverage area
+      if (canChooseOrganization && organizationId) {
+        payload.organizationId = organizationId
+      }
+      if (canChooseCoverage && coverageAreaId) {
+        payload.coverageAreaId = coverageAreaId
+      }
+
+      // Role is always stakeholder for stakeholder management page
+      // Don't send roleCode - backend will maintain it as stakeholder
+
+      // Password is optional
       if (newPassword && String(newPassword).trim().length > 0) {
-        payload.Password = newPassword
         payload.password = newPassword
       }
 
-      if (isSysAdmin && districtId) payload.district = districtId
-      if (cityMunicipality !== undefined) payload.municipality = cityMunicipality || null
+      const response = await updateStakeholder(String(stakeholderId), payload)
 
-      // Account type (assignment) only editable by sysadmin
-      if (isSysAdmin && (accountType !== undefined && accountType !== null)) {
-        payload.Account_Type = accountType || null
-        payload.accountType = accountType || null
-      }
-
-      const res = await fetch(`${API_URL}/api/stakeholders/${coordId}`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify(payload),
-      })
-
-      const text = await res.text()
-      let resp: any = null
-      try {
-        resp = JSON.parse(text)
-      } catch (e) {
-        resp = { message: text }
-      }
-
-      if (!res.ok) {
-        if (resp && resp.errors && Array.isArray(resp.errors)) {
-          setValidationErrors(resp.errors)
-          return
-        }
-        throw new Error(resp.message || "Failed to update stakeholder")
+      if (!response.success) {
+        throw new Error(response.message || "Failed to update stakeholder")
       }
 
       if (onSaved) {
         try {
           await onSaved()
         } catch (e) {
-          // ignore onSaved errors but continue to close/reload
+          // ignore onSaved errors but continue to close
         }
       }
 
       onClose()
-      // Force a full reload so the stakeholder page always refreshes to latest data
-      if (typeof window !== "undefined") {
-        try {
-          window.location.reload()
-        } catch (e) {
-          // ignore reload errors
-        }
-      }
     } catch (err: any) {
       setValidationErrors([err?.message || "Failed to save changes"])
     } finally {
@@ -402,75 +192,27 @@ export default function EditStakeholderModal({
     }
   }
 
-  if (!coordinator) return null
+  if (!stakeholder && !stakeholderData) return null
 
-  // ... existing code for displayedProvinceName and displayedDistrictName ...
-  const displayedProvinceName = (() => {
-    const provKey = selectedProvince || province || null
-    if (!provKey) return ""
-
-    // If selectedProvince is a readable name (not an ObjectId), prefer it
-    if (typeof provKey === "string" && !String(provKey).match(/^[0-9a-fA-F]{24}$/)) {
-      // Try to find a district that references this province to get a nicer name
-      const pick = districts.find(
-        (d) =>
-          String(d.Province_Name) === String(provKey) ||
-          String(d.Province) === String(provKey) ||
-          String(d.province) === String(provKey),
-      )
-      if (pick) return pick.Province_Name || pick.Province || pick.province || String(provKey)
-      return String(provKey)
+  // Diagnostic logging for field states
+  useEffect(() => {
+    if (isOpen) {
+      console.log('[DIAG] Edit Modal Field States:', {
+        canChooseCoverage,
+        canChooseOrganization,
+        isSystemAdmin,
+        coverageOptionsCount: coverageOptions.length,
+        organizationOptionsCount: organizationOptions.length,
+        stakeholderOrganizationId: organizationId,
+        stakeholderCoverageAreaId: coverageAreaId,
+        stakeholderData: stakeholderData ? {
+          hasOrganization: !!(stakeholderData.organization || stakeholderData.organizationId),
+          organization: stakeholderData.organization,
+          organizationId: stakeholderData.organizationId
+        } : null
+      });
     }
-
-    // If provKey looks like an ObjectId (or numeric id), try to resolve against loaded provinces
-    const keyStr = String(provKey)
-    const idLike = keyStr.match(/^[0-9a-fA-F]{24}$/)
-    if (idLike) {
-      // Look for common fields in province objects
-      const pmatch = provinces.find((p: any) =>
-        String(p._id) === keyStr || String(p.id) === keyStr || String(p.Province_ID || "") === keyStr,
-      )
-      if (pmatch) {
-        if (!selectedProvinceId) setSelectedProvinceId(String(pmatch._id || pmatch.id))
-        return pmatch.name || pmatch.Province_Name || String(pmatch._id || pmatch.id)
-      }
-
-      // Last resort: search districts for a province mapping
-      if (districts && districts.length > 0) {
-        const pick = districts.find(
-          (d) =>
-            String(d.Province) === keyStr ||
-            String(d.Province_ID) === keyStr ||
-            (d.Province && String(d.Province._id) === keyStr) ||
-            String(d._id) === keyStr ||
-            String(d.id) === keyStr,
-        )
-        if (pick) return pick.Province_Name || pick.Province || pick.province || keyStr
-      }
-    }
-
-    // If provKey is an object (may come from coordinator.Province), try common name fields
-    if (typeof provKey === "object") {
-      const p = provKey as any
-      return p.Province_Name || p.name || p.Province || String(p._id || p.id || "")
-    }
-
-    // Fallback: return stringified key
-    return String(provKey)
-  })()
-
-  const displayedDistrictName = (() => {
-    const pick = districts.find(
-      (d) =>
-        String(d.District_ID) === String(districtId) ||
-        String(d._id) === String(districtId) ||
-        String(d.id) === String(districtId),
-    )
-    if (pick) return pick.District_Name || pick.District || pick.name || String(districtId || "")
-    if (coordinator.District)
-      return coordinator.District.District_Name || coordinator.District.name || coordinator.District.District_ID || ""
-    return districtId ? String(districtId) : ""
-  })()
+  }, [isOpen, hookLoading, canChooseCoverage, canChooseOrganization, isSystemAdmin, coverageOptions.length, organizationOptions.length, organizationId, coverageAreaId, stakeholderData]);
 
   return (
     <Modal isOpen={isOpen} placement="center" scrollBehavior="inside" size="xl" onClose={onClose}>
@@ -597,175 +339,152 @@ export default function EditStakeholderModal({
               />
             </div>
 
+            {/* Role Selection - Disabled, always stakeholder */}
             <div>
-              <label className="text-sm font-semibold text-gray-900 mb-2 block">Account Type</label>
-              <Select
-                placeholder={isSysAdmin ? "Choose Account Type" : "Account type (view only)"}
-                selectedKeys={accountType ? [String(accountType)] : []}
-                disabled={!isSysAdmin}
-                onSelectionChange={(keys: any) => {
-                  const v = Array.from(keys)[0] as string
-                  setAccountType(v || null)
-                }}
-              >
-                <SelectItem key="LGU" textValue="LGU">LGU</SelectItem>
-                <SelectItem key="Others" textValue="Others">Others</SelectItem>
-              </Select>
+              <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                Role
+              </label>
+              <Input
+                disabled
+                classNames={{ inputWrapper: "h-10 bg-gray-100" }}
+                type="text"
+                value="Stakeholder"
+                variant="bordered"
+                description="Role is fixed to Stakeholder"
+              />
             </div>
 
-            {/* Province and District */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-semibold text-gray-900 mb-2 block">Province</label>
-                {isSysAdmin ? (
-                  <Select
-                    placeholder="Choose Province"
-                    selectedKeys={selectedProvinceId ? [String(selectedProvinceId)] : []}
-                    onSelectionChange={(keys: any) => {
-                      const id = Array.from(keys)[0] as string
-                      const match = provinces.find((p) =>
-                        String(p.id) === String(id) || String(p._id) === String(id) || String(p.name) === String(id) || String(p.Province_Name) === String(id),
-                      )
-                      if (match) {
-                        setSelectedProvinceId(String(match.id || match._id))
-                        setSelectedProvince(match.name || match.Province_Name || String(match.id || match._id))
-                        setDistrictId(null)
-                      }
-                    }}
-                  >
-                    {(provinces || []).map((p: any, idx: number) => {
-                      const key = String(p.id ?? p._id ?? p._id ?? p.name ?? idx)
-                      const label = String(p.name || p.Province_Name || p.name || p.Province || key)
-                      return (
-                        <SelectItem key={key} textValue={label}>
-                          {label}
-                        </SelectItem>
-                      )
-                    })}
-                  </Select>
-                ) : (
-                  <Input
-                    disabled
-                    classNames={{ inputWrapper: "h-10 bg-gray-100" }}
-                    type="text"
-                    value={displayedProvinceName || province}
-                    variant="bordered"
-                  />
-                )}
-              </div>
-              <div>
-                <label className="text-sm font-semibold text-gray-900 mb-2 block">District</label>
+            {/* Coverage Area */}
+            <div>
+              <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                Coverage Area
+              </label>
+              {canChooseCoverage ? (
                 <Select
-                  disabled={!isSysAdmin}
-                  placeholder="Choose District"
-                  selectedKeys={districtId ? [String(districtId)] : []}
+                  placeholder="Select Coverage Area"
+                  selectedKeys={coverageAreaId ? new Set([coverageAreaId]) : new Set()}
+                  isDisabled={hookLoading}
+                  description="System administrators can change coverage area"
                   onSelectionChange={(keys: any) => {
-                    const id = Array.from(keys)[0] as string
-                    setDistrictId(id)
-                    setCityMunicipality("")
-                    const pick = districts.find(
-                      (d) =>
-                        String(d.District_ID) === String(id) ||
-                        String(d.id) === String(id) ||
-                        String(d._id) === String(id),
+                    const caId = Array.from(keys)[0] as string
+                    setCoverageAreaId(caId)
+                  }}
+                >
+                  {coverageOptions.map((ca) => {
+                    const caId = ca._id
+                    const caName = ca.name || String(caId)
+                    return (
+                      <SelectItem key={String(caId)} textValue={caName}>
+                        {caName}
+                      </SelectItem>
                     )
-                    if (pick) {
-                      setProvince(pick.Province_Name || pick.Province || pick.province || "")
-                      setSelectedProvince(pick.Province_Name || pick.Province || pick.province || "")
-                      const provId =
-                        pick.Province_ID ||
-                        pick.ProvinceId ||
-                        (pick.Province && (pick.Province._id || pick.Province.id)) ||
-                        null
-                      if (provId) setSelectedProvinceId(String(provId))
-                    }
-                  }}
-                >
-                  {(() => {
-                    const list = (() => {
-                      if (selectedProvinceId && Array.isArray(districts) && districts.length > 0) {
-                        return districts
-                      }
-                      const provName = (() => {
-                        if (selectedProvince) return selectedProvince
-                        if (selectedProvinceId) {
-                          const p = provinces.find((x) => String(x.id) === String(selectedProvinceId))
-                          if (p) return p.name
-                        }
-                        if (province) return province
-                        return null
-                      })()
-                      return (districts || []).filter((d) =>
-                        provName
-                          ? d.Province_Name === provName || d.Province === provName || d.province === provName
-                          : true,
-                      )
-                    })()
-                    if (list.length > 0) {
-                      return list.map((d, idx) => {
-                        const label =
-                          d.name || d.District_Name || d.District || d.District_Number || d.District_ID || String(idx)
-                        const key = String(d._id || d.id || d.District_ID || idx)
-                        return (
-                          <SelectItem key={key} textValue={String(label)}>
-                            {String(label)}
-                          </SelectItem>
-                        )
-                      })
-                    }
-                    if (districtId || coordinator.District) {
-                      return (
-                        <SelectItem
-                          key={String(
-                            districtId ||
-                              (coordinator.District &&
-                                (coordinator.District.District_ID ||
-                                  coordinator.District._id ||
-                                  coordinator.District.id)),
-                          )}
-                          textValue={String(displayedDistrictName)}
-                        >
-                          {String(displayedDistrictName)}
-                        </SelectItem>
-                      )
-                    }
-                    return null
-                  })()}
+                  })}
                 </Select>
-              </div>
+              ) : (
+                <Input
+                  disabled
+                  classNames={{ inputWrapper: "h-10 bg-gray-100" }}
+                  type="text"
+                  value={(() => {
+                    if (!coverageAreaId) return ""
+                    // Try to find in coverageOptions first
+                    const ca = coverageOptions.find((a) => 
+                      String(a._id) === String(coverageAreaId)
+                    )
+                    if (ca) return ca.name || String(coverageAreaId)
+                    // Fallback to creatorCoverageAreas for legacy compatibility
+                    const caLegacy = creatorCoverageAreas.find((a) => 
+                      String(a._id) === String(coverageAreaId)
+                    )
+                    return caLegacy?.name || String(coverageAreaId)
+                  })()}
+                  variant="bordered"
+                  description="Coverage area cannot be changed"
+                />
+              )}
             </div>
 
-            {/* Municipality and Organization */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-semibold text-gray-900 mb-2 block">Municipality / City</label>
+            {/* Organization */}
+            <div>
+              <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                Organization
+              </label>
+              {canChooseOrganization ? (
                 <Select
-                  placeholder="Choose Municipality / City"
-                  selectedKeys={cityMunicipality ? [String(cityMunicipality)] : []}
+                  placeholder="Select Organization"
+                  selectedKeys={organizationId ? new Set([organizationId]) : new Set()}
+                  isDisabled={hookLoading}
                   onSelectionChange={(keys: any) => {
-                    const v = Array.from(keys)[0] as string
-                    setCityMunicipality(v || "")
+                    const orgId = Array.from(keys)[0] as string
+                    setOrganizationId(orgId)
                   }}
                 >
-                  {municipalities && municipalities.length > 0 ? (
-                    municipalities.map((m: any, idx: number) => {
-                      const label = m.name || m.Name || m.City_Municipality || String(m)
-                      const key = String(m._id || m.id || label || idx)
-                      return (
-                        <SelectItem key={key} textValue={String(label)}>
-                          {String(label)}
-                        </SelectItem>
-                      )
-                    })
-                  ) : cityMunicipality ? (
-                    <SelectItem key={String(cityMunicipality)} textValue={String(cityMunicipality)}>
-                      {String(cityMunicipality)}
-                    </SelectItem>
-                  ) : null}
+                  {organizationOptions.map((org) => {
+                    const orgId = org._id
+                    const orgName = org.name || String(orgId)
+                    return (
+                      <SelectItem key={String(orgId)} textValue={orgName}>
+                        {orgName}
+                      </SelectItem>
+                    )
+                  })}
                 </Select>
-              </div>
-              <div>
-                <label className="text-sm font-semibold text-gray-900 mb-2 block">Organization / Institution</label>
+              ) : (
+                <Input
+                  disabled
+                  classNames={{ inputWrapper: "h-10 bg-gray-100" }}
+                  type="text"
+                  value={(() => {
+                    // First try to get from stakeholder data (the stakeholder's own organization)
+                    if (stakeholderData?.organization) {
+                      const org = stakeholderData.organization
+                      if (typeof org === 'object' && org.name) {
+                        return org.name
+                      }
+                      if (typeof org === 'string') {
+                        return org
+                      }
+                    }
+                    if (stakeholderData?.organizationId) {
+                      const org = stakeholderData.organizationId
+                      if (typeof org === 'object' && org.name) {
+                        return org.name
+                      }
+                      // If it's just an ID, try to find it in organizationOptions
+                      const orgId = typeof org === 'object' ? org._id : org
+                      if (orgId) {
+                        const foundOrg = organizationOptions.find(o => String(o._id) === String(orgId))
+                        if (foundOrg) return foundOrg.name
+                      }
+                    }
+                    // If we have organizationId set, try to find it in organizationOptions
+                    if (organizationId) {
+                      const foundOrg = organizationOptions.find(o => String(o._id) === String(organizationId))
+                      if (foundOrg) return foundOrg.name
+                      // If not found, might be a different org - try stakeholder data
+                      if (stakeholderData) {
+                        // Check if stakeholder has organization in a different field
+                        const org = (stakeholderData as any).organization || (stakeholderData as any).Organization
+                        if (org) {
+                          return typeof org === 'object' ? org.name : String(org)
+                        }
+                      }
+                    }
+                    // Last resort: if coordinator and no stakeholder org found, show coordinator's org as fallback
+                    // (This should rarely happen - stakeholder should always have an org)
+                    if (!canChooseOrganization && organizationOptions.length > 0) {
+                      return organizationOptions[0].name || String(organizationOptions[0]._id)
+                    }
+                    return ""
+                  })()}
+                  variant="bordered"
+                  description="Only system administrators can change organization"
+                />
+              )}
+              <div className="mt-2">
+                <label className="text-sm font-medium text-gray-700 mb-1 block">
+                  Organization / Institution Details
+                </label>
                 <Input
                   placeholder="Enter Organization / Institution"
                   classNames={{ inputWrapper: "h-10" }}

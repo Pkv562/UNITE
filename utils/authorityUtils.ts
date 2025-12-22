@@ -11,7 +11,7 @@ export const AUTHORITY_TIERS = {
   SYSTEM_ADMIN: 100,
   OPERATIONAL_ADMIN: 80,
   COORDINATOR: 60,
-  STAKEHOLDER: 40,
+  STAKEHOLDER: 30,
   BASIC_USER: 20
 } as const;
 
@@ -60,6 +60,18 @@ export function calculateAuthorityFromPermissions(permissions: Permission[]): Au
     return AUTHORITY_TIERS.OPERATIONAL_ADMIN;
   }
 
+  // Check for stakeholder (review-only capabilities) - MUST check BEFORE coordinator
+  // A user is STAKEHOLDER if they have review capabilities but NO operational capabilities
+  const hasReview = permissions.some(p => {
+    if (p.resource === '*' && (p.actions.includes('*') || p.actions.includes('review'))) {
+      return true;
+    }
+    if (p.resource === 'request' && (p.actions.includes('*') || p.actions.includes('review'))) {
+      return true;
+    }
+    return false;
+  });
+
   // Check for coordinator (operational capabilities)
   const operationalCapabilities = [
     { resource: 'request', action: 'create' },
@@ -79,21 +91,17 @@ export function calculateAuthorityFromPermissions(permissions: Permission[]): Au
     });
   });
 
+  // If user has review but NO operational capabilities, it's a STAKEHOLDER
+  if (hasReview && !hasOperational) {
+    return AUTHORITY_TIERS.STAKEHOLDER;
+  }
+
+  // If user has operational capabilities, it's a COORDINATOR
   if (hasOperational) {
     return AUTHORITY_TIERS.COORDINATOR;
   }
 
-  // Check for stakeholder (review-only capabilities)
-  const hasReview = permissions.some(p => {
-    if (p.resource === '*' && (p.actions.includes('*') || p.actions.includes('review'))) {
-      return true;
-    }
-    if (p.resource === 'request' && (p.actions.includes('*') || p.actions.includes('review'))) {
-      return true;
-    }
-    return false;
-  });
-
+  // If user only has review (but we already checked above), fall through
   if (hasReview) {
     return AUTHORITY_TIERS.STAKEHOLDER;
   }
