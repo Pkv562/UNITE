@@ -120,9 +120,13 @@ export interface CreateStaffData {
   phoneNumber?: string;
   organizationType?: 'LGU' | 'NGO' | 'Hospital' | 'RedCross' | 'Non-LGU' | 'Other';
   organizationInstitution?: string;
-  roles: string[]; // Role IDs
-  coverageAreaIds: string[]; // Coverage Area IDs (will be created if needed)
+  organizationIds?: string[]; // Organization IDs (multiple organizations supported)
+  organizationId?: string; // Single organization ID (backward compatibility)
+  roles: string[]; // Role IDs or role codes
+  coverageAreaIds?: string[]; // Coverage Area IDs (will be created if needed)
   locationIds?: string[]; // Location IDs for creating new coverage areas
+  municipalityIds?: string[]; // Municipality IDs (for coordinator creation)
+  pageContext?: string; // Page context: 'coordinator-management' or 'stakeholder-management'
 }
 
 export interface UpdateStaffData {

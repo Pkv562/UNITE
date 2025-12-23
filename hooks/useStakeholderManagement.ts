@@ -11,6 +11,7 @@ import type { Location } from './useLocations';
 
 export interface CreationContext {
   allowedRole: string;
+  roleOptions: Role[];
   canChooseMunicipality: boolean;
   canChooseOrganization: boolean;
   municipalityOptions: Location[];
@@ -19,9 +20,19 @@ export interface CreationContext {
   isSystemAdmin: boolean;
 }
 
+export interface Role {
+  _id: string;
+  id: string;
+  code: string;
+  name: string;
+  authority: number;
+  description?: string;
+}
+
 export interface UseStakeholderManagementReturn {
   // State (from backend)
   allowedRole: string;
+  roleOptions: Role[];
   canChooseMunicipality: boolean;
   canChooseOrganization: boolean;
   municipalityOptions: Location[];
@@ -36,16 +47,17 @@ export interface UseStakeholderManagementReturn {
   fetchBarangays: (municipalityId: string) => Promise<void>;
   
   // Legacy compatibility (for existing components)
-  assignableRoles: never[]; // Always empty - role is forced to stakeholder
+  assignableRoles: Role[]; // Alias for roleOptions
   creatorCoverageAreas: Location[]; // Alias for municipalityOptions (for backward compatibility)
   allowedOrganizations: Organization[]; // Alias for organizationOptions
-  canAssignRole: (roleId: string) => boolean; // Always returns false (no role selection)
+  canAssignRole: (roleId: string) => boolean;
   canSelectCoverageArea: (coverageAreaId: string) => boolean; // Deprecated - use municipality
   canSelectOrganization: (organizationId: string) => boolean;
 }
 
 export function useStakeholderManagement(): UseStakeholderManagementReturn {
   const [allowedRole, setAllowedRole] = useState<string>('stakeholder');
+  const [roleOptions, setRoleOptions] = useState<Role[]>([]);
   const [canChooseMunicipality, setCanChooseMunicipality] = useState<boolean>(false);
   const [canChooseOrganization, setCanChooseOrganization] = useState<boolean>(false);
   const [municipalityOptions, setMunicipalityOptions] = useState<Location[]>([]);
@@ -68,6 +80,7 @@ export function useStakeholderManagement(): UseStakeholderManagementReturn {
       if (response.success && response.data) {
         const context: CreationContext = response.data;
         setAllowedRole(context.allowedRole);
+        setRoleOptions(context.roleOptions || []);
         setCanChooseMunicipality(context.canChooseMunicipality);
         setCanChooseOrganization(context.canChooseOrganization);
         setMunicipalityOptions(context.municipalityOptions || []);
@@ -78,6 +91,8 @@ export function useStakeholderManagement(): UseStakeholderManagementReturn {
         // Diagnostic logging
         console.log('[DIAG] Stakeholder Creation Context:', {
           allowedRole: context.allowedRole,
+          roleOptionsCount: context.roleOptions?.length || 0,
+          roleOptions: context.roleOptions?.map(r => `${r.code} (${r.authority})`).join(', ') || 'none',
           canChooseMunicipality: context.canChooseMunicipality,
           canChooseOrganization: context.canChooseOrganization,
           municipalityOptionsCount: context.municipalityOptions?.length || 0,
@@ -97,11 +112,14 @@ export function useStakeholderManagement(): UseStakeholderManagementReturn {
   }, []);
 
   /**
-   * Check if a role can be assigned (always false - role is forced to stakeholder)
+   * Check if a role can be assigned
    */
   const canAssignRole = useCallback((roleId: string): boolean => {
-    return false; // Role selection is disabled - always stakeholder
-  }, []);
+    return roleOptions.some(role => {
+      const id = role._id || role.id;
+      return String(id) === String(roleId);
+    });
+  }, [roleOptions]);
 
   /**
    * Fetch barangays for a municipality
@@ -160,6 +178,7 @@ export function useStakeholderManagement(): UseStakeholderManagementReturn {
   return {
     // New API (from backend)
     allowedRole,
+    roleOptions,
     canChooseMunicipality,
     canChooseOrganization,
     municipalityOptions,
@@ -172,7 +191,7 @@ export function useStakeholderManagement(): UseStakeholderManagementReturn {
     fetchBarangays,
     
     // Legacy compatibility
-    assignableRoles: [], // Always empty - role is forced to stakeholder
+    assignableRoles: roleOptions, // Alias for roleOptions
     creatorCoverageAreas: municipalityOptions, // Alias for municipalityOptions (for backward compatibility)
     allowedOrganizations: organizationOptions, // Alias for organizationOptions
     canAssignRole,

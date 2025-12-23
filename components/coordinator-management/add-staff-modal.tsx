@@ -16,6 +16,8 @@ import { Select, SelectItem } from "@heroui/select";
 import { Checkbox } from "@heroui/checkbox";
 import RoleAssignmentSection from "./role-assignment-section";
 import CoverageAssignmentModal from "./coverage-assignment-modal";
+import OrganizationSelector from "./organization-selector";
+import MunicipalityTreeSelector from "./municipality-tree-selector";
 import type { CreateStaffData } from "@/types/coordinator.types";
 
 interface AddStaffModalProps {
@@ -43,33 +45,114 @@ export default function AddStaffModal({
   const [showPassword, setShowPassword] = useState(false);
   const [showRetypePassword, setShowRetypePassword] = useState(false);
   
-  // Organization
-  const [organizationTypes, setOrganizationTypes] = useState<Set<string>>(new Set());
-  const [organizationInstitution, setOrganizationInstitution] = useState("");
+  // Organizations (dynamic)
+  const [availableOrganizations, setAvailableOrganizations] = useState<any[]>([]);
+  const [selectedOrganizationIds, setSelectedOrganizationIds] = useState<string[]>([]);
+  const [organizationError, setOrganizationError] = useState("");
+  
+  // Municipalities (dynamic)
+  const [availableMunicipalities, setAvailableMunicipalities] = useState<any[]>([]);
+  const [selectedMunicipalityIds, setSelectedMunicipalityIds] = useState<string[]>([]);
+  const [selectedBarangayIds, setSelectedBarangayIds] = useState<string[]>([]);
+  const [municipalityError, setMunicipalityError] = useState("");
   
   // Roles
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
   const [roleError, setRoleError] = useState("");
   const [allowedStaffTypes, setAllowedStaffTypes] = useState<string[]>([]);
   
-  // Coverage
+  // Coverage (for backward compatibility with coverage area selection)
   const [isCoverageModalOpen, setIsCoverageModalOpen] = useState(false);
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
   const [selectedCoverageAreaIds, setSelectedCoverageAreaIds] = useState<string[]>([]);
   const [coverageError, setCoverageError] = useState("");
   
+  // Loading states
+  const [isLoadingContext, setIsLoadingContext] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
+  
   // Submission state (local to prevent double submissions)
   const [isSubmittingLocal, setIsSubmittingLocal] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Load allowed staff types on mount
+  // Load creation context when modal opens
   useEffect(() => {
-    if (isOpen && getAllowedStaffTypes) {
-      getAllowedStaffTypes().then((types) => {
-        setAllowedStaffTypes(types);
-      });
+    if (isOpen) {
+      fetchCreationContext();
+      if (getAllowedStaffTypes) {
+        getAllowedStaffTypes().then((types) => {
+          setAllowedStaffTypes(types);
+        });
+      }
     }
   }, [isOpen, getAllowedStaffTypes]);
+
+  // Fetch creation context (organizations, municipalities, roles)
+  const fetchCreationContext = async () => {
+    setIsLoadingContext(true);
+    setContextError(null);
+    
+    try {
+      const base = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:6700").replace(/\/$/, "");
+      let token = null;
+      try {
+        token = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token");
+      } catch (e) {
+        token = null;
+      }
+
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      // Fetch creation context
+      const contextRes = await fetch(
+        `${base}/api/users/create-context?pageContext=coordinator-management`,
+        { headers }
+      );
+      
+      if (!contextRes.ok) {
+        throw new Error("Failed to fetch creation context");
+      }
+      
+      const contextData = await contextRes.json();
+      
+      if (contextData.success) {
+        setAvailableOrganizations(contextData.data.allowedOrganizations || []);
+        setAvailableMunicipalities(contextData.data.allowedMunicipalities || []);
+      } else {
+        throw new Error(contextData.message || "Failed to load creation context");
+      }
+
+      // Fetch municipalities with barangays
+      const municipalitiesRes = await fetch(
+        `${base}/api/users/creation-context/municipalities`,
+        { headers }
+      );
+      
+      if (municipalitiesRes.ok) {
+        const municipalitiesData = await municipalitiesRes.json();
+        if (municipalitiesData.success) {
+          // Merge barangays into municipalities
+          const municipalitiesWithBarangays = (contextData.data.allowedMunicipalities || []).map((muni: any) => {
+            const muniWithBarangays = municipalitiesData.data.municipalities.find(
+              (m: any) => m._id === muni._id
+            );
+            return muniWithBarangays || muni;
+          });
+          setAvailableMunicipalities(municipalitiesWithBarangays);
+        }
+      }
+    } catch (error: any) {
+      console.error("Error fetching creation context:", error);
+      setContextError(error.message || "Failed to load data");
+    } finally {
+      setIsLoadingContext(false);
+    }
+  };
 
   // Reset form when modal opens/closes
   useEffect(() => {
@@ -81,17 +164,21 @@ export default function AddStaffModal({
       setPhoneNumber("");
       setPassword("");
       setRetypePassword("");
-      setOrganizationTypes(new Set());
-      setOrganizationInstitution("");
+      setSelectedOrganizationIds([]);
+      setSelectedMunicipalityIds([]);
+      setSelectedBarangayIds([]);
       setSelectedRoleId("");
       setSelectedLocationIds([]);
       setSelectedCoverageAreaIds([]);
       setRoleError("");
       setCoverageError("");
+      setOrganizationError("");
+      setMunicipalityError("");
       setShowPassword(false);
       setShowRetypePassword(false);
       setIsSubmittingLocal(false);
       setSubmitError(null);
+      setContextError(null);
     }
   }, [isOpen]);
 
@@ -126,9 +213,18 @@ export default function AddStaffModal({
       return;
     }
 
-    if (selectedCoverageAreaIds.length === 0 && selectedLocationIds.length === 0) {
-      setCoverageError("Please assign at least one coverage area");
-      setSubmitError("Please assign at least one coverage area");
+    if (selectedOrganizationIds.length === 0) {
+      setOrganizationError("Please select at least one organization");
+      setSubmitError("Please select at least one organization");
+      return;
+    }
+
+    // For coordinators, we need coverage areas (via coverage area selection) OR municipalities
+    // If municipalities are selected, they should be converted to coverage areas on the backend
+    // For now, we'll use the coverage area selection modal, but also allow municipality selection
+    if (selectedCoverageAreaIds.length === 0 && selectedLocationIds.length === 0 && selectedMunicipalityIds.length === 0) {
+      setCoverageError("Please assign at least one coverage area or municipality");
+      setSubmitError("Please assign at least one coverage area or municipality");
       return;
     }
 
@@ -139,15 +235,15 @@ export default function AddStaffModal({
       middleName: middleName || undefined,
       lastName,
       phoneNumber: phoneNumber || undefined,
-      organizationType: organizationTypes.size > 0
-        ? (Array.from(organizationTypes)[0] as CreateStaffData["organizationType"]) // Backend may need single type, but we store multiple
-        : undefined,
-      organizationInstitution: organizationInstitution || undefined,
+      organizationIds: selectedOrganizationIds.length > 0 ? selectedOrganizationIds : undefined,
       roles: selectedRoleId ? [selectedRoleId] : [],
-      coverageAreaIds: selectedCoverageAreaIds,
+      coverageAreaIds: selectedCoverageAreaIds.length > 0 ? selectedCoverageAreaIds : undefined,
       locationIds: selectedLocationIds.length > 0 && selectedCoverageAreaIds.length === 0
         ? selectedLocationIds
         : undefined,
+      // Include municipalities if selected (backend will handle conversion to coverage areas)
+      municipalityIds: selectedMunicipalityIds.length > 0 ? selectedMunicipalityIds : undefined,
+      pageContext: 'coordinator-management',
     };
 
     // Set submitting state immediately to prevent duplicate submissions
@@ -190,14 +286,6 @@ export default function AddStaffModal({
     setIsCoverageModalOpen(false);
   };
 
-  const organizationTypeOptions: Array<{ key: string; label: string }> = [
-    { key: "LGU", label: "LGU" },
-    { key: "NGO", label: "NGO" },
-    { key: "Hospital", label: "Hospital" },
-    { key: "RedCross", label: "Red Cross" },
-    { key: "Non-LGU", label: "Non-LGU" },
-    { key: "Other", label: "Other" },
-  ];
 
   return (
     <>
@@ -427,54 +515,62 @@ export default function AddStaffModal({
                     Organization
                   </h3>
 
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-gray-700">
-                        Organization Type
-                      </label>
-                      <div className="grid grid-cols-2 gap-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
-                        {organizationTypeOptions.map((type) => (
-                          <Checkbox
-                            key={type.key}
-                            isSelected={organizationTypes.has(type.key)}
-                            isDisabled={isSubmitting || isSubmittingLocal}
-                            onValueChange={(checked) => {
-                              setOrganizationTypes((prev) => {
-                                const next = new Set(prev);
-                                if (checked) {
-                                  next.add(type.key);
-                                } else {
-                                  next.delete(type.key);
-                                }
-                                return next;
-                              });
-                            }}
-                            size="sm"
-                          >
-                            <span className="text-sm text-gray-700">{type.label}</span>
-                          </Checkbox>
-                        ))}
-                      </div>
+                  {isLoadingContext ? (
+                    <div className="p-4 text-center text-sm text-gray-500">
+                      Loading organizations...
                     </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-gray-700">
-                        Organization Name
-                      </label>
-                      <Input
-                        value={organizationInstitution}
-                        onChange={(e) => setOrganizationInstitution(e.target.value)}
-                        isDisabled={isSubmitting || isSubmittingLocal}
-                        classNames={{
-                          inputWrapper: "border-gray-300 bg-white shadow-sm h-10",
-                          input: "text-sm placeholder:text-gray-400",
-                        }}
-                        placeholder="Enter organization name"
-                        radius="lg"
+                  ) : contextError ? (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="text-sm text-red-800 font-medium">Error</div>
+                      <div className="text-sm text-red-600 mt-1">{contextError}</div>
+                      <Button
+                        size="sm"
                         variant="bordered"
-                      />
+                        onPress={fetchCreationContext}
+                        className="mt-2"
+                      >
+                        Retry
+                      </Button>
                     </div>
-                  </div>
+                  ) : (
+                    <OrganizationSelector
+                      organizations={availableOrganizations}
+                      selectedIds={selectedOrganizationIds}
+                      onSelectionChange={setSelectedOrganizationIds}
+                      isDisabled={isSubmitting || isSubmittingLocal}
+                      isRequired
+                      error={organizationError}
+                    />
+                  )}
+                </div>
+
+                {/* Section 2.5: Municipalities */}
+                <div className="space-y-3.5">
+                  <h3 className="text-sm font-semibold text-gray-900 border-b border-gray-200 pb-2">
+                    Municipalities
+                  </h3>
+
+                  {isLoadingContext ? (
+                    <div className="p-4 text-center text-sm text-gray-500">
+                      Loading municipalities...
+                    </div>
+                  ) : contextError ? (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="text-sm text-red-800 font-medium">Error</div>
+                      <div className="text-sm text-red-600 mt-1">{contextError}</div>
+                    </div>
+                  ) : (
+                    <MunicipalityTreeSelector
+                      municipalities={availableMunicipalities}
+                      selectedMunicipalityIds={selectedMunicipalityIds}
+                      selectedBarangayIds={selectedBarangayIds}
+                      onMunicipalityChange={setSelectedMunicipalityIds}
+                      onBarangayChange={setSelectedBarangayIds}
+                      isDisabled={isSubmitting || isSubmittingLocal}
+                      isRequired={false}
+                      error={municipalityError}
+                    />
+                  )}
                 </div>
 
                 {/* Section 3: Role Assignment */}
