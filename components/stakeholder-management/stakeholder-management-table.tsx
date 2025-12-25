@@ -19,6 +19,7 @@ import { useState } from "react";
 
 interface Stakeholder {
   id: string;
+  _id?: string;
   name: string;
   email: string;
   phone: string;
@@ -27,6 +28,18 @@ interface Stakeholder {
   province?: string;
   district?: string;
   municipality?: string;
+  coverageArea?: string; // Formatted: "Municipality → Barangay" or just "Municipality"
+  locations?: {
+    municipalityId?: string;
+    municipalityName?: string;
+    barangayId?: string;
+    barangayName?: string;
+  };
+  organizations?: Array<{
+    organizationId?: string;
+    organizationName?: string;
+    organizationType?: string;
+  }>;
 }
 
 interface StakeholderTableProps {
@@ -97,30 +110,9 @@ export default function StakeholderTable({
     return fallback;
   };
 
-  // Apply role-aware visible set first: sysadmin sees all, coordinator sees only matching district+accountType
-  const userRole = (currentUser?.role || "").toString().toLowerCase();
-  const userDistrict = (currentUser?.district || "").toString().toLowerCase();
-  const userAccountType = (currentUser?.accountType || "").toString().toLowerCase();
-
-  const visibleCoordinators =
-    userRole === "sysadmin" || userRole === "systemadmin" || !userRole
-      ? coordinators
-      : coordinators.filter((coordinator) => {
-          const coordDistrict = (displayValue(coordinator.district, "")).toLowerCase();
-          const coordAccountType = (
-            (coordinator as any).accountType || (coordinator as any).Account_Type || ""
-          )
-            .toString()
-            .toLowerCase();
-
-          // If user provided both, require both to match. Otherwise match available criterion.
-          if (userDistrict && userAccountType) {
-            return coordDistrict === userDistrict && coordAccountType === userAccountType;
-          }
-          if (userDistrict) return coordDistrict === userDistrict;
-          if (userAccountType) return coordAccountType === userAccountType;
-          return true;
-        });
+  // Backend handles all filtering (authority and jurisdiction)
+  // Frontend just displays what backend returns
+  const visibleCoordinators = coordinators;
 
   const filteredCoordinators = visibleCoordinators.filter((coordinator) => {
     const q = searchQuery.toLowerCase();
@@ -133,6 +125,9 @@ export default function StakeholderTable({
         .includes(q) ||
       (coordinator.province || "").toLowerCase().includes(q) ||
       (coordinator.district || "").toLowerCase().includes(q) ||
+      (coordinator.coverageArea || coordinator.municipality || "")
+        .toLowerCase()
+        .includes(q) ||
       (
         (municipalityCache &&
           municipalityCache[String(coordinator.municipality)]) ||
@@ -258,7 +253,7 @@ export default function StakeholderTable({
               District
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Municipality
+              Coverage Area
               </th>
               <th className="px-6 py-3.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Action
@@ -302,11 +297,13 @@ export default function StakeholderTable({
                   {displayValue(coordinator.district)}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
-                  {displayValue(
-                    (municipalityCache &&
-                      municipalityCache[String(coordinator.municipality)]) ||
-                      coordinator.municipality,
-                  )}
+                  {coordinator.coverageArea 
+                    ? coordinator.coverageArea
+                    : displayValue(
+                        (municipalityCache &&
+                          municipalityCache[String(coordinator.municipality)]) ||
+                          coordinator.municipality,
+                      )}
                 </td>
                 <td className="px-6 py-4">
                   <Dropdown>

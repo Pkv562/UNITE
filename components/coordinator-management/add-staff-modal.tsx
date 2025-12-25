@@ -17,7 +17,7 @@ import { Checkbox } from "@heroui/checkbox";
 import RoleAssignmentSection from "./role-assignment-section";
 import CoverageAssignmentModal from "./coverage-assignment-modal";
 import OrganizationSelector from "./organization-selector";
-import MunicipalityTreeSelector from "./municipality-tree-selector";
+// MunicipalityTreeSelector removed - coordinators are assigned at province/district level
 import type { CreateStaffData } from "@/types/coordinator.types";
 
 interface AddStaffModalProps {
@@ -50,11 +50,7 @@ export default function AddStaffModal({
   const [selectedOrganizationIds, setSelectedOrganizationIds] = useState<string[]>([]);
   const [organizationError, setOrganizationError] = useState("");
   
-  // Municipalities (dynamic)
-  const [availableMunicipalities, setAvailableMunicipalities] = useState<any[]>([]);
-  const [selectedMunicipalityIds, setSelectedMunicipalityIds] = useState<string[]>([]);
-  const [selectedBarangayIds, setSelectedBarangayIds] = useState<string[]>([]);
-  const [municipalityError, setMunicipalityError] = useState("");
+  // Municipalities removed - coordinators are assigned at province/district level via coverage areas
   
   // Roles
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
@@ -122,29 +118,9 @@ export default function AddStaffModal({
       
       if (contextData.success) {
         setAvailableOrganizations(contextData.data.allowedOrganizations || []);
-        setAvailableMunicipalities(contextData.data.allowedMunicipalities || []);
+        // Municipalities not needed - coordinators use coverage areas at province/district level
       } else {
         throw new Error(contextData.message || "Failed to load creation context");
-      }
-
-      // Fetch municipalities with barangays
-      const municipalitiesRes = await fetch(
-        `${base}/api/users/creation-context/municipalities`,
-        { headers }
-      );
-      
-      if (municipalitiesRes.ok) {
-        const municipalitiesData = await municipalitiesRes.json();
-        if (municipalitiesData.success) {
-          // Merge barangays into municipalities
-          const municipalitiesWithBarangays = (contextData.data.allowedMunicipalities || []).map((muni: any) => {
-            const muniWithBarangays = municipalitiesData.data.municipalities.find(
-              (m: any) => m._id === muni._id
-            );
-            return muniWithBarangays || muni;
-          });
-          setAvailableMunicipalities(municipalitiesWithBarangays);
-        }
       }
     } catch (error: any) {
       console.error("Error fetching creation context:", error);
@@ -165,15 +141,12 @@ export default function AddStaffModal({
       setPassword("");
       setRetypePassword("");
       setSelectedOrganizationIds([]);
-      setSelectedMunicipalityIds([]);
-      setSelectedBarangayIds([]);
       setSelectedRoleId("");
       setSelectedLocationIds([]);
       setSelectedCoverageAreaIds([]);
       setRoleError("");
       setCoverageError("");
       setOrganizationError("");
-      setMunicipalityError("");
       setShowPassword(false);
       setShowRetypePassword(false);
       setIsSubmittingLocal(false);
@@ -219,12 +192,11 @@ export default function AddStaffModal({
       return;
     }
 
-    // For coordinators, we need coverage areas (via coverage area selection) OR municipalities
-    // If municipalities are selected, they should be converted to coverage areas on the backend
-    // For now, we'll use the coverage area selection modal, but also allow municipality selection
-    if (selectedCoverageAreaIds.length === 0 && selectedLocationIds.length === 0 && selectedMunicipalityIds.length === 0) {
-      setCoverageError("Please assign at least one coverage area or municipality");
-      setSubmitError("Please assign at least one coverage area or municipality");
+    // For coordinators, we need coverage areas (via coverage area selection)
+    // Coordinators are assigned at province/district level, not municipality/barangay level
+    if (selectedCoverageAreaIds.length === 0 && selectedLocationIds.length === 0) {
+      setCoverageError("Please assign at least one coverage area");
+      setSubmitError("Please assign at least one coverage area");
       return;
     }
 
@@ -241,8 +213,7 @@ export default function AddStaffModal({
       locationIds: selectedLocationIds.length > 0 && selectedCoverageAreaIds.length === 0
         ? selectedLocationIds
         : undefined,
-      // Include municipalities if selected (backend will handle conversion to coverage areas)
-      municipalityIds: selectedMunicipalityIds.length > 0 ? selectedMunicipalityIds : undefined,
+      // Note: municipalityIds removed - coordinators are assigned at province/district level
       pageContext: 'coordinator-management',
     };
 
@@ -544,34 +515,8 @@ export default function AddStaffModal({
                   )}
                 </div>
 
-                {/* Section 2.5: Municipalities */}
-                <div className="space-y-3.5">
-                  <h3 className="text-sm font-semibold text-gray-900 border-b border-gray-200 pb-2">
-                    Municipalities
-                  </h3>
-
-                  {isLoadingContext ? (
-                    <div className="p-4 text-center text-sm text-gray-500">
-                      Loading municipalities...
-                    </div>
-                  ) : contextError ? (
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                      <div className="text-sm text-red-800 font-medium">Error</div>
-                      <div className="text-sm text-red-600 mt-1">{contextError}</div>
-                    </div>
-                  ) : (
-                    <MunicipalityTreeSelector
-                      municipalities={availableMunicipalities}
-                      selectedMunicipalityIds={selectedMunicipalityIds}
-                      selectedBarangayIds={selectedBarangayIds}
-                      onMunicipalityChange={setSelectedMunicipalityIds}
-                      onBarangayChange={setSelectedBarangayIds}
-                      isDisabled={isSubmitting || isSubmittingLocal}
-                      isRequired={false}
-                      error={municipalityError}
-                    />
-                  )}
-                </div>
+                {/* Section 2.5: Municipalities - HIDDEN for coordinators */}
+                {/* Coordinators are assigned at province/district level, not municipality/barangay level */}
 
                 {/* Section 3: Role Assignment */}
                 <div className="space-y-3.5">

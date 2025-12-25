@@ -140,6 +140,7 @@ export default function StakeholderManagement() {
         (coordinator.organization || coordinator.entity || "").toLowerCase().includes(q) ||
         (coordinator.province || "").toLowerCase().includes(q) ||
         (coordinator.district || "").toLowerCase().includes(q) ||
+        (coordinator.coverageArea || coordinator.municipality || "").toLowerCase().includes(q) ||
         (
           (municipalityCache && municipalityCache[String(coordinator.municipality)]) ||
           coordinator.municipality ||
@@ -545,7 +546,6 @@ export default function StakeholderManagement() {
       }
 
       setUserDistrictId(uid || null);
-      setOpenUserDistrictId(uid || null);
       // Include both centralized getUserInfo and raw parsed object for diagnostics
       let infoForDebug = null;
 
@@ -574,7 +574,6 @@ export default function StakeholderManagement() {
 
   const handleModalClose = () => {
     setIsAddModalOpen(false);
-    setOpenUserDistrictId(null);
   };
 
   const handleCodeCreated = (code: any) => {
@@ -713,188 +712,72 @@ export default function StakeholderManagement() {
         ]
           .filter(Boolean)
           .join(" ");
-        // Prefer a populated District object when available
-        let districtObj = s.District || s.District_Details || null;
-
-        // If not populated, try to resolve from prefetched districtsMap using District_ID
-        if (!districtObj && districtsMap && (s.District_ID || s.DistrictId)) {
-          districtObj =
-            districtsMap[String(s.District_ID || s.DistrictId)] || null;
-        }
-
-        // If still not populated, try to resolve using the districtsList by matching
-        // against known id fields (DB _id, id, or District_ID). This covers cases
-        // where the backend returns `district` as an ObjectId reference instead
-        // of a populated object or a legacy District_ID string.
-        if (
-          !districtObj &&
-          Array.isArray(districtsList) &&
-          districtsList.length > 0
-        ) {
-          const candidate = districtsList.find((d: any) => {
-            const sid =
-              s.district ||
-              s.district_id ||
-              s.districtId ||
-              s.District_ID ||
-              s.DistrictId ||
-              s.District;
-
-            if (!sid) return false;
-
-            return (
-              String(d._id) === String(sid) ||
-              String(d.id) === String(sid) ||
-              String(d.District_ID) === String(sid) ||
-              String(d.District_ID) === String(s.District_ID)
-            );
-          });
-
-          if (candidate) districtObj = candidate;
-        }
-        // Compute province display: prefer explicit Province_Name, else use populated province
-        let province = s.Province_Name || s.province?.name || "";
-
-        let districtDisplay = "";
-
-        if (s.district?.name) {
-          districtDisplay = s.district.name;
-        } else if (districtObj) {
-          districtDisplay = formatDistrict(districtObj);
-        } else if (s.District_Name) {
-          districtDisplay = s.District_Name;
-        } else if (s.District_ID || s.district) {
-          // fallback: try to infer number from District_ID like CSUR-001 -> 1
-          const idCandidate = s.District_ID || s.district;
-          const m = String(idCandidate).match(/(\d+)$/);
-
-          if (m) {
-            const num = Number(m[1]);
-
-            if (!Number.isNaN(num))
-              districtDisplay = `${ordinalSuffix(num)} District`;
-          } else {
-            districtDisplay = String(idCandidate);
+        
+        // Format coverage area: "Municipality → Barangay" or just "Municipality"
+        const formatCoverageArea = (): string => {
+          // Use new user model structure first
+          if (s.locations) {
+            const muniName = s.locations.municipalityName || s.locations.municipality?.name || "";
+            const brgyName = s.locations.barangayName || s.locations.barangay?.name || "";
+            if (muniName) {
+              return brgyName ? `${muniName} → ${brgyName}` : muniName;
+            }
           }
-        }
+          
+          // Fallback to legacy structure
+          const muniName = s.municipality?.name || s.City_Municipality || s.Municipality || s.City || s.cityMunicipality || "";
+          const brgyName = s.barangay?.name || "";
+          if (muniName) {
+            return brgyName ? `${muniName} → ${brgyName}` : muniName;
+          }
+          
+          return "";
+        };
+        
+        // Format organization from new user model structure
+        const formatOrganization = (): string => {
+          // Use new user model structure first (embedded organizations array)
+          if (s.organizations && Array.isArray(s.organizations) && s.organizations.length > 0) {
+            const org = s.organizations[0];
+            return org.organizationName || org.name || "";
+          }
+          
+          // Fallback to legacy structure
+          const tryValues = [
+            s.Organization_Institution,
+            s.Organization,
+            s.organization,
+            s.OrganizationName,
+            s.Organization_Name,
+            s.organization_institution,
+            s.Organisation,
+            s.organisation,
+            s.OrganizationInstitution,
+          ];
 
-        return {
-          id: s.Stakeholder_ID || s.id || "",
-          name: fullName,
-          email: s.Email || s.email || "",
-          phone: s.Phone_Number || s.phoneNumber || s.phone || "",
-          province: province || "",
-          municipality:
-            s.municipality?.name ||
-            s.City_Municipality ||
-            s.Municipality ||
-            s.City ||
-            s.cityMunicipality ||
-            s.municipality ||
-            s.municipality_id ||
-            "",
-          // Resolve organization from multiple possible shapes, including nested objects
-          organization: ((): string => {
-            const tryValues = [
-              s.Organization_Institution,
-              s.Organization,
-              s.organization,
-              s.OrganizationName,
-              s.Organization_Name,
-              s.organization_institution,
-              s.Organisation,
-              s.organisation,
-              s.OrganizationInstitution,
-              s.data && s.data.Organization_Institution,
-              s.data && s.data.organization,
-              s.stakeholder && s.stakeholder.Organization_Institution,
-              s.stakeholder && s.stakeholder.organization,
-              s.result && s.result.Organization_Institution,
-              s.details && s.details.Organization_Institution,
-            ];
+          for (const v of tryValues) {
+            if (v !== undefined && v !== null && String(v).trim() !== "")
+              return String(v).trim();
+          }
 
-            for (const v of tryValues) {
-              if (v !== undefined && v !== null && String(v).trim() !== "")
-                return String(v).trim();
-            }
-            // As a last resort, do a shallow scan for any key name that looks like organization/institution
-            for (const k of Object.keys(s || {})) {
-              const key = String(k).toLowerCase();
-
-              if (
-                key.includes("organ") ||
-                key.includes("institut") ||
-                key.includes("organisation")
-              ) {
-                const v = s[k];
-
-                if (v !== undefined && v !== null && String(v).trim() !== "")
-                  return String(v).trim();
-              }
-            }
-
-            return "";
-          })(),
-          district: districtDisplay,
+          return "";
         };
 
         return {
-          id: s.Stakeholder_ID || s.id || "",
+          id: s._id || s.Stakeholder_ID || s.id || "",
+          _id: s._id || s.id || "",
           name: fullName,
           email: s.Email || s.email || "",
           phone: s.Phone_Number || s.phoneNumber || s.phone || "",
-          province: province || "",
-          municipality:
-            s.City_Municipality ||
-            s.Municipality ||
-            s.City ||
-            s.cityMunicipality ||
-            s.municipality ||
-            s.municipality_id ||
-            "",
-          // Resolve organization from multiple possible shapes, including nested objects
-          organization: ((): string => {
-            const tryValues = [
-              s.Organization_Institution,
-              s.Organization,
-              s.organization,
-              s.OrganizationName,
-              s.Organization_Name,
-              s.organization_institution,
-              s.Organisation,
-              s.organisation,
-              s.OrganizationInstitution,
-              s.data && s.data.Organization_Institution,
-              s.data && s.data.organization,
-              s.stakeholder && s.stakeholder.Organization_Institution,
-              s.stakeholder && s.stakeholder.organization,
-              s.result && s.result.Organization_Institution,
-              s.details && s.details.Organization_Institution,
-            ];
-
-            for (const v of tryValues) {
-              if (v !== undefined && v !== null && String(v).trim() !== "")
-                return String(v).trim();
-            }
-            // As a last resort, do a shallow scan for any key name that looks like organization/institution
-            for (const k of Object.keys(s || {})) {
-              const key = String(k).toLowerCase();
-
-              if (
-                key.includes("organ") ||
-                key.includes("institut") ||
-                key.includes("organisation")
-              ) {
-                const v = s[k];
-
-                if (v !== undefined && v !== null && String(v).trim() !== "")
-                  return String(v).trim();
-              }
-            }
-
-            return "";
-          })(),
-          district: districtDisplay,
+          province: s.Province_Name || s.province?.name || "",
+          municipality: formatCoverageArea().split(" → ")[0] || "",
+          coverageArea: formatCoverageArea(), // Full coverage area display
+          organization: formatOrganization(),
+          district: s.District_Name || s.district?.name || "",
+          // Include raw data for edit modal
+          locations: s.locations,
+          organizations: s.organizations,
+          roles: s.roles,
         };
       });
 
@@ -1159,6 +1042,43 @@ export default function StakeholderManagement() {
 
       {/* Table Content */}
       <div className="px-4 sm:px-6 py-4 bg-gray-50">
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-700 font-medium">Error loading stakeholders</p>
+            <p className="text-xs text-red-600 mt-1">{error}</p>
+          </div>
+        )}
+        {!loading && !error && filteredData.length === 0 && (
+          <div className="mb-4 p-6 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-sm text-yellow-800 font-medium">
+              {selectedTab === "pending" 
+                ? "No pending signup requests found"
+                : selectedTab === "approved"
+                  ? "No approved stakeholders found"
+                  : "No stakeholders found"}
+            </p>
+            <p className="text-xs text-yellow-700 mt-2">
+              {selectedTab === "pending" 
+                ? "There are currently no pending signup requests to review."
+                : !canManageStakeholders
+                  ? "You may not have stakeholders assigned to your jurisdiction. Check if you have assigned organizations and coverage areas."
+                  : searchQuery
+                    ? `No stakeholders match your search query "${searchQuery}". Try adjusting your search terms.`
+                    : "If you're a coordinator, ensure you have assigned organizations and coverage areas. Stakeholders must be in the same organizations and municipalities as your coverage areas."}
+            </p>
+            {selectedTab !== "pending" && !searchQuery && (
+              <div className="mt-3 text-xs text-yellow-700">
+                <p className="font-medium">Troubleshooting:</p>
+                <ul className="list-disc list-inside mt-1 space-y-1">
+                  <li>Verify stakeholders exist in the database with authority &lt; 60</li>
+                  <li>Check that stakeholders have assigned organizations matching yours</li>
+                  <li>Ensure stakeholders' municipalities are within your coverage areas</li>
+                  <li>Contact an administrator if you believe stakeholders should be visible</li>
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
         <StakeholderTable
           // Pass the SLICED data here
           coordinators={paginatedData} 

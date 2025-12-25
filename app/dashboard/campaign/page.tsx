@@ -70,6 +70,12 @@ export default function CampaignPage() {
   const [requests, setRequests] = useState<any[]>([]);
   const [totalRequestsCount, setTotalRequestsCount] = useState<number>(0);
   const [isServerPaged, setIsServerPaged] = useState<boolean>(false);
+  const [requestCounts, setRequestCounts] = useState({
+    all: 0,
+    approved: 0,
+    pending: 0,
+    rejected: 0,
+  });
   const [publicEvents, setPublicEvents] = useState<any[]>([]);
   const [isLoadingRequests, setIsLoadingRequests] = useState(false);
   const [requestsError, setRequestsError] = useState("");
@@ -141,8 +147,17 @@ export default function CampaignPage() {
     return null;
   };
 
-  // Extracted fetchRequests so we can reuse after creating events
-  const fetchRequests = async (fetchAll = false) => {
+  const mapTabToStatusParam = (tab: string) => {
+    if (!tab || tab === "all") return undefined;
+    if (tab === "approved") return "APPROVED";
+    if (tab === "pending") return "PENDING_REVIEW";
+    if (tab === "rejected") return "REJECTED";
+
+    return tab.toUpperCase();
+  };
+
+  // Extracted fetchRequests so we can reuse after creating events. Relies on backend filtering instead of client-side filtering.
+  const fetchRequests = async () => {
     setIsLoadingRequests(true);
     setRequestsError("");
 
@@ -157,31 +172,36 @@ export default function CampaignPage() {
       // Build query params for server-side filtering
       const params = new URLSearchParams();
 
-      // Always fetch all requests for client-side filtering and pagination
-      params.set("page", "1");
-      params.set("limit", "10000"); // High limit to get all
+      params.set("page", String(currentPage));
+      params.set("limit", String(pageSize));
+
       if (searchQuery && searchQuery.trim())
         params.set("search", searchQuery.trim());
-      // NOTE: Do not send `status` to the server here. Backend status tokens
-      // vary and returning server-filtered lists causes mismatches and empty
-      // results. We fetch the page(s) and apply a deterministic client-side
-      // filter based on `event.Status` to ensure tabs show the expected items.
-      // Do not send date_from/date_to to server; advanced date filtering is
-      // performed client-side against the event's Start_Date to avoid server
-      // timezone/format mismatches.
+
+      const statusParam = mapTabToStatusParam(selectedTab);
+
+      if (statusParam) params.set("status", statusParam);
+
       if (quickFilter?.category && quickFilter.category !== "all")
         params.set("category", quickFilter.category);
-      if (searchQuery && searchQuery.trim())
-        params.set("search", searchQuery.trim());
-      // NOTE: Do not send `status` to the server here. Backend status tokens
-      // vary and returning server-filtered lists causes mismatches and empty
-      // results. We fetch the page(s) and apply a deterministic client-side
-      // filter based on `event.Status` to ensure tabs show the expected items.
-      // Do not send date_from/date_to to server; advanced date filtering is
-      // performed client-side against the event's Start_Date to avoid server
-      // timezone/format mismatches.
-      if (quickFilter?.category && quickFilter.category !== "all")
-        params.set("category", quickFilter.category);
+      if (quickFilter?.startDate) params.set("date_from", quickFilter.startDate);
+      if (quickFilter?.endDate) params.set("date_to", quickFilter.endDate);
+      if (quickFilter?.province) params.set("province", String(quickFilter.province));
+      if (quickFilter?.district)
+        params.set("district", String(quickFilter.district));
+      if (quickFilter?.municipality)
+        params.set("municipality", String(quickFilter.municipality));
+
+      if (advancedFilter.title)
+        params.set("title", String(advancedFilter.title));
+      if (advancedFilter.requester)
+        params.set("requester", String(advancedFilter.requester));
+      if (advancedFilter.coordinator)
+        params.set("coordinator", String(advancedFilter.coordinator));
+      if (advancedFilter.stakeholder)
+        params.set("stakeholder", String(advancedFilter.stakeholder));
+      if (advancedFilter.start)
+        params.set("start", String(advancedFilter.start));
 
       const url = `${API_URL}/api/requests/me?${params.toString()}`;
       // Request fresh data (avoid cached 304 responses) so client-side filters
@@ -194,14 +214,21 @@ export default function CampaignPage() {
       // body.data is array of requests (controllers return { success, data, pagination })
       const data = body.data || [];
       const list = Array.isArray(data) ? data : [];
+      const pagination = body.pagination || {};
+      const statusCounts = pagination.statusCounts || body.statusCounts || {};
 
       setRequests(list);
-      // Since we fetch all, total is the list length
-      setTotalRequestsCount(list.length);
-      // Always client-side pagination
-      setIsServerPaged(false);
-      // if server returned pagination, update UI page data (optional)
-      // You can store pagination in state if needed (not implemented here)
+      setTotalRequestsCount(pagination.totalRecords ?? list.length);
+      setIsServerPaged(Boolean(pagination.totalRecords));
+      setRequestCounts({
+        all: pagination.totalRecords ?? list.length,
+        approved:
+          statusCounts.approved ?? statusCounts.Approved ?? statusCounts.APPROVED ?? 0,
+        pending:
+          statusCounts.pending ?? statusCounts.Pending ?? statusCounts.PENDING ?? 0,
+        rejected:
+          statusCounts.rejected ?? statusCounts.Rejected ?? statusCounts.REJECTED ?? 0,
+      });
     } catch (err: any) {
       console.error("Fetch requests error", err);
       setRequestsError(err.message || "Failed to fetch requests");
@@ -883,238 +910,7 @@ export default function CampaignPage() {
     return "Pending";
   };
 
-  const requestCounts = useMemo(() => {
-    const counts = {
-      approved: 0,
-      pending: 0,
-      rejected: 0,
-    };
-
-    requests.forEach((req) => {
-      const status = normalizeStatus(req);
-
-      if (status === "Approved") {
-        counts.approved++;
-      } else if (status === "Pending") {
-        counts.pending++;
-      } else if (status === "Rejected") {
-        counts.rejected++;
-      }
-    });
-
-    return {
-      all: requests.length,
-      ...counts,
-    };
-  }, [requests]);
-
-  const filteredRequests = requests.filter((r: any) => {
-    // Tab/status filter (using event.Status preferred)
-    if (selectedTab && selectedTab !== "all") {
-      const s = normalizeStatus(r);
-
-      if (selectedTab === "approved" && s !== "Approved") return false;
-      if (selectedTab === "pending" && s !== "Pending") return false;
-      if (selectedTab === "rejected" && s !== "Rejected") return false;
-    }
-
-    // Quick filter (from toolbar)
-    if (quickFilter) {
-      const ev = r.event || {};
-
-      // Category
-      if (quickFilter.category && quickFilter.category !== "all") {
-        const rawCategory = ev.Category || ev.categoryType || ev.category || "";
-        const catKey = String(rawCategory || "").toLowerCase();
-        let categoryLabel = "Event";
-
-        if (catKey.includes("blood")) categoryLabel = "Blood Drive";
-        else if (catKey.includes("training")) categoryLabel = "Training";
-        else if (catKey.includes("advocacy")) categoryLabel = "Advocacy";
-
-        if (categoryLabel !== quickFilter.category) return false;
-      }
-
-      // Date Range
-      if (quickFilter.startDate && quickFilter.endDate) {
-        const start = parseDate(quickFilter.startDate);
-        const end = parseDate(quickFilter.endDate);
-        const evStart = parseDate(ev.Start_Date || ev.date);
-
-        if (start && end && evStart) {
-          // Reset times for comparison (inclusive)
-          start.setHours(0, 0, 0, 0);
-          end.setHours(23, 59, 59, 999);
-          if (evStart < start || evStart > end) return false;
-        }
-      }
-
-      // Province
-      if (quickFilter.province) {
-        const pId = String(quickFilter.province);
-        const evPId = String(r.province || ev.province || "");
-
-        if (evPId && evPId !== pId) return false;
-      }
-
-      // District
-      if (quickFilter.district) {
-        const dId = String(quickFilter.district);
-        const evDId = String(r.district?._id || r.district || ev.district?._id || ev.district || "");
-
-        if (evDId && evDId !== dId) return false;
-      }
-
-      // Municipality
-      if (quickFilter.municipality) {
-        const mId = String(quickFilter.municipality);
-        const evMId = String(r.municipality || ev.municipality || "");
-
-        if (evMId && evMId !== mId) return false;
-      }
-    }
-
-    // Search query (global search box) - match title or requester or coordinator
-    if (searchQuery && searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      const ev = r.event || {};
-      const title = (ev.Event_Title || ev.title || "").toString().toLowerCase();
-      // requester name - check who actually created the request
-      let requestee = "";
-
-      if (
-        r.made_by_role === "Stakeholder" &&
-        r.stakeholder &&
-        r.stakeholder.staff
-      ) {
-        const s = r.stakeholder.staff;
-
-        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-          .trim()
-          .toLowerCase();
-      } else if (
-        (r.made_by_role === "Coordinator" ||
-          r.made_by_role === "SystemAdmin") &&
-        r.coordinator &&
-        r.coordinator.staff
-      ) {
-        const s = r.coordinator.staff;
-
-        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-          .trim()
-          .toLowerCase();
-      } else if (r.stakeholder && r.stakeholder.staff) {
-        // Fallback: stakeholder data exists
-        const s = r.stakeholder.staff;
-
-        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-          .trim()
-          .toLowerCase();
-      } else if (r.coordinator && r.coordinator.staff) {
-        // Final fallback: coordinator data
-        const s = r.coordinator.staff;
-
-        requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-          .trim()
-          .toLowerCase();
-      } else if (r.MadeByStakeholderID || ev.MadeByStakeholderID) {
-        requestee = (r.MadeByStakeholderID || ev.MadeByStakeholderID)
-          .toString()
-          .toLowerCase();
-      }
-      if (!(title.includes(q) || requestee.includes(q))) return false;
-    }
-
-    // Advanced filter: title, requester, date
-    if (advancedFilter) {
-      const ev = r.event || {};
-
-      if (advancedFilter.title) {
-        const t = (ev.Event_Title || ev.title || "").toString().toLowerCase();
-
-        if (!t.includes(String(advancedFilter.title).toLowerCase()))
-          return false;
-      }
-      if (advancedFilter.requester) {
-        let requestee = "";
-
-        if (
-          r.made_by_role === "Stakeholder" &&
-          r.stakeholder &&
-          r.stakeholder.staff
-        ) {
-          const s = r.stakeholder.staff;
-
-          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-            .trim()
-            .toLowerCase();
-        } else if (
-          (r.made_by_role === "Coordinator" ||
-            r.made_by_role === "SystemAdmin") &&
-          r.coordinator &&
-          r.coordinator.staff
-        ) {
-          const s = r.coordinator.staff;
-
-          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-            .trim()
-            .toLowerCase();
-        } else if (r.stakeholder && r.stakeholder.staff) {
-          // Fallback: stakeholder data exists
-          const s = r.stakeholder.staff;
-
-          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-            .trim()
-            .toLowerCase();
-        } else if (r.coordinator && r.coordinator.staff) {
-          // Final fallback: coordinator data
-          const s = r.coordinator.staff;
-
-          requestee = `${s.First_Name || ""} ${s.Last_Name || ""}`
-            .trim()
-            .toLowerCase();
-        } else if (r.MadeByStakeholderID || ev.MadeByStakeholderID) {
-          requestee = (r.MadeByStakeholderID || ev.MadeByStakeholderID)
-            .toString()
-            .toLowerCase();
-        }
-        if (!requestee.includes(String(advancedFilter.requester).toLowerCase()))
-          return false;
-      }
-      if (advancedFilter.coordinator) {
-        const cId = String(advancedFilter.coordinator);
-        const rCId = String(r.coordinator_id || "");
-
-        if (rCId && rCId !== cId) return false;
-      }
-      if (advancedFilter.stakeholder) {
-        const sId = String(advancedFilter.stakeholder);
-        const rSId = String(r.stakeholder_id || "");
-
-        if (rSId && rSId !== sId) return false;
-      }
-      if (advancedFilter.start) {
-        try {
-          const filterDate = parseDate(advancedFilter.start);
-          const evStart = parseDate(ev.Start_Date);
-
-          if (!evStart || !filterDate) return false;
-          if (
-            !(
-              evStart.getFullYear() === filterDate.getFullYear() &&
-              evStart.getMonth() === filterDate.getMonth() &&
-              evStart.getDate() === filterDate.getDate()
-            )
-          )
-            return false;
-        } catch (e) {
-          // ignore malformed date filter
-        }
-      }
-    }
-
-    return true;
-  });
+  const filteredRequests = requests;
 
   // Client-side pagination calculations
   // When server returns paged results, use server's total count; otherwise

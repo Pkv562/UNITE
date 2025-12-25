@@ -27,6 +27,7 @@ export default function AddStakeholderModal({
   onClearError = undefined,
 }: AddStakeholderModalProps) {
   const {
+    roleOptions,
     municipalityOptions,
     barangayOptions,
     organizationOptions,
@@ -38,6 +39,7 @@ export default function AddStakeholderModal({
     fetchBarangays,
   } = useStakeholderManagement()
 
+  const [selectedRole, setSelectedRole] = useState<string>("")
   const [selectedMunicipality, setSelectedMunicipality] = useState<string>("")
   const [selectedBarangay, setSelectedBarangay] = useState<string>("")
   const [selectedOrganization, setSelectedOrganization] = useState<string>("")
@@ -45,8 +47,23 @@ export default function AddStakeholderModal({
   const [showRetypePassword, setShowRetypePassword] = useState(false)
   const [organizationInput, setOrganizationInput] = useState<string>("")
 
-  // Set default organization for non-system-admins
+  // Set default role and organization for non-system-admins
   useEffect(() => {
+    // Auto-select first role if only one option available
+    if (roleOptions.length > 0 && !selectedRole) {
+      const firstRole = roleOptions[0]
+      const roleId = firstRole._id || firstRole.id
+      if (roleId) {
+        setSelectedRole(String(roleId))
+        console.log('[DIAG] Add Modal - Auto-selected role:', {
+          roleId: String(roleId),
+          roleCode: firstRole.code,
+          roleName: firstRole.name
+        })
+      }
+    }
+    
+    // Auto-select first organization if only one option available
     if (!canChooseOrganization && organizationOptions.length > 0 && !selectedOrganization) {
       const org = organizationOptions[0]
       const orgId = org._id
@@ -58,7 +75,7 @@ export default function AddStakeholderModal({
         })
       }
     }
-  }, [canChooseOrganization, organizationOptions, selectedOrganization])
+  }, [roleOptions, canChooseOrganization, organizationOptions, selectedRole, selectedOrganization])
 
   // Fetch barangays when municipality is selected
   useEffect(() => {
@@ -71,6 +88,17 @@ export default function AddStakeholderModal({
     }
   }, [selectedMunicipality, fetchBarangays])
 
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setSelectedRole("")
+      setSelectedMunicipality("")
+      setSelectedBarangay("")
+      setSelectedOrganization("")
+      setOrganizationInput("")
+    }
+  }, [isOpen])
+
   // Diagnostic logging for field states
   useEffect(() => {
     if (isOpen) {
@@ -78,16 +106,17 @@ export default function AddStakeholderModal({
         canChooseMunicipality,
         canChooseOrganization,
         isSystemAdmin,
+        roleOptionsCount: roleOptions.length,
         municipalityOptionsCount: municipalityOptions.length,
         barangayOptionsCount: barangayOptions.length,
         organizationOptionsCount: organizationOptions.length,
+        selectedRole: selectedRole || 'none',
         selectedMunicipality: selectedMunicipality || 'none',
         selectedBarangay: selectedBarangay || 'none',
-        selectedOrganization: selectedOrganization || 'none',
-        role: 'stakeholder (forced)'
+        selectedOrganization: selectedOrganization || 'none'
       });
     }
-  }, [isOpen, hookLoading, canChooseMunicipality, canChooseOrganization, isSystemAdmin, municipalityOptions.length, barangayOptions.length, organizationOptions.length, selectedMunicipality, selectedBarangay, selectedOrganization]);
+  }, [isOpen, hookLoading, canChooseMunicipality, canChooseOrganization, isSystemAdmin, roleOptions.length, municipalityOptions.length, barangayOptions.length, organizationOptions.length, selectedRole, selectedMunicipality, selectedBarangay, selectedOrganization]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -104,6 +133,12 @@ export default function AddStakeholderModal({
     // Validation
     if (password !== retypePassword) {
       alert("Passwords do not match!")
+      return
+    }
+
+    // Validation
+    if (!selectedRole) {
+      alert("Please select a role.")
       return
     }
 
@@ -132,7 +167,7 @@ export default function AddStakeholderModal({
     // For coordinators, organizationId is required
     const finalOrganizationId = selectedOrganization || (organizationOptions.length > 0 ? String(organizationOptions[0]._id) : undefined)
 
-    // Prepare data for API - role is always 'stakeholder' for this page
+    // Prepare data for API - use selected role ID
     const data = {
       firstName,
       middleName: middleName || undefined,
@@ -140,7 +175,7 @@ export default function AddStakeholderModal({
       email,
       phoneNumber: phoneNumber || undefined,
       password,
-      roles: ['stakeholder'], // Always stakeholder for stakeholder-management page
+      roles: [selectedRole], // Use selected role ID
       municipalityId: selectedMunicipality,
       barangayId: selectedBarangay || undefined, // Optional
       organizationId: finalOrganizationId,
@@ -149,8 +184,11 @@ export default function AddStakeholderModal({
     }
 
     console.log('[DIAG] Add Modal - Submitting data:', {
+      roleId: data.roles[0],
       hasOrganizationId: !!data.organizationId,
       organizationId: data.organizationId,
+      municipalityId: data.municipalityId,
+      barangayId: data.barangayId,
       canChooseOrganization,
       organizationOptionsCount: organizationOptions.length
     })
@@ -212,6 +250,46 @@ export default function AddStakeholderModal({
                   </div>
                 </div>
               )}
+
+              {/* Role Selection - Always show dropdown */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-900">
+                  Role <span className="text-red-500">*</span>
+                </label>
+                <Select
+                  isRequired
+                  classNames={{
+                    trigger: "border-gray-300",
+                  }}
+                  placeholder={hookLoading ? "Loading roles..." : roleOptions.length === 0 ? "No roles available" : "Select a role"}
+                  name="role"
+                  radius="md"
+                  selectedKeys={selectedRole ? new Set([selectedRole]) : new Set()}
+                  size="md"
+                  variant="bordered"
+                  isDisabled={hookLoading || roleOptions.length === 0}
+                  description={roleOptions.length > 0 ? "Select a role with authority below coordinator level (< 60)" : hookLoading ? "Loading available roles..." : "No roles available. Contact an administrator."}
+                  onSelectionChange={(keys: any) => {
+                    const roleId = Array.from(keys)[0] as string
+                    setSelectedRole(roleId || "")
+                  }}
+                >
+                  {roleOptions.map((role) => {
+                    const roleId = role._id || role.id
+                    const roleName = role.name || role.code || String(roleId)
+                    return (
+                      <SelectItem key={String(roleId)} textValue={roleName}>
+                        {roleName} {role.authority !== undefined ? `(Authority: ${role.authority})` : ''}
+                      </SelectItem>
+                    )
+                  })}
+                </Select>
+                {roleOptions.length === 0 && !hookLoading && (
+                  <p className="text-xs text-red-500">
+                    No roles available. You need roles with authority below coordinator level (&lt; 60) to create stakeholders.
+                  </p>
+                )}
+              </div>
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-900">
@@ -363,17 +441,30 @@ export default function AddStakeholderModal({
                   classNames={{
                     trigger: "border-gray-300",
                   }}
-                  placeholder={hookLoading ? "Loading..." : canChooseMunicipality ? "Select a municipality" : "Select a municipality within your jurisdiction"}
+                  placeholder={hookLoading ? "Loading..." : canChooseMunicipality ? "Select a municipality" : municipalityOptions.length > 0 ? "Select a municipality" : "No municipalities available"}
                   name="municipality"
                   radius="md"
                   selectedKeys={selectedMunicipality ? new Set([selectedMunicipality]) : new Set()}
                   size="md"
                   variant="bordered"
-                  isDisabled={hookLoading || (!canChooseMunicipality && municipalityOptions.length === 0)}
-                  description={!canChooseMunicipality ? "You can only select municipalities within your jurisdiction" : undefined}
+                  isDisabled={hookLoading || municipalityOptions.length === 0}
+                  description={
+                    hookLoading 
+                      ? "Loading municipalities..." 
+                      : municipalityOptions.length === 0 
+                        ? "No municipalities available in your coverage areas. Contact an administrator to assign coverage areas to your account." 
+                        : !canChooseMunicipality && municipalityOptions.length > 0
+                          ? "You can only select municipalities within your assigned coverage areas"
+                          : canChooseMunicipality
+                            ? "Select any municipality (system admin)"
+                            : undefined
+                  }
                   onSelectionChange={(keys: any) => {
                     const muniId = Array.from(keys)[0] as string
                     setSelectedMunicipality(muniId)
+                    if (muniId) {
+                      fetchBarangays(muniId)
+                    }
                   }}
                 >
                   {municipalityOptions.map((muni) => {
@@ -387,8 +478,8 @@ export default function AddStakeholderModal({
                   })}
                 </Select>
                 {municipalityOptions.length === 0 && !hookLoading && (
-                  <p className="text-xs text-gray-500">
-                    No municipalities available. Contact an administrator to assign coverage areas to your account.
+                  <p className="text-xs text-red-500">
+                    No municipalities available. You need assigned coverage areas with municipalities to create stakeholders. Contact an administrator.
                   </p>
                 )}
               </div>
@@ -439,18 +530,20 @@ export default function AddStakeholderModal({
                 <label className="text-sm font-medium text-gray-900">
                   Organization
                 </label>
-                {canChooseOrganization ? (
+                {canChooseOrganization && organizationOptions.length > 1 ? (
                   <Select
                     classNames={{
                       trigger: "border-gray-300",
                     }}
-                    placeholder={hookLoading ? "Loading organizations..." : "Select Organization (Optional)"}
+                    placeholder={hookLoading ? "Loading organizations..." : "Select Organization"}
                     name="organization"
                     radius="md"
                     selectedKeys={selectedOrganization ? new Set([selectedOrganization]) : new Set()}
                     size="md"
                     variant="bordered"
-                    isDisabled={hookLoading}
+                    isDisabled={hookLoading || organizationOptions.length === 0}
+                    isRequired
+                    description={isSystemAdmin ? "Select any organization (system admin)" : "Select from your assigned organizations"}
                     onSelectionChange={(keys: any) => {
                       const orgId = Array.from(keys)[0] as string
                       setSelectedOrganization(orgId)
@@ -466,6 +559,24 @@ export default function AddStakeholderModal({
                       )
                     })}
                   </Select>
+                ) : organizationOptions.length > 0 ? (
+                  <>
+                    <Input
+                      disabled
+                      classNames={{
+                        inputWrapper: "border-gray-300 bg-gray-50",
+                      }}
+                      name="organization_display"
+                      placeholder="Organization"
+                      radius="md"
+                      size="md"
+                      type="text"
+                      value={organizationOptions[0].name || String(organizationOptions[0]._id)}
+                      variant="bordered"
+                      description={organizationOptions.length === 1 ? "Organization is automatically set to your assigned organization" : "Organization is automatically set"}
+                    />
+                    <input name="organization" type="hidden" value={selectedOrganization || String(organizationOptions[0]._id)} />
+                  </>
                 ) : (
                   <>
                     <Input
@@ -478,15 +589,15 @@ export default function AddStakeholderModal({
                       radius="md"
                       size="md"
                       type="text"
-                      value={organizationOptions.length > 0 
-                        ? (organizationOptions[0].name || String(organizationOptions[0]._id))
-                        : (hookLoading ? "Loading..." : "No organization assigned")}
+                      value={hookLoading ? "Loading..." : "No organization assigned"}
                       variant="bordered"
-                      description={organizationOptions.length > 0 
-                        ? "Organization is set to your organization" 
-                        : "Please wait for organization to load"}
+                      description={hookLoading ? "Please wait for organization to load" : "Contact an administrator to assign an organization to your account"}
                     />
-                    <input name="organization" type="hidden" value={selectedOrganization || ""} />
+                    {!hookLoading && (
+                      <p className="text-xs text-red-500">
+                        You need at least one assigned organization to create stakeholders. Contact an administrator.
+                      </p>
+                    )}
                   </>
                 )}
                 {!canChooseOrganization && organizationOptions.length > 0 && (

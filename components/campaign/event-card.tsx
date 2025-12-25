@@ -200,50 +200,67 @@ const EventCard: React.FC<EventCardProps> = ({
     resolvedRequest?.requestId ||
     null;
 
+  /**
+   * PERMISSION-BASED ARCHITECTURE NOTE:
+   * Action visibility in this component is driven by `allowedActions` from the backend.
+   * Backend validates permissions (e.g., request.review, request.approve) and authority hierarchy.
+   * Role names below are ONLY for API routing - actual authorization happens on backend.
+   * 
+   * See: STATE_MACHINE_README.md for permission requirements per action
+   */
   const resolveActorEndpoint = () => {
     const viewer = getViewer();
     const roleString = String(viewer.role || "").toLowerCase();
 
+    // Role-based routing (backend will validate actual permissions)
     if (viewer.isAdmin) return "admin-action";
     if (roleString.includes("coordinator")) return "coordinator-action";
     if (roleString.includes("stakeholder")) return "stakeholder-action";
 
-    return "admin-action";
+    return "admin-action"; // Fallback
   };
 
   const viewer = getViewer();
   const viewerId = getViewerId();
   const viewerRoleString = String(viewer.role || "").toLowerCase();
 
+  // Permission-based action computation
+  // Backend returns allowedActions based on user's permissions + authority hierarchy
   const allowedActionSet = useAllowedActionSet({
     request,
     fullRequest,
     resolvedRequest,
   });
-  // Debug: log allowed actions for the current viewer
+  
+  // Debug: log permission-based allowed actions
   try {
-    // Log more detailed payload for troubleshooting coordinator vs admin flows
     const dbg = {
       requestId: resolvedRequestId,
       viewerId,
-      viewerRoleString,
-      actions: Array.from(allowedActionSet || []),
+      // Role string for context only - action visibility is permission-driven
+      viewerRole: viewerRoleString,
+      // Permission-based allowed actions from backend
+      allowedActions: Array.from(allowedActionSet || []),
       status: resolvedRequest?.Status || resolvedRequest?.status,
-      reviewer: resolvedRequest?.reviewer,
-      coordinator_id: resolvedRequest?.coordinator_id,
-      resolvedAllowedActions: resolvedRequest?.allowedActions ?? resolvedRequest?.allowed_actions ?? null,
+      // Backend-computed permissions (from API response)
+      backendAllowedActions: resolvedRequest?.allowedActions ?? resolvedRequest?.allowed_actions ?? null,
       rootAllowedActions: request?.allowedActions ?? request?.allowed_actions ?? null,
     };
-    console.debug("[EventCard] allowedActionSet", dbg);
-    // For coordinator/admin sessions, also print the whole request snapshot (trimmed)
+    console.debug("[EventCard] Permission-based allowed actions", dbg);
+    
+    // Detailed request snapshot for debugging permission issues
     if (viewerRoleString.includes("coordinator") || viewerRoleString.includes("admin")) {
       try {
-        console.debug("[EventCard] resolvedRequest (trimmed)", {
+        console.debug("[EventCard] Request details", {
           Request_ID: resolvedRequest?.Request_ID || resolvedRequest?._id,
           Status: resolvedRequest?.Status || resolvedRequest?.status,
           reviewer: resolvedRequest?.reviewer,
+          // Backend validates these permissions
           allowedActions: resolvedRequest?.allowedActions || resolvedRequest?.allowed_actions || null,
-          event: resolvedRequest?.event ? { Event_ID: resolvedRequest.event.Event_ID || resolvedRequest.event._id, Status: resolvedRequest.event.Status || resolvedRequest.event.status } : null,
+          event: resolvedRequest?.event ? { 
+            Event_ID: resolvedRequest.event.Event_ID || resolvedRequest.event._id, 
+            Status: resolvedRequest.event.Status || resolvedRequest.event.status 
+          } : null,
         });
       } catch (e) {}
     }
@@ -263,6 +280,8 @@ const EventCard: React.FC<EventCardProps> = ({
     }
   })();
 
+  // Helper: Check if viewer is assigned coordinator (for UI hints only)
+  // NOTE: This is NOT used for authorization - backend validates permissions
   const viewerIsAssignedCoordinator = (() => {
     try {
       if (!viewerId) return false;

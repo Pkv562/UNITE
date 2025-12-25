@@ -1,9 +1,29 @@
+/**
+ * Event Card Utility Functions
+ * 
+ * PERMISSION-BASED ARCHITECTURE:
+ * These utilities help extract and check allowedActions from backend responses.
+ * Action visibility is determined by backend permission validation, not role names.
+ * 
+ * Backend validates:
+ * - User permissions (e.g., request.review, request.approve, event.publish)
+ * - Authority hierarchy (reviewer.authority >= requester.authority)
+ * - State transition validity
+ * 
+ * Frontend uses allowedActions array to show/hide UI elements.
+ * Backend always validates permissions independently - never trust frontend.
+ */
+
 import { useMemo } from "react";
 import { ACTION_SYNONYMS, BOOLEAN_FLAG_TO_ACTION } from "./event-card.constants";
 
 export const normalizeActionName = (name?: string | null) =>
   typeof name === "string" ? name.trim().toLowerCase() : "";
 
+/**
+ * Get current viewer info from localStorage/sessionStorage
+ * NOTE: Role is for routing/display only. Authorization is permission-based on backend.
+ */
 export const getViewer = () => {
   try {
     if (typeof window === "undefined")
@@ -58,6 +78,19 @@ export const formatDate = (dateStr: string | null | undefined): string => {
   }
 };
 
+/**
+ * Extract allowedActions from backend API response
+ * 
+ * Backend returns allowedActions array computed from:
+ * - User's permissions (request.review, request.approve, etc.)
+ * - Authority hierarchy validation
+ * - Current request state
+ * 
+ * This hook walks the request/event structure to find and normalize
+ * all allowedActions arrays and permission flags.
+ * 
+ * @returns Set of normalized action names that user is allowed to perform
+ */
 export const useAllowedActionSet = (payload: {
   request?: any;
   fullRequest?: any;
@@ -131,6 +164,19 @@ export const useAllowedActionSet = (payload: {
   }, [request, fullRequest, resolvedRequest]);
 };
 
+/**
+ * Factory function to create permission checker
+ * 
+ * Returns a function that checks if an action (or its synonyms) exists in the
+ * allowedActions set from the backend.
+ * 
+ * Usage:
+ *   const hasAllowedAction = hasAllowedActionFactory(allowedActionSet);
+ *   if (hasAllowedAction('accept')) { ... }
+ * 
+ * @param allowedActionSet - Set of permitted action names from backend
+ * @returns Function to check if action is allowed
+ */
 export const hasAllowedActionFactory = (allowedActionSet: Set<string>) => (
   actionName?: string | string[] | null,
 ) => {

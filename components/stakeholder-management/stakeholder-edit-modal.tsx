@@ -23,12 +23,15 @@ export default function EditStakeholderModal({
   onSaved,
 }: EditStakeholderModalProps) {
   const {
+    roleOptions,
     municipalityOptions,
+    barangayOptions,
     organizationOptions,
     canChooseMunicipality,
     canChooseOrganization,
     isSystemAdmin,
     loading: hookLoading,
+    fetchBarangays,
     // Legacy compatibility
     creatorCoverageAreas,
     allowedOrganizations,
@@ -41,7 +44,8 @@ export default function EditStakeholderModal({
   const [phoneNumber, setPhoneNumber] = useState("")
   const [organization, setOrganization] = useState("")
   const [organizationId, setOrganizationId] = useState<string>("")
-  const [coverageAreaId, setCoverageAreaId] = useState<string>("")
+  const [selectedMunicipality, setSelectedMunicipality] = useState<string>("")
+  const [selectedBarangay, setSelectedBarangay] = useState<string>("")
   const [selectedRole, setSelectedRole] = useState<string>("")
   const [newPassword, setNewPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -98,19 +102,34 @@ export default function EditStakeholderModal({
               }
             }
             
-            // Set role if available (should always be stakeholder)
-            if (data.roles && data.roles.length > 0) {
+            // Set role if available (use role ID from embedded roles array)
+            if (data.roles && Array.isArray(data.roles) && data.roles.length > 0) {
               const role = data.roles[0]
-              const roleCode = typeof role === 'object' ? role.code : role
-              if (roleCode) {
-                setSelectedRole(String(roleCode))
-              } else {
-                // Default to stakeholder if no role found
-                setSelectedRole('stakeholder')
+              // Support both embedded role object and role ID
+              const roleId = typeof role === 'object' 
+                ? (role.roleId || role._id || role.id)
+                : role
+              if (roleId) {
+                setSelectedRole(String(roleId))
+              } else if (typeof role === 'object' && role.roleCode) {
+                // Fallback: try to find role by code
+                const matchingRole = roleOptions.find(r => r.code === role.roleCode)
+                if (matchingRole) {
+                  setSelectedRole(String(matchingRole._id || matchingRole.id))
+                }
               }
-            } else {
-              // Default to stakeholder
-              setSelectedRole('stakeholder')
+            }
+            
+            // Set municipality and barangay from locations
+            if (data.locations) {
+              if (data.locations.municipalityId) {
+                setSelectedMunicipality(String(data.locations.municipalityId))
+                // Fetch barangays for the municipality
+                fetchBarangays(String(data.locations.municipalityId))
+              }
+              if (data.locations.barangayId) {
+                setSelectedBarangay(String(data.locations.barangayId))
+              }
             }
           } else {
             // Fallback: use stakeholder prop directly
@@ -158,14 +177,19 @@ export default function EditStakeholderModal({
       if (canChooseOrganization && organizationId) {
         payload.organizationId = organizationId
       }
-      // Note: For stakeholders, location changes should use municipalityId/barangayId
-      // This coverageAreaId is kept for backward compatibility with existing data
-      if (canChooseMunicipality && coverageAreaId) {
-        payload.coverageAreaId = coverageAreaId
+      
+      // Update municipality/barangay if changed
+      if (canChooseMunicipality && selectedMunicipality) {
+        payload.municipalityId = selectedMunicipality
+        if (selectedBarangay) {
+          payload.barangayId = selectedBarangay
+        }
       }
 
-      // Role is always stakeholder for stakeholder management page
-      // Don't send roleCode - backend will maintain it as stakeholder
+      // Update role if changed (only if creator has authority to assign it)
+      if (selectedRole) {
+        payload.roles = [selectedRole] // Send role ID
+      }
 
       // Password is optional
       if (newPassword && String(newPassword).trim().length > 0) {
@@ -196,6 +220,13 @@ export default function EditStakeholderModal({
 
   if (!stakeholder && !stakeholderData) return null
 
+  // Fetch barangays when municipality is selected
+  useEffect(() => {
+    if (selectedMunicipality) {
+      fetchBarangays(selectedMunicipality)
+    }
+  }, [selectedMunicipality, fetchBarangays])
+
   // Diagnostic logging for field states
   useEffect(() => {
     if (isOpen) {
@@ -203,18 +234,23 @@ export default function EditStakeholderModal({
         canChooseMunicipality,
         canChooseOrganization,
         isSystemAdmin,
+        roleOptionsCount: roleOptions.length,
         municipalityOptionsCount: municipalityOptions.length,
+        barangayOptionsCount: barangayOptions.length,
         organizationOptionsCount: organizationOptions.length,
+        selectedRole: selectedRole || 'none',
+        selectedMunicipality: selectedMunicipality || 'none',
+        selectedBarangay: selectedBarangay || 'none',
         stakeholderOrganizationId: organizationId,
-        stakeholderCoverageAreaId: coverageAreaId,
         stakeholderData: stakeholderData ? {
           hasOrganization: !!(stakeholderData.organization || stakeholderData.organizationId),
           organization: stakeholderData.organization,
-          organizationId: stakeholderData.organizationId
+          organizationId: stakeholderData.organizationId,
+          locations: stakeholderData.locations
         } : null
       });
     }
-  }, [isOpen, hookLoading, canChooseMunicipality, canChooseOrganization, isSystemAdmin, municipalityOptions.length, organizationOptions.length, organizationId, coverageAreaId, stakeholderData]);
+  }, [isOpen, hookLoading, canChooseMunicipality, canChooseOrganization, isSystemAdmin, roleOptions.length, municipalityOptions.length, barangayOptions.length, organizationOptions.length, selectedRole, selectedMunicipality, selectedBarangay, organizationId, stakeholderData]);
 
   return (
     <Modal isOpen={isOpen} placement="center" scrollBehavior="inside" size="xl" onClose={onClose}>
@@ -341,52 +377,120 @@ export default function EditStakeholderModal({
               />
             </div>
 
-            {/* Role Selection - Disabled, always stakeholder */}
-            <div>
-              <label className="text-sm font-semibold text-gray-900 mb-2 block">
-                Role
-              </label>
-              <Input
-                disabled
-                classNames={{ inputWrapper: "h-10 bg-gray-100" }}
-                type="text"
-                value="Stakeholder"
-                variant="bordered"
-                description="Role is fixed to Stakeholder"
-              />
-            </div>
+            {/* Role Selection */}
+            {roleOptions.length > 1 ? (
+              <div>
+                <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                  Role
+                </label>
+                <Select
+                  placeholder="Select Role"
+                  selectedKeys={selectedRole ? new Set([selectedRole]) : new Set()}
+                  isDisabled={hookLoading}
+                  onSelectionChange={(keys: any) => {
+                    const roleId = Array.from(keys)[0] as string
+                    setSelectedRole(roleId)
+                  }}
+                >
+                  {roleOptions.map((role) => {
+                    const roleId = role._id || role.id
+                    const roleName = role.name || role.code || String(roleId)
+                    return (
+                      <SelectItem key={String(roleId)} textValue={roleName}>
+                        {roleName} {role.authority ? `(Authority: ${role.authority})` : ''}
+                      </SelectItem>
+                    )
+                  })}
+                </Select>
+              </div>
+            ) : roleOptions.length === 1 ? (
+              <div>
+                <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                  Role
+                </label>
+                <Input
+                  disabled
+                  classNames={{ inputWrapper: "h-10 bg-gray-100" }}
+                  type="text"
+                  value={roleOptions[0].name || roleOptions[0].code || "Stakeholder"}
+                  variant="bordered"
+                  description="Role is set to your only available option"
+                />
+              </div>
+            ) : null}
 
-            {/* Location (Municipality/Barangay) - Display only for edit */}
-            <div>
-              <label className="text-sm font-semibold text-gray-900 mb-2 block">
-                Location
-              </label>
-              <Input
-                disabled
-                classNames={{ inputWrapper: "h-10 bg-gray-100" }}
-                type="text"
-                value={(() => {
-                  if (!coverageAreaId && !stakeholderData?.locations) return "Not set"
-                  // Try to find in municipalityOptions first
-                  if (municipalityOptions.length > 0) {
-                    const location = municipalityOptions.find((loc: { _id: string; id?: string; name?: string }) => 
-                      String(loc._id || loc.id) === String(coverageAreaId)
+            {/* Municipality Selection */}
+            {canChooseMunicipality ? (
+              <div>
+                <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                  Municipality <span className="text-red-500">*</span>
+                </label>
+                <Select
+                  isRequired
+                  placeholder="Select Municipality"
+                  selectedKeys={selectedMunicipality ? new Set([selectedMunicipality]) : new Set()}
+                  isDisabled={hookLoading}
+                  onSelectionChange={(keys: any) => {
+                    const muniId = Array.from(keys)[0] as string
+                    setSelectedMunicipality(muniId)
+                    fetchBarangays(muniId)
+                    setSelectedBarangay("") // Reset barangay when municipality changes
+                  }}
+                >
+                  {municipalityOptions.map((muni) => {
+                    const muniId = muni._id || muni.id
+                    const muniName = muni.name || String(muniId)
+                    return (
+                      <SelectItem key={String(muniId)} textValue={muniName}>
+                        {muniName}
+                      </SelectItem>
                     )
-                    if (location) return location.name || String(coverageAreaId)
-                  }
-                  // Fallback to creatorCoverageAreas for legacy compatibility
-                  if (creatorCoverageAreas.length > 0) {
-                    const caLegacy = creatorCoverageAreas.find((loc: { _id: string; id?: string; name?: string }) => 
-                      String(loc._id || loc.id) === String(coverageAreaId)
+                  })}
+                </Select>
+              </div>
+            ) : (
+              <div>
+                <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                  Municipality
+                </label>
+                <Input
+                  disabled
+                  classNames={{ inputWrapper: "h-10 bg-gray-100" }}
+                  type="text"
+                  value={stakeholderData?.locations?.municipalityName || selectedMunicipality || "Not set"}
+                  variant="bordered"
+                  description="Municipality cannot be changed"
+                />
+              </div>
+            )}
+
+            {/* Barangay Selection (Optional) */}
+            {selectedMunicipality && (
+              <div>
+                <label className="text-sm font-semibold text-gray-900 mb-2 block">
+                  Barangay <span className="text-gray-500 text-xs">(Optional)</span>
+                </label>
+                <Select
+                  placeholder={hookLoading ? "Loading barangays..." : barangayOptions.length === 0 ? "No barangays available" : "Select Barangay (Optional)"}
+                  selectedKeys={selectedBarangay ? new Set([selectedBarangay]) : new Set()}
+                  isDisabled={hookLoading || barangayOptions.length === 0}
+                  onSelectionChange={(keys: any) => {
+                    const barangayId = Array.from(keys)[0] as string
+                    setSelectedBarangay(barangayId || "")
+                  }}
+                >
+                  {barangayOptions.map((brgy) => {
+                    const brgyId = brgy._id || brgy.id
+                    const brgyName = brgy.name || String(brgyId)
+                    return (
+                      <SelectItem key={String(brgyId)} textValue={brgyName}>
+                        {brgyName}
+                      </SelectItem>
                     )
-                    if (caLegacy) return caLegacy.name || String(coverageAreaId)
-                  }
-                  return coverageAreaId ? String(coverageAreaId) : "Not set"
-                })()}
-                variant="bordered"
-                description="Location cannot be changed in edit mode"
-              />
-            </div>
+                  })}
+                </Select>
+              </div>
+            )}
 
             {/* Organization */}
             <div>

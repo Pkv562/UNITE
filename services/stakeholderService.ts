@@ -92,7 +92,7 @@ export interface ListStakeholdersResponse {
  * @returns Created stakeholder data
  */
 export async function createStakeholder(
-  data: CreateStakeholderData
+  data: any
 ): Promise<CreateStakeholderResponse> {
   try {
     const payload: any = {
@@ -100,7 +100,7 @@ export async function createStakeholder(
       lastName: data.lastName,
       email: data.email,
       password: data.password,
-      roles: ['stakeholder'], // Always stakeholder for stakeholder-management page
+      roles: data.roles || [], // Use provided roles (should be role IDs)
     };
 
     if (data.middleName) payload.middleName = data.middleName;
@@ -108,8 +108,11 @@ export async function createStakeholder(
     if (data.organizationId) payload.organizationId = data.organizationId;
     if (data.organizationType) payload.organizationType = data.organizationType;
     if (data.organizationInstitution) payload.organizationInstitution = data.organizationInstitution;
+    if (data.municipalityId) payload.municipalityId = data.municipalityId;
+    if (data.barangayId) payload.barangayId = data.barangayId;
     if (data.coverageAreaId) payload.coverageAreaId = data.coverageAreaId;
     if (data.field) payload.field = data.field;
+    if (data.pageContext) payload.pageContext = data.pageContext;
 
     const response = await fetchJsonWithAuth('/api/users', {
       method: 'POST',
