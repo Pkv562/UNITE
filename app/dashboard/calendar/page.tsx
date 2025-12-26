@@ -1204,7 +1204,7 @@ export default function CalendarPage(props: any) {
 
   // Perform an admin action (Accepted/Rejected/Rescheduled) given an Event_ID.
   // This will fetch the event to determine the linked request id, then call
-  // the admin-action endpoint on the request.
+  // the unified actions endpoint on the request.
   const performAdminActionByEventId = async (
     eventId: string,
     action: string,
@@ -1245,29 +1245,33 @@ export default function CalendarPage(props: any) {
     if (!requestId)
       throw new Error("Unable to determine request id for action");
 
-    const body: any = { action, note: note ? note.trim() : undefined };
+    // Map old action names to new unified action names
+    const actionMap: Record<string, string> = {
+      "Accepted": "accept",
+      "Rejected": "reject",
+      "Rescheduled": "reschedule",
+      "Cancelled": "cancel",
+    };
+    const unifiedAction = actionMap[action] || action.toLowerCase();
 
-    if (rescheduledDate) body.rescheduledDate = rescheduledDate;
+    const body: any = { action: unifiedAction, note: note ? note.trim() : undefined };
+
+    if (rescheduledDate) body.proposedDate = rescheduledDate;
 
     let res;
 
     if (token) {
       res = await fetchWithAuth(
-        `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`,
+        `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
         { method: "POST", body: JSON.stringify(body) },
       );
     } else {
-      const legacyBody = {
-        adminId: user?.id || user?.Admin_ID || null,
-        ...body,
-      };
-
       res = await fetch(
-        `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/admin-action`,
+        `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
         {
           method: "POST",
           headers,
-          body: JSON.stringify(legacyBody),
+          body: JSON.stringify(body),
           credentials: "include",
         },
       );
@@ -1378,7 +1382,7 @@ export default function CalendarPage(props: any) {
           ...eventPayload,
         };
 
-        const res = await fetch(`${API_BASE}/api/events/direct`, {
+        const res = await fetch(`${API_BASE}/api/events`, {
           method: "POST",
           headers,
           body: JSON.stringify(body),
@@ -1403,7 +1407,7 @@ export default function CalendarPage(props: any) {
           ...eventPayload,
         };
 
-        const res = await fetch(`${API_BASE}/api/requests`, {
+        const res = await fetch(`${API_BASE}/api/event-requests`, {
           method: "POST",
           headers,
           body: JSON.stringify(body),

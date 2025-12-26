@@ -37,6 +37,7 @@ import RescheduleModal from "./reschedule-modal";
 import ConfirmModal from "./confirm-modal";
 import {
   performRequestAction as svcPerformRequestAction,
+  performConfirmAction as svcPerformConfirmAction,
   performStakeholderConfirm as svcPerformStakeholderConfirm,
   performCoordinatorConfirm,
   fetchRequestDetails as svcFetchRequestDetails,
@@ -200,25 +201,8 @@ const EventCard: React.FC<EventCardProps> = ({
     resolvedRequest?.requestId ||
     null;
 
-  /**
-   * PERMISSION-BASED ARCHITECTURE NOTE:
-   * Action visibility in this component is driven by `allowedActions` from the backend.
-   * Backend validates permissions (e.g., request.review, request.approve) and authority hierarchy.
-   * Role names below are ONLY for API routing - actual authorization happens on backend.
-   * 
-   * See: STATE_MACHINE_README.md for permission requirements per action
-   */
-  const resolveActorEndpoint = () => {
-    const viewer = getViewer();
-    const roleString = String(viewer.role || "").toLowerCase();
-
-    // Role-based routing (backend will validate actual permissions)
-    if (viewer.isAdmin) return "admin-action";
-    if (roleString.includes("coordinator")) return "coordinator-action";
-    if (roleString.includes("stakeholder")) return "stakeholder-action";
-
-    return "admin-action"; // Fallback
-  };
+  // Note: resolveActorEndpoint removed - we now use unified /api/event-requests/:id/actions endpoint
+  // Backend validates permissions automatically based on user's token
 
   const viewer = getViewer();
   const viewerId = getViewerId();
@@ -312,26 +296,59 @@ const EventCard: React.FC<EventCardProps> = ({
     rescheduledISO: string,
     noteText: string,
   ) => {
+    console.log("[EventCard] handleRescheduleConfirm called with:", {
+      currentDateStr,
+      rescheduledISO,
+      noteText,
+      resolvedRequestId,
+      hasOnRescheduleEvent: !!onRescheduleEvent,
+    });
+
     try {
       if (onRescheduleEvent) {
-        onRescheduleEvent(currentDateStr, rescheduledISO, noteText);
+        console.log("[EventCard] Using onRescheduleEvent callback");
+        await onRescheduleEvent(currentDateStr, rescheduledISO, noteText);
       } else {
-        if (resolvedRequestId) {
-          await performRequestAction(
-            resolvedRequestId,
-            resolveActorEndpoint(),
-            "Rescheduled",
-            noteText,
-            rescheduledISO,
-          );
+        console.log("[EventCard] Using direct API call");
+        
+        if (!resolvedRequestId) {
+          console.error("[EventCard] Request ID not found");
+          alert("Request ID not found. Cannot reschedule.");
+          throw new Error("Request ID not found");
         }
+        
+        if (!rescheduledISO) {
+          console.error("[EventCard] Rescheduled date is missing");
+          alert("Rescheduled date is required.");
+          throw new Error("Rescheduled date is required");
+        }
+
+        console.log("[EventCard] Calling svcPerformRequestAction with:", {
+          requestId: resolvedRequestId,
+          action: "reschedule",
+          note: noteText,
+          proposedDate: rescheduledISO,
+        });
+
+        await svcPerformRequestAction(
+          resolvedRequestId,
+          "reschedule",
+          noteText,
+          rescheduledISO,
+        );
+
+        console.log("[EventCard] Reschedule action completed successfully");
       }
     } catch (e) {
-      console.error("Reschedule error:", e);
-    } finally {
-      setRescheduleOpen(false);
+      console.error("[EventCard] Reschedule error:", e);
+      const errorMessage = (e as Error).message || "Failed to reschedule request";
+      alert(`Failed to reschedule: ${errorMessage}`);
+      throw e; // Re-throw so modal can handle it
     }
-
+    
+    // Only close modal and refresh if successful
+    setRescheduleOpen(false);
+    
     if (viewOpen) {
       await openViewRequest();
     }
@@ -346,17 +363,15 @@ const EventCard: React.FC<EventCardProps> = ({
 
   const handleCancelWithNote = async (note?: string) => {
     try {
-      const n = note ? note.trim() : "";
-      if (!n) {
-        throw new Error("Please provide a reason for cancelling this event");
-      }
-
+      // Note: Cancel actions don't include notes in the request body
+      // The note is for UI/display purposes only, not sent to backend
+      // Backend validator doesn't allow note for cancel actions
+      
       if (resolvedRequestId) {
-        await performRequestAction(
+        await svcPerformRequestAction(
           resolvedRequestId,
-          resolveActorEndpoint(),
-          "Cancelled",
-          n,
+          "cancel",
+          undefined, // Don't pass note for cancel actions
         );
       } else if (onCancelEvent) {
         onCancelEvent();
@@ -448,7 +463,7 @@ const EventCard: React.FC<EventCardProps> = ({
         const stakeholderId =
           r?.stakeholder_id ||
           r?.Stakeholder_ID ||
-          (r?.made_by_role === "Stakeholder" ? r?.made_by_id : null) ||
+          (r?.requester?.userId || r?.requester?.id || null) ||
           null;
         const eventId = r?.Event_ID || r?.EventId || null;
 
@@ -512,11 +527,11 @@ const EventCard: React.FC<EventCardProps> = ({
     (async () => {
       try {
         if (resolvedRequestId) {
-          await performRequestAction(
+          // Accept actions don't include notes - backend validator doesn't allow it
+          await svcPerformRequestAction(
             resolvedRequestId,
-            resolveActorEndpoint(),
-            "Accepted",
-            note || "",
+            "accept",
+            undefined, // Don't pass note for accept actions
           );
         } else if (onAcceptEvent) {
           try {
@@ -540,10 +555,9 @@ const EventCard: React.FC<EventCardProps> = ({
     (async () => {
       try {
         if (resolvedRequestId) {
-          await performRequestAction(
+          await svcPerformRequestAction(
             resolvedRequestId,
-            resolveActorEndpoint(),
-            "Rejected",
+            "reject",
             note || "",
           );
         } else if (onRejectEvent) {
@@ -599,7 +613,7 @@ const EventCard: React.FC<EventCardProps> = ({
   // API_BASE imported from event-card.constants
 
   // Network operations moved to services/requestsService
-  const performRequestAction = svcPerformRequestAction;
+  // Using service methods directly - no need for local wrapper
 
   // Open local view modal, fetching full request details when necessary
   const openViewRequest = async () => {
@@ -650,7 +664,7 @@ const EventCard: React.FC<EventCardProps> = ({
       const headers: any = { "Content-Type": "application/json" };
 
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      const url = `${API_BASE}/api/requests/${encodeURIComponent(requestId)}`;
+      const url = `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}`;
       let res;
 
       if (token) {
@@ -788,25 +802,17 @@ const EventCard: React.FC<EventCardProps> = ({
   };
 
   // Stakeholder confirm action moved to services
-  const performStakeholderConfirm = svcPerformStakeholderConfirm;
-
+  // Unified confirm action - no need for role-specific functions
   const runStakeholderDecision = async (decision: "Accepted" | "Rejected") => {
     try {
       if (!resolvedRequestId) {
         throw new Error("Unable to determine request id");
       }
-      // If current viewer is a coordinator confirming an admin decision, use the coordinator-confirm endpoint
-      if (
-        viewerRoleString.includes("coordinator") &&
-        viewerIsAssignedCoordinator
-      ) {
-        await performCoordinatorConfirm(resolvedRequestId, decision);
-      } else {
-        await performStakeholderConfirm(resolvedRequestId, decision);
-      }
+      // Use unified confirm endpoint - backend validates permissions
+      await svcPerformConfirmAction(resolvedRequestId);
       setViewOpen(false);
     } catch (err: any) {
-      console.error("Stakeholder decision error:", err);
+      console.error("Confirm decision error:", err);
       alert(
         `Failed to ${
           decision === "Accepted" ? "confirm" : "decline"
@@ -885,7 +891,10 @@ const EventCard: React.FC<EventCardProps> = ({
           key="reschedule"
           description="Propose a new schedule"
           startContent={<Clock />}
-          onPress={() => setRescheduleOpen(true)}
+          onPress={() => {
+            console.log("[EventCard] Reschedule button clicked in dropdown");
+            setRescheduleOpen(true);
+          }}
         >
           Reschedule
         </DropdownItem>,
@@ -905,15 +914,9 @@ const EventCard: React.FC<EventCardProps> = ({
           startContent={<Check />}
           onPress={async () => {
             try {
-              if (
-                viewerRoleString.includes("coordinator") &&
-                viewerIsAssignedCoordinator
-              ) {
-                await performCoordinatorConfirm(resolvedRequestId, "Accepted");
-                setViewOpen(false);
-              } else {
-                await runStakeholderDecision("Accepted");
-              }
+              // Use unified confirm endpoint - backend validates permissions
+              await svcPerformConfirmAction(resolvedRequestId);
+              setViewOpen(false);
             } catch (e) {
               console.error("Confirm error:", e);
               alert(
@@ -1009,7 +1012,7 @@ const EventCard: React.FC<EventCardProps> = ({
             setViewOpen(false);
             try {
               if (!resolvedRequestId) return alert("Request id not found");
-              await performCoordinatorConfirm(resolvedRequestId, "Accepted");
+              await svcPerformConfirmAction(resolvedRequestId);
               try {
                 window.dispatchEvent(
                   new CustomEvent("unite:requests-changed", {
@@ -1051,6 +1054,7 @@ const EventCard: React.FC<EventCardProps> = ({
           key="footer-resched"
           color="default"
           onPress={() => {
+            console.log("[EventCard] Reschedule button clicked in footer");
             setViewOpen(false);
             setRescheduleOpen(true);
           }}
@@ -1109,148 +1113,64 @@ const EventCard: React.FC<EventCardProps> = ({
     // First check the request Status field for new workflow statuses
     const requestStatus = String(r?.Status || r?.status || "").toLowerCase();
 
-    // Unified workflow statuses (case-insensitive)
+    // Generic, scalable status labels - never depend on role names
+    // Use backend's getHumanStatusLabel function logic for consistency
+    
+    // Pending states
     if (
       requestStatus.includes("pending") ||
-      requestStatus.includes("pending_review") ||
       requestStatus.includes("pending_review")
     ) {
-      // Check for Coordinator-Stakeholder case: if creator is Coordinator and stakeholder_id exists, Stakeholder is reviewer
-      const creatorRole = r?.made_by_role || r?.creator?.role;
-      const isCoordinatorRequest = creatorRole && String(creatorRole).toLowerCase().includes("coordinator");
-      const hasStakeholder = !!(r?.stakeholder_id || r?.Stakeholder_ID || r?.stakeholderId);
-      const isCoordinatorStakeholderCase = isCoordinatorRequest && hasStakeholder;
-      
-      // Check reviewer role
-      const reviewerRole = r?.reviewer?.role ? String(r.reviewer.role).toLowerCase() : null;
-      
-      // For Coordinator-Stakeholder cases, prioritize Stakeholder reviewer
-      if (isCoordinatorStakeholderCase && (reviewerRole?.includes("stakeholder") || !reviewerRole)) {
-        return "Waiting for Stakeholder review";
-      }
-      
-      if (reviewerRole?.includes("stakeholder")) {
-        return "Waiting for Stakeholder review";
-      }
-      if (reviewerRole?.includes("coordinator")) {
-        return "Waiting for Coordinator review";
-      }
-      if (
-        reviewerRole?.includes("admin") ||
-        reviewerRole?.includes("systemadmin")
-      ) {
-        return "Waiting for Admin review";
-      }
-      return "Waiting for Admin or Coordinator review";
+      return "Waiting for Review";
     }
 
+    // Review states
     if (requestStatus.includes("review")) {
-      if (requestStatus.includes("accepted"))
-        return "Waiting for Coordinator confirmation";
+      if (requestStatus.includes("accepted")) {
+        return "Accepted / Confirmed";
+      }
+      
       if (
         requestStatus.includes("resched") ||
         requestStatus.includes("reschedule") ||
         requestStatus.includes("rescheduled")
       ) {
-        const reviewerRole = r?.reviewer?.role ? String(r.reviewer.role).toLowerCase() : null;
-        // Check for Coordinator-Stakeholder case
-        const creatorRole = r?.made_by_role || r?.creator?.role;
-        const isCoordinatorRequest = creatorRole && String(creatorRole).toLowerCase().includes("coordinator");
-        const hasStakeholder = !!(r?.stakeholder_id || r?.Stakeholder_ID || r?.stakeholderId);
-        const isCoordinatorStakeholderCase = isCoordinatorRequest && hasStakeholder;
-        
-        if (isCoordinatorStakeholderCase && (reviewerRole?.includes("stakeholder") || !reviewerRole)) {
-          return "Waiting for Stakeholder review (reschedule)";
-        }
-        if (reviewerRole?.includes("stakeholder")) {
-          return "Waiting for Stakeholder review (reschedule)";
-        }
-        if (reviewerRole?.includes("coordinator")) {
-          return "Waiting for Coordinator review (reschedule)";
-        }
-        return "Waiting for Admin review (reschedule)";
+        return "Reschedule Requested";
       }
       
-      // Check for Coordinator-Stakeholder case for general review status
-      const creatorRole = r?.made_by_role || r?.creator?.role;
-      const isCoordinatorRequest = creatorRole && String(creatorRole).toLowerCase().includes("coordinator");
-      const hasStakeholder = !!(r?.stakeholder_id || r?.Stakeholder_ID || r?.stakeholderId);
-      const isCoordinatorStakeholderCase = isCoordinatorRequest && hasStakeholder;
-      const reviewerRole = r?.reviewer?.role ? String(r.reviewer.role).toLowerCase() : null;
-      
-      if (isCoordinatorStakeholderCase && (reviewerRole?.includes("stakeholder") || !reviewerRole)) {
-        return "Waiting for Stakeholder review";
-      }
-      if (reviewerRole?.includes("stakeholder")) {
-        return "Waiting for Stakeholder review";
-      }
-      if (reviewerRole?.includes("coordinator")) {
-        return "Waiting for Coordinator review";
-      }
-      if (reviewerRole?.includes("admin") || reviewerRole?.includes("systemadmin")) {
-        return "Waiting for Admin review";
-      }
-      return "Waiting for Admin or Coordinator review";
+      // Other review states
+      return "Under Review";
     }
 
+    // Rescheduled states (legacy)
     if (
       requestStatus.includes("rescheduled_by_admin") ||
-      requestStatus.includes("rescheduled_by_admin") ||
-      requestStatus.includes("rescheduled_by_admin")
+      requestStatus.includes("rescheduled_by_coordinator") ||
+      requestStatus.includes("rescheduled_by_stakeholder")
     ) {
-      const reviewerRole = r?.reviewer?.role ? String(r.reviewer.role).toLowerCase() : null;
-      // Check for Coordinator-Stakeholder case
-      const creatorRole = r?.made_by_role || r?.creator?.role;
-      const isCoordinatorRequest = creatorRole && String(creatorRole).toLowerCase().includes("coordinator");
-      const hasStakeholder = !!(r?.stakeholder_id || r?.Stakeholder_ID || r?.stakeholderId);
-      const isCoordinatorStakeholderCase = isCoordinatorRequest && hasStakeholder;
-      
-      if (isCoordinatorStakeholderCase && (reviewerRole?.includes("stakeholder") || !reviewerRole)) {
-        return "Waiting for Stakeholder review (reschedule)";
-      }
-      if (reviewerRole?.includes("stakeholder")) {
-        return "Waiting for Stakeholder review (reschedule)";
-      }
-      if (reviewerRole?.includes("coordinator")) {
-        return "Waiting for Coordinator review (reschedule)";
-      }
-      return "Waiting for Admin review (reschedule)";
-    }
-    if (requestStatus.includes("rescheduled_by_coordinator")) {
-      return "Rescheduled by coordinator";
-    }
-    if (requestStatus.includes("rescheduled_by_stakeholder")) {
-      return "Rescheduled by stakeholder";
+      return "Reschedule Requested";
     }
 
-    // Fallback to old logic for backward compatibility
-    if (status !== "Pending") return null;
-    const adminAction =
-      (r as any).AdminAction ?? (r as any).adminAction ?? null;
-    const stakeholderAction =
-      (r as any).StakeholderFinalAction ??
-      (r as any).stakeholderFinalAction ??
-      null;
-    const coordinatorAction =
-      (r as any).CoordinatorFinalAction ??
-      (r as any).coordinatorFinalAction ??
-      null;
+    // Final states
+    if (requestStatus.includes("approved") || requestStatus.includes("completed")) {
+      return "Completed / Published";
+    }
+    
+    if (requestStatus.includes("rejected") || requestStatus.includes("reject")) {
+      return "Rejected";
+    }
+    
+    if (requestStatus.includes("cancelled") || requestStatus.includes("cancel")) {
+      return "Cancelled";
+    }
 
-    // Check if there's a stakeholder involved in this request
-    const hasStakeholder =
-      r?.stakeholder_id ||
-      r?.Stakeholder_ID ||
-      r?.StakeholderId ||
-      r?.MadeByStakeholderID ||
-      r?.stakeholder?.Stakeholder_ID ||
-      null;
+    // Awaiting confirmation
+    if (requestStatus.includes("awaiting_confirmation")) {
+      return "Waiting for Confirmation";
+    }
 
-    if (!adminAction) return "Waiting for admin review";
-    if (hasStakeholder && !stakeholderAction)
-      return "Waiting for stakeholder confirmation";
-    if (!coordinatorAction) return "Waiting for coordinator confirmation";
-
-    return null;
+    // Fallback: return generic label or status as-is
+    return status || "Unknown";
   };
 
   // Try to derive the current viewer id from legacy storage
@@ -1598,10 +1518,7 @@ const EventCard: React.FC<EventCardProps> = ({
                     viewerRoleString.includes("coordinator") &&
                     viewerIsAssignedCoordinator
                   ) {
-                    await performCoordinatorConfirm(
-                      resolvedRequestId,
-                      "Accepted",
-                    );
+                    await svcPerformConfirmAction(resolvedRequestId);
                   } else {
                     await runStakeholderDecision("Accepted");
                   }

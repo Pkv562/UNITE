@@ -278,7 +278,7 @@ export default function NotificationModal({
 
     if (rid && n.NotificationType !== "System") {
       try {
-        const url = `${API_URL}/api/requests/${encodeURIComponent(rid)}`;
+        const url = `${API_URL}/api/event-requests/${encodeURIComponent(rid)}`;
         const response: any = await fetchJsonWithAuth(url);
         const data = response?.data || response?.request || response;
 

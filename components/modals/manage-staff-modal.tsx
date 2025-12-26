@@ -103,7 +103,7 @@ export default function ManageStaffModal({
 
           if (token) headers["Authorization"] = `Bearer ${token}`;
           const r = await fetch(
-            `${API_BASE}/api/requests/${encodeURIComponent(rid)}`,
+            `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}`,
             { headers },
           );
           const rb = await r.json();
@@ -192,12 +192,12 @@ export default function ManageStaffModal({
 
       if (token) {
         res = await fetchWithAuth(
-          `${API_BASE}/api/requests/${encodeURIComponent(rid)}/staff`,
+          `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}/staff`,
           { method: "POST", body: JSON.stringify(body) },
         );
       } else {
         res = await fetch(
-          `${API_BASE}/api/requests/${encodeURIComponent(rid)}/staff`,
+          `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}/staff`,
           {
             method: "POST",
             headers,

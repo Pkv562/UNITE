@@ -288,7 +288,7 @@ export default function EditEventModal({
               : { MadeByStakeholderID: user.Stakeholder_ID || user.id }),
         };
 
-        const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
+        const res = await fetch(`${API_URL}/api/event-requests/${requestId}`, {
           method: "PUT",
           headers,
           body: JSON.stringify(body),
@@ -388,7 +388,7 @@ export default function EditEventModal({
         body.requiresReview = requiresReview;
 
         // PUT to update existing request
-        const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
+        const res = await fetch(`${API_URL}/api/event-requests/${requestId}`, {
           method: "PUT",
           headers,
           body: JSON.stringify(body),

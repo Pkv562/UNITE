@@ -37,8 +37,11 @@ const RescheduleModal: React.FC<Props> = ({
   );
 
   const handleConfirm = async () => {
+    console.log("[RescheduleModal] handleConfirm called");
     setValidationError(null);
+    
     if (!rescheduledDate) {
+      console.log("[RescheduleModal] Validation failed: No date selected");
       setValidationError("Please choose a new date");
       return;
     }
@@ -49,15 +52,18 @@ const RescheduleModal: React.FC<Props> = ({
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       if (rs.getTime() < today.getTime()) {
+        console.log("[RescheduleModal] Validation failed: Date is in the past");
         setValidationError("Rescheduled date cannot be before today");
         return;
       }
     } catch (e) {
+      console.error("[RescheduleModal] Date validation error:", e);
       setValidationError("Invalid date selected");
       return;
     }
 
     if (!note || note.trim().length === 0) {
+      console.log("[RescheduleModal] Validation failed: No note provided");
       setValidationError("Please provide a reason for rescheduling");
       return;
     }
@@ -69,12 +75,26 @@ const RescheduleModal: React.FC<Props> = ({
           ? rescheduledDate.toISOString()
           : new Date(rescheduledDate).toISOString();
 
-    await onConfirm(currentDate || "", newDateISO, note.trim());
+    console.log("[RescheduleModal] Calling onConfirm with:", {
+      currentDate: currentDate || "",
+      newDateISO,
+      note: note.trim(),
+    });
 
-    setRescheduledDate(null);
-    setNote("");
-    setValidationError(null);
-    onClose();
+    try {
+      await onConfirm(currentDate || "", newDateISO, note.trim());
+      console.log("[RescheduleModal] onConfirm completed successfully");
+      
+      setRescheduledDate(null);
+      setNote("");
+      setValidationError(null);
+      onClose();
+    } catch (error) {
+      console.error("[RescheduleModal] Error in onConfirm:", error);
+      const errorMessage = (error as Error).message || "Failed to reschedule";
+      setValidationError(errorMessage);
+      // Don't close modal on error so user can see the error
+    }
   };
 
   return (

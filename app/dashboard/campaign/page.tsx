@@ -170,17 +170,18 @@ export default function CampaignPage() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       // Build query params for server-side filtering
+      // New API uses skip/limit instead of page/limit
       const params = new URLSearchParams();
-
-      params.set("page", String(currentPage));
+      const skip = (currentPage - 1) * pageSize;
+      params.set("skip", String(skip));
       params.set("limit", String(pageSize));
 
+      const statusParam = mapTabToStatusParam(selectedTab);
+      if (statusParam) params.set("status", statusParam);
+
+      // Note: New API may not support all these filters yet, but we'll pass them for backward compatibility
       if (searchQuery && searchQuery.trim())
         params.set("search", searchQuery.trim());
-
-      const statusParam = mapTabToStatusParam(selectedTab);
-
-      if (statusParam) params.set("status", statusParam);
 
       if (quickFilter?.category && quickFilter.category !== "all")
         params.set("category", quickFilter.category);
@@ -203,7 +204,8 @@ export default function CampaignPage() {
       if (advancedFilter.start)
         params.set("start", String(advancedFilter.start));
 
-      const url = `${API_URL}/api/requests/me?${params.toString()}`;
+      // Use new unified endpoint
+      const url = `${API_URL}/api/event-requests?${params.toString()}`;
       // Request fresh data (avoid cached 304 responses) so client-side filters
       // are applied to a current payload.
       const res = await fetch(url, { headers, cache: "no-store" });
@@ -211,23 +213,38 @@ export default function CampaignPage() {
 
       if (!res.ok) throw new Error(body.message || "Failed to fetch requests");
 
-      // body.data is array of requests (controllers return { success, data, pagination })
-      const data = body.data || [];
-      const list = Array.isArray(data) ? data : [];
-      const pagination = body.pagination || {};
-      const statusCounts = pagination.statusCounts || body.statusCounts || {};
+      // New response format: { success, data: { requests, count } }
+      const responseData = body.data || {};
+      const list = Array.isArray(responseData.requests) ? responseData.requests : 
+                   Array.isArray(body.data) ? body.data : 
+                   Array.isArray(body) ? body : [];
+      const totalCount = responseData.count ?? list.length;
 
       setRequests(list);
-      setTotalRequestsCount(pagination.totalRecords ?? list.length);
-      setIsServerPaged(Boolean(pagination.totalRecords));
+      setTotalRequestsCount(totalCount);
+      setIsServerPaged(totalCount > list.length);
+      
+      // Calculate status counts from the list (backend should provide this in future)
+      const statusCounts = {
+        approved: list.filter((r: any) => {
+          const status = r.status || r.Status || "";
+          return status.toLowerCase().includes("approv") || status.toLowerCase().includes("complete");
+        }).length,
+        pending: list.filter((r: any) => {
+          const status = r.status || r.Status || "";
+          return status.toLowerCase().includes("pending") || status.toLowerCase().includes("review");
+        }).length,
+        rejected: list.filter((r: any) => {
+          const status = r.status || r.Status || "";
+          return status.toLowerCase().includes("reject");
+        }).length,
+      };
+
       setRequestCounts({
-        all: pagination.totalRecords ?? list.length,
-        approved:
-          statusCounts.approved ?? statusCounts.Approved ?? statusCounts.APPROVED ?? 0,
-        pending:
-          statusCounts.pending ?? statusCounts.Pending ?? statusCounts.PENDING ?? 0,
-        rejected:
-          statusCounts.rejected ?? statusCounts.Rejected ?? statusCounts.REJECTED ?? 0,
+        all: totalCount,
+        approved: statusCounts.approved,
+        pending: statusCounts.pending,
+        rejected: statusCounts.rejected,
       });
     } catch (err: any) {
       console.error("Fetch requests error", err);
@@ -516,7 +533,7 @@ export default function CampaignPage() {
           undefined,
         Email: data.email || undefined,
         Phone_Number: data.contactNumber || undefined,
-        categoryType:
+        Category:
           eventType === "blood-drive"
             ? "BloodDrive"
             : eventType === "training"
@@ -525,17 +542,17 @@ export default function CampaignPage() {
       };
 
       // Category-specific mappings
-      if (eventPayload.categoryType === "Training") {
+      if (eventPayload.Category === "Training") {
         eventPayload.MaxParticipants = data.numberOfParticipants
           ? parseInt(data.numberOfParticipants, 10)
           : undefined;
         eventPayload.TrainingType = data.trainingType || undefined;
-      } else if (eventPayload.categoryType === "BloodDrive") {
+      } else if (eventPayload.Category === "BloodDrive") {
         eventPayload.Target_Donation = data.goalCount
           ? parseInt(data.goalCount, 10)
           : undefined;
         eventPayload.VenueType = data.venueType || undefined;
-      } else if (eventPayload.categoryType === "Advocacy") {
+      } else if (eventPayload.Category === "Advocacy") {
         eventPayload.TargetAudience =
           data.audienceType || data.targetAudience || undefined;
         eventPayload.Topic = data.topic || undefined;
@@ -545,51 +562,31 @@ export default function CampaignPage() {
           : undefined;
       }
 
-      // If a coordinator was selected (admin or stakeholder flow), include it
+      // If a coordinator was selected, include it for request assignment
       if (data.coordinator) {
-        // For createEventRequest controller we need coordinatorId in body (coordinatorId param)
-        eventPayload.MadeByCoordinatorID = data.coordinator;
+        eventPayload.coordinatorId = data.coordinator;
       }
 
       // If a stakeholder was selected, include it so server can assign and notify accordingly
       if (data.stakeholder) {
-        eventPayload.MadeByStakeholderID = data.stakeholder;
-        // include explicit stakeholder reference (some controllers/validators accept this key)
-        eventPayload.stakeholder = data.stakeholder;
+        eventPayload.stakeholderId = data.stakeholder;
       }
 
-      // Decide endpoint based on user role. Use getUserInfo helper for robust detection.
+      // Check user permissions to decide if we should create a direct event or a request
+      // Users with event.create permission can create direct events
+      // Others should create requests that go through approval workflow
       const info = getUserInfo();
-      const roleStr = String(
-        info.role || user?.staff_type || user?.role || "",
-      ).toLowerCase();
-      const isAdmin = !!(info.isAdmin || roleStr.includes("admin"));
-      const isCoordinator = !!roleStr.includes("coordinator");
+      const userAuthority = user?.authority || info.authority || 20;
+      const isSystemAdmin = userAuthority >= 80;
 
-      if (isAdmin || isCoordinator) {
-        // Admin/Coordinator -> immediate publish endpoint
-        const creatorId =
-          user?.Admin_ID ||
-          user?.Coordinator_ID ||
-          user?.id ||
-          user?.ID ||
-          null;
-        const creatorRole =
-          info.role ||
-          user?.staff_type ||
-          user?.role ||
-          (isAdmin ? "Admin" : isCoordinator ? "Coordinator" : null);
-
-        const body = {
-          creatorId,
-          creatorRole,
-          ...eventPayload,
-        };
-
-        const res = await fetch(`${API_URL}/api/events/direct`, {
+      // For system admins or users creating with coordinator assignment, try direct event creation
+      // Otherwise, create a request that goes through approval workflow
+      if (isSystemAdmin && !data.coordinator) {
+        // System admin creating direct event (no coordinator needed)
+        const res = await fetch(`${API_URL}/api/events`, {
           method: "POST",
           headers,
-          body: JSON.stringify(body),
+          body: JSON.stringify(eventPayload),
         });
         const resp = await res.json();
 
@@ -600,21 +597,16 @@ export default function CampaignPage() {
 
         return resp;
       } else {
-        // Stakeholder -> create request (needs coordinatorId)
-        if (!data.coordinator)
+        // Create request (goes through approval workflow)
+        // Coordinator assignment is required for stakeholders, optional for others
+        if (!data.coordinator && userAuthority < 60) {
           throw new Error("Coordinator is required for requests");
-        const stakeholderId =
-          user?.Stakeholder_ID || user?.StakeholderId || user?.id || null;
-        const body = {
-          coordinatorId: data.coordinator,
-          MadeByStakeholderID: stakeholderId,
-          ...eventPayload,
-        };
+        }
 
-        const res = await fetch(`${API_URL}/api/requests`, {
+        const res = await fetch(`${API_URL}/api/event-requests`, {
           method: "POST",
           headers,
-          body: JSON.stringify(body),
+          body: JSON.stringify(eventPayload),
         });
         const resp = await res.json();
 
@@ -661,18 +653,18 @@ export default function CampaignPage() {
 
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
+      const res = await fetch(`${API_URL}/api/event-requests/${requestId}`, {
         headers,
       });
       const body = await res.json();
 
       // debug: log raw response body from the API
-      debug("[Campaign] GET /api/requests/%s response body:", requestId, body);
+      debug("[Campaign] GET /api/event-requests/%s response body:", requestId, body);
       if (!res.ok)
         throw new Error(body.message || "Failed to fetch request details");
 
-      // controller returns { success, data: request }
-      const data = body.data || body.request || null;
+      // New API returns { success, data: { request } }
+      const data = body.data?.request || body.data || body.request || null;
 
       debug("[Campaign] parsed view request data:", data);
       setViewRequest(data || body);
@@ -707,14 +699,15 @@ export default function CampaignPage() {
 
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
+      const res = await fetch(`${API_URL}/api/event-requests/${requestId}`, {
         headers,
       });
       const body = await res.json();
 
       if (!res.ok)
         throw new Error(body.message || "Failed to fetch request details");
-      const data = body.data || body.request || null;
+      // New API returns { success, data: { request } }
+      const data = body.data?.request || body.data || body.request || null;
 
       setEditRequest(data || body);
       setEditModalOpen(true);
@@ -734,14 +727,27 @@ export default function CampaignPage() {
     rescheduledDateISO: string,
     note: string,
   ) => {
-    if (!reqObj) return;
+    console.log("[CampaignPage] handleRescheduleEvent called with:", {
+      reqObj,
+      currentDate,
+      rescheduledDateISO,
+      note,
+    });
+
+    if (!reqObj) {
+      console.error("[CampaignPage] handleRescheduleEvent: reqObj is null");
+      return;
+    }
+
     const requestId =
-      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.RequestId;
+      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.requestId;
+
+    console.log("[CampaignPage] Resolved requestId:", requestId);
 
     if (!requestId) {
+      console.error("[CampaignPage] Unable to determine request id for reschedule");
       setErrorModalMessage("Unable to determine request id for reschedule");
       setErrorModalOpen(true);
-
       return;
     }
 
@@ -756,35 +762,50 @@ export default function CampaignPage() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const body: any = {
-        action: "Rescheduled",
-        rescheduledDate: rescheduledDateISO,
+        action: "reschedule",
+        proposedDate: rescheduledDateISO,
         note: note,
       };
 
-      // include admin/coordinator identity if available (server should derive from token ideally)
-      if (user && user.id) body.adminId = user.id;
-      if (user && user.staff_type) body.adminRole = user.staff_type;
+      console.log("[CampaignPage] Sending reschedule request:", {
+        url: `${API_URL}/api/event-requests/${requestId}/actions`,
+        body,
+        headers: { ...headers, Authorization: token ? "Bearer ***" : undefined },
+      });
 
       const res = await fetch(
-        `${API_URL}/api/requests/${requestId}/admin-action`,
+        `${API_URL}/api/event-requests/${requestId}/actions`,
         {
           method: "POST",
           headers,
           body: JSON.stringify(body),
         },
       );
+
+      console.log("[CampaignPage] Reschedule response status:", res.status, res.statusText);
+
       const resp = await res.json();
+      console.log("[CampaignPage] Reschedule response body:", resp);
 
-      if (!res.ok)
-        throw new Error(resp.message || "Failed to reschedule request");
+      if (!res.ok) {
+        const errorMsg = resp.message || resp.errors?.join(", ") || "Failed to reschedule request";
+        console.error("[CampaignPage] Reschedule failed:", errorMsg, resp);
+        throw new Error(errorMsg);
+      }
 
+      console.log("[CampaignPage] Reschedule succeeded, refreshing requests list");
+      
       // refresh requests list to reflect updated date/status
       await fetchRequests();
 
+      console.log("[CampaignPage] Requests list refreshed");
+
       return resp;
     } catch (err: any) {
-      console.error("Reschedule error", err);
-      setErrorModalMessage(err?.message || "Failed to reschedule request");
+      console.error("[CampaignPage] Reschedule error caught:", err);
+      const errorMessage = err?.message || err?.errors?.join(", ") || "Failed to reschedule request";
+      console.error("[CampaignPage] Error message:", errorMessage);
+      setErrorModalMessage(errorMessage);
       setErrorModalOpen(true);
       throw err;
     }
@@ -794,7 +815,7 @@ export default function CampaignPage() {
   const handleCancelEvent = async (reqObj: any) => {
     if (!reqObj) return;
     const requestId =
-      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.RequestId;
+      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.requestId;
 
     if (!requestId) {
       setErrorModalMessage("Unable to determine request id for cancellation");
@@ -813,23 +834,10 @@ export default function CampaignPage() {
 
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      // Get coordinator ID from user or request
-      const coordinatorId =
-        user?.Coordinator_ID || user?.id || reqObj.coordinator_id;
-
-      if (!coordinatorId) {
-        setErrorModalMessage(
-          "Unable to determine coordinator for cancellation",
-        );
-        setErrorModalOpen(true);
-
-        return;
-      }
-
-      const res = await fetch(`${API_URL}/api/requests/${requestId}`, {
+      // Cancel request - no need for coordinator ID, backend validates permissions
+      const res = await fetch(`${API_URL}/api/event-requests/${requestId}`, {
         method: "DELETE",
         headers,
-        body: JSON.stringify({ coordinatorId }),
       });
       const resp = await res.json();
 
@@ -994,10 +1002,11 @@ export default function CampaignPage() {
               {/* Quick/Advanced filters are shown via toolbar dropdowns */}
 
               {paginatedRequests.map((req, index) => {
+                // New API returns event fields directly on request, not nested in event object
                 const event = req.event || {};
-                const title = event.Event_Title || event.title || "Untitled";
-                // Requestee name: check who actually created the request based on made_by_role
-                let requestee = req.createdByName || "Unknown";
+                const title = req.Event_Title || event.Event_Title || event.title || "Untitled";
+                // Requestee name: check who actually created the request (from requester field)
+                let requestee = req.requester?.name || req.createdByName || "Unknown";
                 let creatorDistrict = null;
 
                 // If creatorDistrict is still not set, try to get district based on stakeholder/coordinator presence
@@ -1022,6 +1031,8 @@ export default function CampaignPage() {
                 }
 
                 const rawCategory =
+                  req.Category ||
+                  req.category ||
                   event.Category ||
                   event.categoryType ||
                   event.category ||
@@ -1042,27 +1053,34 @@ export default function CampaignPage() {
                     .join(" ");
                 }
                 // Map status to Approved/Pending/Rejected/Cancelled
-                const statusRaw = event.Status || req.Status || "Pending";
-                const status = statusRaw.includes("Reject")
+                // New API uses 'status' field (lowercase), old API used 'Status' (uppercase)
+                const statusRaw = req.status || req.Status || event.Status || event.status || "pending-review";
+                const status = statusRaw.includes("reject") || statusRaw.includes("Reject")
                   ? "Rejected"
-                  : statusRaw.includes("Approved") ||
-                      statusRaw.includes("Complete") ||
-                      statusRaw.includes("Completed")
+                  : statusRaw.includes("approv") || statusRaw.includes("Approv") ||
+                      statusRaw.includes("complete") || statusRaw.includes("Complete") ||
+                      statusRaw.includes("completed") || statusRaw.includes("Completed")
                     ? "Approved"
-                    : statusRaw.includes("Cancel") ||
-                        statusRaw.includes("Cancelled")
+                    : statusRaw.includes("cancel") || statusRaw.includes("Cancel") ||
+                        statusRaw.includes("cancelled") || statusRaw.includes("Cancelled")
                       ? "Cancelled"
                       : "Pending";
 
-                const location = event.Location || event.location || "";
+                const location = req.Location || event.Location || event.location || "";
 
-                // Format date - prefer Start_Date and End_Date
-                const start: Date | undefined = event.Start_Date
-                  ? new Date(event.Start_Date)
-                  : undefined;
-                const end: Date | undefined = event.End_Date
-                  ? new Date(event.End_Date)
-                  : undefined;
+                // Format date - prefer Date or Start_Date from request, fallback to event
+                const start: Date | undefined = req.Date
+                  ? new Date(req.Date)
+                  : req.Start_Date
+                    ? new Date(req.Start_Date)
+                    : event.Start_Date
+                      ? new Date(event.Start_Date)
+                      : undefined;
+                const end: Date | undefined = req.End_Date
+                  ? new Date(req.End_Date)
+                  : event.End_Date
+                    ? new Date(event.End_Date)
+                    : undefined;
 
                 const formatDateRange = (s?: Date, e?: Date) => {
                   if (!s) return "";
@@ -1092,7 +1110,9 @@ export default function CampaignPage() {
 
                 const dateStr = start
                   ? formatDateRange(start, end)
-                  : event.date || "";
+                  : req.Date
+                    ? new Date(req.Date).toLocaleString()
+                    : event.date || "";
 
                 // Compute district display: use the creator's district (stakeholder or coordinator)
                 const makeOrdinal = (n: number | string) => {
@@ -1127,8 +1147,11 @@ export default function CampaignPage() {
                   } else {
                     displayDistrict = String(dn);
                   }
-                } else if (event.District || req.district) {
-                  displayDistrict = event.District || req.district || "";
+                } else if (req.district) {
+                  // district is an ObjectId reference, we'll need to resolve it via locations provider
+                  displayDistrict = req.district || "";
+                } else if (event.District) {
+                  displayDistrict = event.District || "";
                 }
 
                 return (

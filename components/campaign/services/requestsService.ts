@@ -6,38 +6,74 @@ const getToken = () =>
     ? localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token")
     : null;
 
+/**
+ * Perform an action on a request (accept, reject, reschedule, cancel)
+ * Uses the unified /api/event-requests/:id/actions endpoint
+ */
 export const performRequestAction = async (
   requestId: string,
-  actorType: "admin-action" | "coordinator-action" | "stakeholder-action",
-  action: "Accepted" | "Rejected" | "Rescheduled" | "Cancelled",
+  action: "accept" | "reject" | "reschedule" | "cancel",
   note?: string,
-  rescheduledDate?: string | null,
+  proposedDate?: string | null,
 ) => {
   const token = getToken();
   const headers: any = { "Content-Type": "application/json" };
 
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const body: any = { action, note: note || "" };
-  if (rescheduledDate) body.rescheduledDate = rescheduledDate;
+  const body: any = { action };
+  
+  // Only include note for reject and reschedule actions
+  // Backend validator only allows note for reject/reschedule, not for accept/cancel
+  if ((action === "reject" || action === "reschedule") && note) {
+    body.note = note;
+  }
+  
+  // For reschedule action, proposedDate is required by backend
+  if (action === "reschedule") {
+    if (!proposedDate) {
+      throw new Error("proposedDate is required for reschedule action");
+    }
+    body.proposedDate = proposedDate;
+  } else if (proposedDate) {
+    // For other actions, include proposedDate if provided (optional)
+    body.proposedDate = proposedDate;
+  }
+
+  console.log(`[performRequestAction] Sending ${action} action:`, {
+    requestId,
+    action,
+    hasNote: !!note,
+    hasProposedDate: !!body.proposedDate,
+    proposedDate: body.proposedDate,
+  });
 
   let res;
 
   if (token) {
     res = await fetchWithAuth(
-      `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/${actorType}`,
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
       { method: "POST", body: JSON.stringify(body) },
     );
   } else {
-    const legacyBody = { action, note: note || "", ...(rescheduledDate && { rescheduledDate }) };
     res = await fetch(
-      `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/${actorType}`,
-      { method: "POST", headers, body: JSON.stringify(legacyBody), credentials: "include" },
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
+      { method: "POST", headers, body: JSON.stringify(body), credentials: "include" },
     );
   }
 
   const resp = await res.json();
-  if (!res.ok) throw new Error(resp.message || `Failed to perform ${actorType}`);
+  
+  if (!res.ok) {
+    console.error(`[performRequestAction] ${action} failed:`, {
+      status: res.status,
+      statusText: res.statusText,
+      response: resp,
+    });
+    throw new Error(resp.message || resp.errors?.join(", ") || `Failed to perform action: ${action}`);
+  }
+
+  console.log(`[performRequestAction] ${action} succeeded:`, resp);
 
   try {
     window.dispatchEvent(new CustomEvent("unite:requests-changed", { detail: { requestId } }));
@@ -46,84 +82,67 @@ export const performRequestAction = async (
   return resp;
 };
 
+/**
+ * Confirm a reviewer's decision (unified for all roles)
+ * Uses the unified /api/event-requests/:id/actions endpoint with action: 'confirm'
+ */
+export const performConfirmAction = async (requestId: string, note?: string) => {
+  const token = getToken();
+  const headers: any = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  // Don't include note for confirm actions - backend validator doesn't allow it
+  const body: any = { action: "confirm" };
+
+  let res;
+  if (token) {
+    res = await fetchWithAuth(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  } else {
+    res = await fetch(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
+      { method: "POST", headers, body: JSON.stringify(body), credentials: "include" },
+    );
+  }
+
+  const resp = await res.json();
+  if (!res.ok) throw new Error(resp.message || "Failed to confirm decision");
+
+  try {
+    window.dispatchEvent(new CustomEvent("unite:requests-changed", { detail: { requestId } }));
+  } catch (e) {}
+
+  return resp;
+};
+
+/**
+ * Legacy function for backward compatibility - maps to performConfirmAction
+ * @deprecated Use performConfirmAction instead
+ */
 export const performStakeholderConfirm = async (requestId: string, action: "Accepted" | "Rejected") => {
-  const rawUser = typeof window !== "undefined" ? localStorage.getItem("unite_user") : null;
-  const parsedUser = rawUser ? JSON.parse(rawUser as string) : null;
-  const stakeholderId = parsedUser?.id || parsedUser?.Stakeholder_ID || parsedUser?.StakeholderId || parsedUser?.ID || null;
-
-  if (!stakeholderId) throw new Error("Unable to determine stakeholder id");
-
-  const token = getToken();
-  const headers: any = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const body: any = { stakeholderId, action };
-
-  let res;
-  if (token) {
-    res = await fetchWithAuth(
-      `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/stakeholder-confirm`,
-      { method: "POST", body: JSON.stringify(body) },
-    );
-  } else {
-    res = await fetch(
-      `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/stakeholder-confirm`,
-      { method: "POST", headers, body: JSON.stringify(body), credentials: "include" },
-    );
-  }
-
-  const resp = await res.json();
-  if (!res.ok) throw new Error(resp.message || "Failed to record stakeholder confirmation");
-
-  try {
-    window.dispatchEvent(new CustomEvent("unite:requests-changed", { detail: { requestId } }));
-  } catch (e) {}
-
-  return resp;
+  return performConfirmAction(requestId);
 };
 
+/**
+ * Legacy function for backward compatibility - maps to performConfirmAction
+ * @deprecated Use performConfirmAction instead
+ */
 export const performCoordinatorConfirm = async (requestId: string, action: "Accepted" | "Rejected") => {
-  const rawUser = typeof window !== "undefined" ? localStorage.getItem("unite_user") : null;
-  const parsedUser = rawUser ? JSON.parse(rawUser as string) : null;
-  const coordinatorId = parsedUser?.id || parsedUser?.Coordinator_ID || parsedUser?.CoordinatorId || parsedUser?.ID || null;
-
-  if (!coordinatorId) throw new Error("Unable to determine coordinator id");
-
-  const token = getToken();
-  const headers: any = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const body: any = { coordinatorId, action };
-
-  let res;
-  if (token) {
-    res = await fetchWithAuth(
-      `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/coordinator-confirm`,
-      { method: "POST", body: JSON.stringify(body) },
-    );
-  } else {
-    res = await fetch(
-      `${API_BASE}/api/requests/${encodeURIComponent(requestId)}/coordinator-confirm`,
-      { method: "POST", headers, body: JSON.stringify(body), credentials: "include" },
-    );
-  }
-
-  const resp = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(resp.message || "Failed to record coordinator confirmation");
-
-  try {
-    window.dispatchEvent(new CustomEvent("unite:requests-changed", { detail: { requestId } }));
-  } catch (e) {}
-
-  return resp;
+  return performConfirmAction(requestId);
 };
 
+/**
+ * Fetch request details by ID
+ * Uses the new /api/event-requests/:id endpoint
+ */
 export const fetchRequestDetails = async (requestId: string) => {
   const token = getToken();
   const headers: any = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const url = `${API_BASE}/api/requests/${encodeURIComponent(requestId)}`;
+  const url = `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}`;
 
   let res;
   if (token) {
@@ -137,10 +156,15 @@ export const fetchRequestDetails = async (requestId: string) => {
   }
 
   const body = await res.json().catch(() => ({}));
-  const data = body?.data || body?.request || body;
+  // Handle new response format: { success, data: { request } }
+  const data = body?.data?.request || body?.data || body?.request || body;
   return data;
 };
 
+/**
+ * Delete a request (hard delete, for cancelled/rejected requests only)
+ * Uses the new /api/event-requests/:id/delete endpoint
+ */
 export const deleteRequest = async (requestId: string) => {
   const token = getToken();
   const headers: any = { "Content-Type": "application/json" };
@@ -148,9 +172,9 @@ export const deleteRequest = async (requestId: string) => {
 
   let res;
   if (token) {
-    res = await fetchWithAuth(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/delete`, { method: "DELETE" });
+    res = await fetchWithAuth(`${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/delete`, { method: "DELETE" });
   } else {
-    res = await fetch(`${API_BASE}/api/requests/${encodeURIComponent(requestId)}/delete`, { method: "DELETE", headers, credentials: "include" });
+    res = await fetch(`${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/delete`, { method: "DELETE", headers, credentials: "include" });
   }
 
   const resp = await res.json();
