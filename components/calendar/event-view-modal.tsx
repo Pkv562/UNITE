@@ -171,27 +171,39 @@ export const EventViewModal: React.FC<EventViewModalProps> = ({
   const contactNumber =
     event.Phone_Number || event.PhoneNumber || event.contactNumber || "";
 
-  // Coordinator display: API may return coordinator with `name` or nested `staff` object
+  // Coordinator display: API may return coordinator with various name formats
+  // Backend returns coordinator with `fullName` property from getEventDetails endpoint
   let coordinatorLabel = "";
   const coord = event?.coordinator || request?.coordinator || null;
 
   if (coord) {
     if (typeof coord === "string") {
       coordinatorLabel = coord;
+    } else if (coord.fullName) {
+      // Primary: backend returns fullName from User model
+      coordinatorLabel = coord.fullName;
     } else if (coord.name) {
+      // Fallback: some API shapes use name
       coordinatorLabel = coord.name;
+    } else if (coord.firstName || coord.lastName) {
+      // Backend camelCase format: firstName and lastName
+      coordinatorLabel = [coord.firstName, coord.lastName]
+        .filter(Boolean)
+        .join(" ");
     } else if (coord.staff) {
+      // Nested staff object format
       const s = coord.staff;
-
       coordinatorLabel = [s.First_Name, s.Middle_Name, s.Last_Name]
         .filter(Boolean)
         .join(" ");
     } else if (coord.First_Name || coord.Last_Name) {
+      // Legacy format: First_Name, Middle_Name, Last_Name
       coordinatorLabel = [coord.First_Name, coord.Middle_Name, coord.Last_Name]
         .filter(Boolean)
         .join(" ");
     }
   } else if (request?.MadeByStakeholderID) {
+    // Fallback: if no coordinator object, use stakeholder ID
     coordinatorLabel = safe(request.MadeByStakeholderID);
   }
 
