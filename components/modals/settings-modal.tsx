@@ -17,6 +17,7 @@ import { useRoles, Role } from "@/hooks/useRoles";
 import RoleManagementTable from "@/components/settings/role-management-table";
 import RoleFormModal from "@/components/settings/role-form-modal";
 import LocationManagement from "@/components/settings/location-management";
+import NotificationSettings from "@/components/settings/notification-settings";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -82,16 +83,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
-      // Set initial tab based on available permissions
-      if (permissions.canAccessSettings) {
-        setActiveTab("general");
-      } else if (permissions.canEditRequesting) {
-        setActiveTab("requesting");
-      } else if (permissions.canEditLocation) {
-        setActiveTab("location");
-      } else if (permissions.canEditStaff) {
-        setActiveTab("staff");
-      }
+      // Set initial tab - General is now default for all users
+      setActiveTab("general");
     } else {
       document.body.style.overflow = "";
       // Reset role form state when modal closes
@@ -239,12 +232,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     </div>
   );
 
-  // Check if user has any settings access
-  const hasAnyAccess =
-    permissions.canAccessSettings ||
-    permissions.canEditRequesting ||
-    permissions.canEditLocation ||
-    permissions.canEditStaff;
+  // Check if user has any settings access (General tab is now accessible to all authenticated users)
+  const hasAnyAccess = true; // All authenticated users can access General tab for notification settings
 
   // Show loading state
   if (permissionsLoading || loading) {
@@ -295,18 +284,17 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   {/* Sidebar */}
                   <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-gray-200 p-4 md:p-6 bg-gray-50 md:bg-transparent shrink-0 flex-shrink-0">
                     <nav className="space-y-1">
-                      {permissions.canAccessSettings && (
-                        <button
-                          onClick={() => setActiveTab("general")}
-                          className={`w-full block rounded-md px-3 py-2 text-sm font-semibold text-center md:text-left transition-colors ${
-                            activeTab === "general"
-                              ? "bg-white md:bg-gray-100 border border-gray-200 text-gray-900 shadow-sm md:shadow-none"
-                              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                          }`}
-                        >
-                          General
-                        </button>
-                      )}
+                      {/* General tab is now accessible to all authenticated users */}
+                      <button
+                        onClick={() => setActiveTab("general")}
+                        className={`w-full block rounded-md px-3 py-2 text-sm font-semibold text-center md:text-left transition-colors ${
+                          activeTab === "general"
+                            ? "bg-white md:bg-gray-100 border border-gray-200 text-gray-900 shadow-sm md:shadow-none"
+                            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                        }`}
+                      >
+                        General
+                      </button>
                       {permissions.canEditRequesting && (
                         <button
                           onClick={() => setActiveTab("requesting")}
@@ -359,34 +347,54 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   {/* Right Content */}
                   <div className="flex-1 p-4 md:p-8 pb-10 md:pb-8 w-full min-w-0">
                     <div className="w-full min-h-[600px] max-w-none">
-                      {/* General Settings Tab */}
-                      {activeTab === "general" && permissions.canAccessSettings && (
+                      {/* General Settings Tab - Accessible to all users */}
+                      {activeTab === "general" && (
                         <section className="min-h-[600px] w-full">
                           <h3 className="text-base font-semibold text-gray-900 mb-6">
                             General Settings
                           </h3>
-                          <div className="divide-y divide-gray-200 w-full">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between py-4 gap-2 md:gap-0 w-full">
-                              <div className="flex-1 pr-0 md:pr-8">
-                                <h4 className="text-sm font-medium text-gray-900">
-                                  Notifications
-                                </h4>
-                                <p className="text-sm text-gray-500 mt-1 md:mt-0">
-                                  Enable or disable application notifications.
-                                </p>
-                              </div>
-                              <div className="w-full md:w-auto mt-2 md:mt-0">
-                                <Switch
-                                  isSelected={settings.notificationsEnabled}
-                                  onValueChange={(isSelected) =>
-                                    updateSettings({
-                                      notificationsEnabled: isSelected,
-                                    })
-                                  }
-                                  aria-label="Enable notifications"
-                                />
+                          
+                          {/* Admin-only System Settings Section */}
+                          {permissions.canAccessSettings && (
+                            <div className="mb-8 pb-8 border-b border-gray-200">
+                              <h4 className="text-sm font-medium text-gray-900 mb-4">
+                                System Settings
+                              </h4>
+                              <div className="divide-y divide-gray-200 w-full">
+                                <div className="flex flex-col md:flex-row md:items-center justify-between py-4 gap-2 md:gap-0 w-full">
+                                  <div className="flex-1 pr-0 md:pr-8">
+                                    <h4 className="text-sm font-medium text-gray-900">
+                                      Notifications
+                                    </h4>
+                                    <p className="text-sm text-gray-500 mt-1 md:mt-0">
+                                      Enable or disable application notifications system-wide.
+                                    </p>
+                                  </div>
+                                  <div className="w-full md:w-auto mt-2 md:mt-0">
+                                    <Switch
+                                      isSelected={settings.notificationsEnabled}
+                                      onValueChange={(isSelected) =>
+                                        updateSettings({
+                                          notificationsEnabled: isSelected,
+                                        })
+                                      }
+                                      aria-label="Enable notifications"
+                                    />
+                                  </div>
+                                </div>
                               </div>
                             </div>
+                          )}
+
+                          {/* Notification Settings Section - Available to all users */}
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-900 mb-4">
+                              Notification Preferences
+                            </h4>
+                            <p className="text-sm text-gray-500 mb-6">
+                              Configure your personal email notification preferences.
+                            </p>
+                            <NotificationSettings isOpen={isOpen && activeTab === "general"} />
                           </div>
                         </section>
                       )}
