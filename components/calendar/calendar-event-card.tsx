@@ -94,35 +94,8 @@ const CalendarEventCard: React.FC<CalendarEventCardProps> = ({
   },
   color = "#3b82f6",
 }) => {
-  // Debug logging to trace data flow
-  React.useEffect(() => {
-    if (process.env.NODE_ENV === "development") {
-      console.log("[CalendarEventCard] Rendering with props:", {
-        title,
-        ownerName,
-        startTime,
-        endTime,
-        category,
-        province,
-        district,
-        municipality,
-        location,
-        countType,
-        count,
-        hasRawEvent: !!rawEvent,
-        eventId: rawEvent?.Event_ID || rawEvent?.EventId,
-      });
-    }
-  }, [title, ownerName, startTime, category, province, district, municipality, location, countType, count, rawEvent]);
-
   // Validate required props
   if (!title || !rawEvent) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn("[CalendarEventCard] Missing required props:", {
-        hasTitle: !!title,
-        hasRawEvent: !!rawEvent,
-      });
-    }
     return (
       <div className="bg-white rounded-lg border border-gray-200 p-2 sm:p-3">
         <div className="text-xs text-gray-500">Invalid event data</div>

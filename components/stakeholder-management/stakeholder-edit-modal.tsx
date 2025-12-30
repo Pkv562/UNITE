@@ -102,7 +102,7 @@ export default function EditStakeholderModal({
             setCurrentUserAuthority(authority)
           }
         } catch (error) {
-          console.error('Failed to fetch current user data:', error)
+          // Failed to fetch current user data
         }
       }
       
@@ -117,25 +117,11 @@ export default function EditStakeholderModal({
         try {
           const stakeholderId = stakeholder._id || stakeholder.id || stakeholder.Stakeholder_ID || stakeholder.StakeholderId
           if (!stakeholderId) {
-            console.error('[EditStakeholderModal] No stakeholder ID available')
             return
           }
-
-          console.log('[EditStakeholderModal] Loading edit context for stakeholder:', stakeholderId)
           
           // Fetch complete edit context from dedicated endpoint
           const editContext = await getStakeholderEditContext(String(stakeholderId))
-          
-          console.log('[EditStakeholderModal] Edit context loaded:', {
-            hasRole: !!editContext.role,
-            hasOrganization: !!editContext.organization,
-            hasLocation: !!editContext.location,
-            editPermissions: editContext.editPermissions,
-            hookLoading: hookLoading,
-            municipalityOptionsCount: municipalityOptions.length,
-            organizationOptionsCount: organizationOptions.length,
-            isSystemAdmin: isSystemAdmin
-          })
           
           // Set all form fields directly from edit context - no complex extraction needed
           setFirstName(editContext.firstName || "")
@@ -193,9 +179,7 @@ export default function EditStakeholderModal({
           setStakeholderData(editContext)
           
         } catch (error: any) {
-          console.error('[EditStakeholderModal] Failed to load edit context:', error)
           // Fallback: try to use stakeholder prop data
-          console.log('[EditStakeholderModal] Falling back to stakeholder prop data')
           setStakeholderData(stakeholder)
           
           // Try to extract basic fields from prop as fallback
@@ -262,16 +246,10 @@ export default function EditStakeholderModal({
               
               // Deduplicate provinces before setting
               const uniqueProvinces = deduplicateById(provinces)
-              console.log('[EditStakeholderModal] Loaded provinces:', {
-                count: uniqueProvinces.length,
-                selectedProvince: selectedProvince
-              })
               setProvinceOptions(uniqueProvinces)
-            } else {
-              console.error('[EditStakeholderModal] Failed to fetch provinces:', res.status, res.statusText)
             }
           } catch (e) {
-            console.error('[EditStakeholderModal] Error fetching provinces:', e)
+            // Error fetching provinces
           }
         }
         
@@ -286,7 +264,6 @@ export default function EditStakeholderModal({
   useEffect(() => {
     const isAdmin = (currentUserAuthority !== null && currentUserAuthority >= 80) || isSystemAdmin
     if (isOpen && isAdmin && selectedProvince) {
-      console.log('[EditStakeholderModal] Fetching districts for province:', selectedProvince)
       const fetchDistricts = async () => {
         try {
           const base = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "")
@@ -309,17 +286,10 @@ export default function EditStakeholderModal({
             
             // Deduplicate districts before setting
             const uniqueDistricts = deduplicateById(districts)
-            console.log('[EditStakeholderModal] Loaded districts:', {
-              count: uniqueDistricts.length,
-              selectedDistrict: selectedDistrict
-            })
-            
             setDistrictOptions(uniqueDistricts)
-          } else {
-            console.error('[EditStakeholderModal] Failed to fetch districts:', res.status, res.statusText)
           }
         } catch (e) {
-          console.error('[EditStakeholderModal] Error fetching districts:', e)
+          // Error fetching districts
         }
       }
       fetchDistricts()
@@ -357,28 +327,10 @@ export default function EditStakeholderModal({
               return String(muniId) === String(selectedMunicipality)
             })
             if (!alreadyInList) {
-              const parentId = typeof currentMuni.parent === 'object' 
-                ? (currentMuni.parent?._id || (currentMuni.parent as any)?.id)
-                : currentMuni.parent
-              console.log('[EditStakeholderModal] Adding current municipality to filtered list (district mismatch):', {
-                municipalityId: selectedMunicipality,
-                municipalityName: currentMuni.name,
-                municipalityParent: parentId,
-                selectedDistrict: selectedDistrict
-              })
               filtered.push(currentMuni)
             }
-          } else {
-            console.warn('[EditStakeholderModal] Current municipality not found in options:', selectedMunicipality)
           }
         }
-        
-        console.log('[EditStakeholderModal] Filtered municipalities for district:', {
-          districtId: selectedDistrict,
-          filteredCount: filtered.length,
-          selectedMunicipality: selectedMunicipality,
-          municipalityInList: selectedMunicipality ? filtered.some((m: any) => String(m._id || m.id) === String(selectedMunicipality)) : false
-        })
         
         setFilteredMunicipalityOptions(filtered)
       } else if (selectedMunicipality) {
@@ -388,11 +340,9 @@ export default function EditStakeholderModal({
           return String(muniId) === String(selectedMunicipality)
         })
         if (currentMuni) {
-          console.log('[EditStakeholderModal] No district selected, showing current municipality only:', currentMuni.name)
           setFilteredMunicipalityOptions([currentMuni])
         } else {
           // Municipality not found in options yet, show all (will update when options load)
-          console.log('[EditStakeholderModal] Municipality not found in options yet, showing all')
           setFilteredMunicipalityOptions(uniqueMunicipalityOptions)
         }
       } else {
@@ -423,26 +373,15 @@ export default function EditStakeholderModal({
         const orgId = stakeholderData.organization._id
         const orgExists = uniqueOrganizationOptions.some(o => String(o._id) === String(orgId))
         if (orgExists) {
-          console.log('[EditStakeholderModal] Setting organizationId from edit context:', {
-            orgId: orgId,
-            orgName: stakeholderData.organization.name
-          })
           setOrganizationId(orgId)
           if (stakeholderData.organization.name) {
             setOrganization(stakeholderData.organization.name)
           }
         } else {
-          console.warn('[EditStakeholderModal] Organization from edit context not found in options:', {
-            orgId: orgId,
-            orgName: stakeholderData.organization.name,
-            availableOptions: uniqueOrganizationOptions.map(o => ({ id: o._id, name: o.name }))
-          })
-          // For admins, if org not in options, this is unexpected - log it
           // For coordinators, try to use first available
           if (!canChooseOrganization && uniqueOrganizationOptions.length > 0) {
             const firstOrg = uniqueOrganizationOptions[0]
             if (firstOrg._id) {
-              console.log('[EditStakeholderModal] Using first available organization:', firstOrg._id)
               setOrganizationId(String(firstOrg._id))
               if (firstOrg.name) {
                 setOrganization(firstOrg.name)
@@ -454,15 +393,10 @@ export default function EditStakeholderModal({
         // Verify existing organizationId exists in options
         const orgExists = uniqueOrganizationOptions.some(o => String(o._id) === String(organizationId))
         if (!orgExists) {
-          console.warn('[EditStakeholderModal] Organization ID not found in options:', {
-            orgId: organizationId,
-            availableOptions: uniqueOrganizationOptions.map(o => ({ id: o._id, name: o.name }))
-          })
           // For coordinators, if org not in options, try to use first available
           if (!canChooseOrganization && uniqueOrganizationOptions.length > 0) {
             const firstOrg = uniqueOrganizationOptions[0]
             if (firstOrg._id) {
-              console.log('[EditStakeholderModal] Using first available organization:', firstOrg._id)
               setOrganizationId(String(firstOrg._id))
               if (firstOrg.name) {
                 setOrganization(firstOrg.name)
@@ -498,42 +432,6 @@ export default function EditStakeholderModal({
     }
     return uniqueMunicipalityOptions
   }, [currentUserAuthority, isSystemAdmin, uniqueFilteredMunicipalityOptions, uniqueMunicipalityOptions])
-
-  // Diagnostic logging for field states
-  useEffect(() => {
-    if (isOpen) {
-      const isAdmin = (currentUserAuthority !== null && currentUserAuthority >= 80) || isSystemAdmin
-      console.log('[EditStakeholderModal] Field States Summary:', {
-        authority: currentUserAuthority,
-        isAdmin: isAdmin,
-        isCoordinator: currentUserAuthority !== null && currentUserAuthority >= 60 && currentUserAuthority < 80,
-        canChooseMunicipality,
-        canChooseOrganization,
-        isSystemAdmin,
-        hookLoading,
-        province: province || 'not set',
-        district: district || 'not set',
-        selectedProvince: selectedProvince || 'not set',
-        selectedDistrict: selectedDistrict || 'not set',
-        selectedMunicipality: selectedMunicipality || 'not set',
-        organizationId: organizationId || 'not set',
-        organization: organization || 'not set',
-        roleOptionsCount: roleOptions.length,
-        municipalityOptionsCount: municipalityOptions.length,
-        filteredMunicipalityOptionsCount: filteredMunicipalityOptions.length,
-        barangayOptionsCount: barangayOptions.length,
-        organizationOptionsCount: organizationOptions.length,
-        provinceOptionsCount: provinceOptions.length,
-        districtOptionsCount: districtOptions.length,
-        selectedRole: selectedRole || 'none',
-        stakeholderData: stakeholderData ? {
-          hasOrganization: !!(stakeholderData.organization || stakeholderData.organizationId || stakeholderData.organizations),
-          hasLocations: !!stakeholderData.locations,
-          hasRoles: !!(stakeholderData.roles && Array.isArray(stakeholderData.roles))
-        } : null
-      } as any);
-    }
-  }, [isOpen, hookLoading, canChooseMunicipality, canChooseOrganization, isSystemAdmin, currentUserAuthority, province, district, selectedProvince, selectedDistrict, roleOptions.length, municipalityOptions.length, filteredMunicipalityOptions.length, barangayOptions.length, organizationOptions.length, provinceOptions.length, districtOptions.length, selectedRole, selectedMunicipality, selectedBarangay, organizationId, organization, stakeholderData]);
 
   const handleSave = async () => {
     if (!stakeholder && !stakeholderData) return
@@ -789,6 +687,7 @@ export default function EditStakeholderModal({
                   Role
                 </label>
                 <Select
+                  aria-label="Role"
                   placeholder="Select Role"
                   selectedKeys={selectedRole ? new Set([selectedRole]) : new Set()}
                   isDisabled={hookLoading || !((currentUserAuthority !== null && currentUserAuthority >= 80) || isSystemAdmin)}
@@ -831,6 +730,7 @@ export default function EditStakeholderModal({
               </label>
               {((currentUserAuthority !== null && currentUserAuthority >= 80) || isSystemAdmin) ? (
                 <Select
+                  aria-label="Province"
                   placeholder="Select Province"
                   selectedKeys={selectedProvince ? new Set([selectedProvince]) : new Set()}
                   isDisabled={hookLoading}
@@ -877,6 +777,7 @@ export default function EditStakeholderModal({
               </label>
               {((currentUserAuthority !== null && currentUserAuthority >= 80) || isSystemAdmin) ? (
                 <Select
+                  aria-label="District"
                   placeholder={selectedProvince ? "Select District" : "Select Province first"}
                   selectedKeys={selectedDistrict ? new Set([selectedDistrict]) : new Set()}
                   isDisabled={hookLoading || !selectedProvince}
@@ -945,6 +846,7 @@ export default function EditStakeholderModal({
                   Municipality <span className="text-red-500">*</span>
                 </label>
                 <Select
+                  aria-label="Municipality"
                   isRequired
                   placeholder={
                     (((currentUserAuthority !== null && currentUserAuthority >= 80) || isSystemAdmin) && selectedDistrict)
@@ -1016,7 +918,7 @@ export default function EditStakeholderModal({
                             }
                           }
                         } catch (e) {
-                          console.error('Failed to update location from municipality:', e)
+                          // Failed to update location from municipality
                         }
                       }
                       updateLocationFromMunicipality()
@@ -1079,6 +981,7 @@ export default function EditStakeholderModal({
                   Barangay <span className="text-gray-500 text-xs">(Optional)</span>
                 </label>
                 <Select
+                  aria-label="Barangay"
                   placeholder={hookLoading ? "Loading barangays..." : barangayOptions.length === 0 ? "No barangays available" : "Select Barangay (Optional)"}
                   selectedKeys={selectedBarangay ? new Set([selectedBarangay]) : new Set()}
                   isDisabled={hookLoading || barangayOptions.length === 0}
@@ -1107,6 +1010,7 @@ export default function EditStakeholderModal({
               </label>
               {canChooseOrganization || (currentUserAuthority !== null && currentUserAuthority >= 60 && currentUserAuthority < 80 && organizationOptions.length > 1) || ((currentUserAuthority !== null && currentUserAuthority >= 80) || isSystemAdmin) ? (
                 <Select
+                  aria-label="Organization"
                   placeholder="Select Organization"
                   selectedKeys={organizationId ? new Set([organizationId]) : new Set()}
                   isDisabled={hookLoading}

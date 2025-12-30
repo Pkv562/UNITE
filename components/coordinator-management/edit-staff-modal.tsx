@@ -550,7 +550,7 @@ export default function EditStaffModal({
                     <div className="space-y-2">
                       {currentRoles.map((role) => (
                         <div
-                          key={role.id}
+                          key={role._id || role.id || `role-${role.code || role.name}`}
                           className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200"
                         >
                           <div>

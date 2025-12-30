@@ -86,16 +86,6 @@ export default function StakeholderTable({
 }: StakeholderTableProps) {
   const [, /*unused*/ setUnused] = useState(false);
   
-  // Debug log for permission check
-  if (isRequests || (coordinators.length > 0 && (coordinators[0] as any)?._isRequest)) {
-    console.log('[StakeholderTable] Permission check:', {
-      canApproveReject,
-      hasOnAcceptRequest: !!onAcceptRequest,
-      hasOnRejectRequest: !!onRejectRequest,
-      isRequests,
-      coordinatorsCount: coordinators.length
-    });
-  }
 
   const displayValue = (v: any, fallback = "—") => {
     if (v === null || v === undefined) return fallback;

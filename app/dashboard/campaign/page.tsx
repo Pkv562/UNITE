@@ -6,6 +6,7 @@ import { Modal } from "@heroui/modal";
 import { Spinner } from "@heroui/spinner";
 
 import { getUserInfo } from "../../../utils/getUserInfo";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import MobileNav from "@/components/tools/mobile-nav";
 
 import Topbar from "@/components/layout/topbar";
@@ -47,6 +48,10 @@ export default function CampaignPage() {
   const [selectedTab, setSelectedTab] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 6; // show max 6 requests per page
+  
+  // Fetch current user from API
+  const { user: currentUser } = useCurrentUser();
+  
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
   const [quickFilter, setQuickFilter] = useState<{
@@ -413,51 +418,24 @@ export default function CampaignPage() {
         // ignore calendar load failures
       }
     })();
-    try {
-      const raw = localStorage.getItem("unite_user");
-
-      if (raw) {
-        const u = JSON.parse(raw);
-        const first =
-          u.First_Name ||
-          u.First_Name ||
-          u.first_name ||
-          u.FirstName ||
-          u.firstName ||
-          u.First ||
-          "";
-        const middle =
-          u.Middle_Name ||
-          u.MiddleName ||
-          u.middle_name ||
-          u.middleName ||
-          u.Middle ||
-          "";
-        const last =
-          u.Last_Name ||
-          u.LastName ||
-          u.last_name ||
-          u.lastName ||
-          u.Last ||
-          "";
-        const parts = [first, middle, last]
-          .map((p: any) => (p || "").toString().trim())
-          .filter(Boolean);
-        const full = parts.join(" ");
-        const email =
-          u.Email || u.email || u.Email_Address || u.emailAddress || "";
-
-        if (full) setCurrentUserName(full);
-        else if (u.name) setCurrentUserName(u.name);
-        if (email) setCurrentUserEmail(email);
-      }
-    } catch (err) {
-      // ignore malformed localStorage entry
-    }
-
     // Mark initial load as done after setting states
     setInitialLoadDone(true);
   }, []);
+
+  // Update display name and email from API user data
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.fullName) {
+        setCurrentUserName(currentUser.fullName);
+      } else if (currentUser.firstName || currentUser.lastName) {
+        const nameParts = [currentUser.firstName, currentUser.middleName, currentUser.lastName].filter(Boolean);
+        setCurrentUserName(nameParts.join(" ") || "unite user");
+      }
+      if (currentUser.email) {
+        setCurrentUserEmail(currentUser.email);
+      }
+    }
+  }, [currentUser]);
 
   // reset to first page whenever filters/search change
   useEffect(() => {
@@ -1089,8 +1067,8 @@ export default function CampaignPage() {
 
       {/* Topbar Component */}
       <Topbar
-        userEmail={currentUserEmail || "bmc@gmail.com"}
-        userName={currentUserName || "Bicol Medical Center"}
+        userEmail={currentUserEmail || "unite@health.tech"}
+        userName={currentUserName || "unite user"}
         onSearch={handleSearch}
         onUserClick={handleUserClick}
       />

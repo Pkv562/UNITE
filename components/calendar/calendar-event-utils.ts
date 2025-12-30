@@ -90,15 +90,6 @@ export const extractEventOwner = (
     event.Email ||
     "Coordinator";
 
-  if (process.env.NODE_ENV === "development") {
-    console.log("[extractEventOwner] Extracted owner name:", {
-      ownerName,
-      hasDetailedEvent: !!detailedEvent,
-      hasStakeholder: !!detailedEvent?.stakeholder,
-      hasCoordinator: !!detailedEvent?.coordinator,
-    });
-  }
-
   return ownerName;
 };
 
@@ -154,17 +145,6 @@ export const resolveEventLocations = (
   provinceName = provinceName && provinceName !== "Unknown Province" ? provinceName : null;
   districtName = districtName && districtName !== "Unknown District" ? districtName : null;
   municipalityName = municipalityName && municipalityName !== "Unknown Municipality" ? municipalityName : null;
-
-  if (process.env.NODE_ENV === "development") {
-    console.log("[resolveEventLocations] Resolved locations:", {
-      provinceId,
-      districtId,
-      municipalityId,
-      provinceName,
-      districtName,
-      municipalityName,
-    });
-  }
 
   return {
     province: provinceName,
@@ -254,19 +234,6 @@ export const extractCategoryData = (
   } else {
     countType = "Details";
     count = "View event";
-  }
-
-  if (process.env.NODE_ENV === "development") {
-    console.log("[extractCategoryData] Extracted category data:", {
-      category,
-      countType,
-      count,
-      targetDonation,
-      maxParticipants,
-      expectedAudience,
-      eventCategoryData: event.categoryData,
-      detailedEventCategoryData: detailedEvent?.categoryData,
-    });
   }
 
   return { countType, count };
@@ -393,18 +360,6 @@ export const transformEventData = (
   const category = determineEventCategory(rawCat);
   const categoryLabel = getCategoryLabel(category);
 
-  // Debug logging for category resolution
-  if (process.env.NODE_ENV === "development") {
-    console.log("[transformEventData] Category resolution:", {
-      rawCat,
-      category,
-      categoryLabel,
-      eventCategory: event.category,
-      eventCategoryCapital: event.Category,
-      detailedEventCategory: detailedEvent?.category,
-    });
-  }
-
   // Extract category-specific data
   const categoryData = extractCategoryData(event, detailedEvent, category);
 
@@ -426,21 +381,6 @@ export const transformEventData = (
 
   // Get color
   const color = getCategoryColor(category);
-
-  if (process.env.NODE_ENV === "development") {
-    console.log("[transformEventData] Transformed event:", {
-      title,
-      ownerName,
-      startTime,
-      endTime,
-      category,
-      locations,
-      location,
-      categoryData,
-      color,
-      hasDetailedEvent: !!detailedEvent,
-    });
-  }
 
   return {
     title,

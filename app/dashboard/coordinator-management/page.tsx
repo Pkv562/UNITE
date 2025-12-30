@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getUserInfo } from "../../../utils/getUserInfo";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useCoordinatorManagement } from "@/hooks/useCoordinatorManagement";
 import Topbar from "@/components/layout/topbar";
 import MobileNav from "@/components/tools/mobile-nav";
@@ -26,9 +27,12 @@ export default function CoordinatorManagement() {
   } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
+  // Fetch current user from API
+  const { user: currentUser } = useCurrentUser();
+  
   const [userInfo, setUserInfo] = useState<any | null>(null);
-  const [displayName, setDisplayName] = useState("Bicol Medical Center");
-  const [displayEmail, setDisplayEmail] = useState("bmc@gmail.com");
+  const [displayName, setDisplayName] = useState("unite user");
+  const [displayEmail, setDisplayEmail] = useState("unite@health.tech");
 
   // Use the coordinator management hook
   const {
@@ -56,13 +60,23 @@ export default function CoordinatorManagement() {
     getAllowedStaffTypesForCurrentUser,
   } = useCoordinatorManagement();
 
-  // Get user info for display
+  // Update display name and email from API user data
   useEffect(() => {
+    if (currentUser) {
+      if (currentUser.fullName) {
+        setDisplayName(currentUser.fullName);
+      } else if (currentUser.firstName || currentUser.lastName) {
+        const nameParts = [currentUser.firstName, currentUser.middleName, currentUser.lastName].filter(Boolean);
+        setDisplayName(nameParts.join(" ") || "unite user");
+      }
+      if (currentUser.email) {
+        setDisplayEmail(currentUser.email);
+      }
+    }
+    // Also keep getUserInfo for backward compatibility
     const info = getUserInfo();
     setUserInfo(info);
-    setDisplayName(info?.displayName || info?.raw?.First_Name || "Bicol Medical Center");
-    setDisplayEmail(info?.email || info?.raw?.Email || "bmc@gmail.com");
-  }, []);
+  }, [currentUser]);
 
   // Detect mobile viewport
   useEffect(() => {

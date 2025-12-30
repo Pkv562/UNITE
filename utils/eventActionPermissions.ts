@@ -57,29 +57,9 @@ function getUserId(): string | null {
   
   try {
     const rawUser = localStorage.getItem('unite_user');
-    console.log('[eventActionPermissions] getUserId - rawUser exists:', !!rawUser);
     
     if (rawUser) {
       const user = JSON.parse(rawUser);
-      console.log('[eventActionPermissions] getUserId - user object:', {
-        hasUser: !!user,
-        userKeys: user ? Object.keys(user).slice(0, 30) : [],
-        _id: user?._id,
-        id: user?.id,
-        User_ID: user?.User_ID,
-        userId: user?.userId,
-        ID: user?.ID,
-        allIdFields: {
-          _id: user?._id,
-          id: user?.id,
-          User_ID: user?.User_ID,
-          userId: user?.userId,
-          ID: user?.ID,
-          Admin_ID: user?.Admin_ID,
-          Coordinator_ID: user?.Coordinator_ID,
-          Stakeholder_ID: user?.Stakeholder_ID,
-        },
-      });
       
       const userId = 
         user?._id || 
@@ -90,38 +70,26 @@ function getUserId(): string | null {
         null;
       
       if (userId) {
-        console.log('[eventActionPermissions] getUserId - found userId:', userId);
         return String(userId);
       }
     }
     
     // Fallback: try to get user ID from JWT token
-    console.log('[eventActionPermissions] getUserId - trying JWT token fallback...');
     const token = localStorage.getItem('unite_token') || sessionStorage.getItem('unite_token');
     if (token) {
       try {
         const decoded = decodeJwt(token);
-        console.log('[eventActionPermissions] getUserId - JWT decoded:', {
-          hasDecoded: !!decoded,
-          decodedKeys: decoded ? Object.keys(decoded).slice(0, 10) : [],
-          id: decoded?.id,
-          userId: decoded?.userId,
-          _id: decoded?._id,
-        });
         const tokenUserId = decoded?.id || decoded?.userId || decoded?._id || null;
         if (tokenUserId) {
-          console.log('[eventActionPermissions] getUserId - found userId from JWT:', tokenUserId);
           return String(tokenUserId);
         }
       } catch (e) {
-        console.warn('[eventActionPermissions] getUserId - JWT decode failed:', e);
+        // JWT decode failed, continue to return null
       }
     }
     
-    console.warn('[eventActionPermissions] getUserId - no userId found');
     return null;
   } catch (e) {
-    console.error('[eventActionPermissions] getUserId - error:', e);
     return null;
   }
 }
@@ -161,13 +129,6 @@ function extractLocationId(event: any): string | null {
 function extractRequestId(event: any): string | null {
   if (!event) return null;
   
-  console.log('[eventActionPermissions] extractRequestId - checking event:', {
-    hasEvent: !!event,
-    eventKeys: Object.keys(event || {}).slice(0, 30),
-    hasRequest: !!event.request,
-    requestKeys: event.request ? Object.keys(event.request).slice(0, 20) : [],
-  });
-  
   // Try multiple possible locations for request ID
   const requestId =
     event.request?.Request_ID ||
@@ -189,19 +150,6 @@ function extractRequestId(event: any): string | null {
     event.raw?.RequestId ||
     null;
   
-  console.log('[eventActionPermissions] extractRequestId result:', {
-    requestId,
-    checkedFields: {
-      'event.request.Request_ID': event.request?.Request_ID,
-      'event.request.RequestId': event.request?.RequestId,
-      'event.request.id': event.request?.id,
-      'event.Request_ID': event.Request_ID,
-      'event.RequestId': event.RequestId,
-      'event.requestId': event.requestId,
-      'event.request_id': event.request_id,
-    },
-  });
-  
   return requestId ? String(requestId) : null;
 }
 
@@ -217,7 +165,6 @@ async function fetchRequestIdByEventId(eventId: string): Promise<string | null> 
         : null;
     
     if (!token) {
-      console.warn('[eventActionPermissions] No token for fetching request ID');
       return null;
     }
     
@@ -227,18 +174,12 @@ async function fetchRequestIdByEventId(eventId: string): Promise<string | null> 
     };
     
     // Try to get event details which includes request info
-    console.log('[eventActionPermissions] Fetching event details to find request ID:', {
-      url: `${API_BASE}/api/events/${encodeURIComponent(eventId)}`,
-      eventId,
-    });
-    
     const response = await fetch(`${API_BASE}/api/events/${encodeURIComponent(eventId)}`, {
       headers,
       credentials: 'include',
     });
     
     if (!response.ok) {
-      console.warn(`[eventActionPermissions] Failed to fetch event details: ${response.status}`);
       return null;
     }
     
@@ -254,15 +195,8 @@ async function fetchRequestIdByEventId(eventId: string): Promise<string | null> 
       eventData?.RequestId ||
       null;
     
-    console.log('[eventActionPermissions] Request ID from event details:', {
-      requestId,
-      hasRequest: !!eventData?.request,
-      requestKeys: eventData?.request ? Object.keys(eventData.request) : [],
-    });
-    
     return requestId ? String(requestId) : null;
   } catch (error) {
-    console.error('[eventActionPermissions] Error fetching request ID:', error);
     return null;
   }
 }
@@ -278,7 +212,6 @@ function getUserPermissionsFromStorage(): Array<{ resource: string; actions: str
   try {
     const rawUser = localStorage.getItem('unite_user');
     if (!rawUser) {
-      console.log('[eventActionPermissions] getUserPermissionsFromStorage - no user in localStorage');
       return [];
     }
     
@@ -293,20 +226,12 @@ function getUserPermissionsFromStorage(): Array<{ resource: string; actions: str
       null;
     
     if (!permissionsRaw) {
-      console.log('[eventActionPermissions] getUserPermissionsFromStorage - no permissions found');
       return [];
     }
-    
-    console.log('[eventActionPermissions] getUserPermissionsFromStorage - raw permissions:', {
-      type: typeof permissionsRaw,
-      value: permissionsRaw,
-    });
     
     // Handle string format: "event.create,read,update" or "event.create,read,update,request.reschedule"
     // Format: resource.action1,action2,action3 where actions without dots belong to the last resource
     if (typeof permissionsRaw === 'string') {
-      console.log('[eventActionPermissions] getUserPermissionsFromStorage - parsing string format...');
-      
       const permissionMap = new Map<string, Set<string>>();
       let currentResource: string | null = null;
       
@@ -340,24 +265,16 @@ function getUserPermissionsFromStorage(): Array<{ resource: string; actions: str
         actions: Array.from(actions),
       }));
       
-      console.log('[eventActionPermissions] getUserPermissionsFromStorage - parsed from string:', permissionsArray);
       return permissionsArray;
     }
     
     // Handle array format: [{ resource: 'event', actions: ['create', 'read', 'update'] }]
     if (Array.isArray(permissionsRaw)) {
-      console.log('[eventActionPermissions] getUserPermissionsFromStorage - permissions is array:', permissionsRaw);
       return permissionsRaw;
     }
     
-    console.warn('[eventActionPermissions] getUserPermissionsFromStorage - unknown permissions format:', {
-      type: typeof permissionsRaw,
-      value: permissionsRaw,
-    });
-    
     return [];
   } catch (e) {
-    console.error('[eventActionPermissions] Error getting user permissions from storage:', e);
     return [];
   }
 }
@@ -377,15 +294,6 @@ function mapPermissionsToActions(
   const isApproved = normalizedStatus.includes('approve');
   const isCancelled = normalizedStatus.includes('cancel');
   const isCompleted = normalizedStatus.includes('complete');
-  
-  console.log('[eventActionPermissions] mapPermissionsToActions:', {
-    permissions,
-    eventStatus,
-    normalizedStatus,
-    isApproved,
-    isCancelled,
-    isCompleted,
-  });
   
   // Find event permissions
   const eventPerms = permissions.find(p => p.resource === 'event');
@@ -451,7 +359,6 @@ function mapPermissionsToActions(
     }
   }
   
-  console.log('[eventActionPermissions] mapPermissionsToActions result:', actions);
   return actions;
 }
 
@@ -468,20 +375,10 @@ async function fetchAvailableActionsFromBackend(
     const eventId = event?.Event_ID || event?.EventId || event?.id;
     const eventStatus = event?.Status || event?.status || 'Approved';
     
-    console.log('[eventActionPermissions] fetchAvailableActionsFromBackend called:', {
-      eventId,
-      userId,
-      eventStatus,
-      eventKeys: Object.keys(event || {}).slice(0, 30),
-      hasRequest: !!extractRequestId(event),
-      requestId: extractRequestId(event),
-    });
-    
     let requestId = extractRequestId(event);
     
     // If no request ID found in event, try to fetch it by Event_ID
     if (!requestId && eventId) {
-      console.log('[eventActionPermissions] No request ID in event, fetching by Event_ID...');
       requestId = await fetchRequestIdByEventId(eventId);
     }
     
@@ -498,34 +395,16 @@ async function fetchAvailableActionsFromBackend(
           'Authorization': `Bearer ${token}`,
         };
         
-        console.log('[eventActionPermissions] Fetching actions from backend:', {
-          url: `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
-          requestId,
-        });
-        
         try {
           const response = await fetch(`${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`, {
             headers,
             credentials: 'include',
           });
           
-          console.log('[eventActionPermissions] Backend response:', {
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok,
-          });
-          
           if (response.ok) {
             const body = await response.json();
-            console.log('[eventActionPermissions] Backend response body:', JSON.stringify(body, null, 2));
             
             const actions = body.data?.actions || body.actions || [];
-            console.log('[eventActionPermissions] Extracted actions from backend:', {
-              rawActions: actions,
-              actionsType: typeof actions,
-              isArray: Array.isArray(actions),
-              length: Array.isArray(actions) ? actions.length : 0,
-            });
             
             // Normalize action names to match our EventAction type
             const normalizedActions: EventAction[] = actions
@@ -535,7 +414,6 @@ async function fetchAvailableActionsFromBackend(
                 if (['view', 'edit', 'reschedule', 'cancel', 'delete'].includes(lower)) {
                   return lower as EventAction;
                 }
-                console.warn('[eventActionPermissions] Unknown action from backend:', action);
                 return null;
               })
               .filter((action: EventAction | null): action is EventAction => action !== null);
@@ -545,53 +423,27 @@ async function fetchAvailableActionsFromBackend(
               normalizedActions.unshift('view');
             }
             
-            console.log('[eventActionPermissions] Final normalized actions from backend:', normalizedActions);
-            
             // If backend returned more than just view, use it
             if (normalizedActions.length > 1) {
               return normalizedActions;
             }
-            
-            console.log('[eventActionPermissions] Backend returned only view, falling back to permission parsing');
-          } else {
-            const errorText = await response.text();
-            console.warn(`[eventActionPermissions] Backend returned error: ${response.status}`, {
-              errorText,
-              requestId,
-            });
           }
         } catch (fetchError) {
-          console.error('[eventActionPermissions] Error calling backend:', fetchError);
+          // Error calling backend, fall through to permission parsing
         }
       }
-    } else {
-      console.warn('[eventActionPermissions] No request ID found for event:', {
-        eventId,
-        eventData: event,
-        possibleRequestFields: {
-          request: event?.request,
-          Request_ID: event?.Request_ID,
-          RequestId: event?.RequestId,
-          requestId: event?.requestId,
-        },
-      });
     }
     
     // Fallback: Parse permissions from localStorage
-    console.log('[eventActionPermissions] Falling back to permission parsing from localStorage...');
     const permissions = getUserPermissionsFromStorage();
     
     if (permissions.length > 0) {
       const actionsFromPermissions = mapPermissionsToActions(permissions, eventStatus);
-      console.log('[eventActionPermissions] Actions from permissions:', actionsFromPermissions);
       return actionsFromPermissions;
     }
     
-    console.warn('[eventActionPermissions] No permissions found, returning view only');
     return ['view'];
   } catch (error) {
-    console.error('[eventActionPermissions] Error fetching available actions:', error);
-    
     // Final fallback: try to parse permissions
     try {
       const permissions = getUserPermissionsFromStorage();
@@ -600,7 +452,7 @@ async function fetchAvailableActionsFromBackend(
         return mapPermissionsToActions(permissions, eventStatus);
       }
     } catch (fallbackError) {
-      console.error('[eventActionPermissions] Fallback permission parsing also failed:', fallbackError);
+      // Fallback also failed
     }
     
     return ['view']; // Final fallback to view only
@@ -621,24 +473,10 @@ export async function getEventActionPermissions(
   userId?: string | null,
   forceRefresh: boolean = false
 ): Promise<EventActionPermissions> {
-  console.log('[eventActionPermissions] getEventActionPermissions called:', {
-    eventId: event?.Event_ID || event?.EventId || event?.id,
-    userId,
-    forceRefresh,
-    eventKeys: event ? Object.keys(event).slice(0, 20) : [],
-  });
-  
   // Get user ID
   const actualUserId = userId || getUserId();
   
-  console.log('[eventActionPermissions] User ID resolved:', {
-    provided: userId,
-    resolved: actualUserId,
-    hasUserId: !!actualUserId,
-  });
-  
   if (!actualUserId) {
-    console.warn('[eventActionPermissions] No user ID, returning view-only');
     // Unauthenticated: view only
     return {
       canView: true,
@@ -659,30 +497,18 @@ export async function getEventActionPermissions(
     const now = Date.now();
     
     if (now - cached.timestamp < PERMISSION_CACHE_TTL) {
-      console.log('[eventActionPermissions] Using cached permissions:', cached.permissions);
       return cached.permissions;
     } else {
       permissionCache.delete(cacheKey);
-      console.log('[eventActionPermissions] Cache expired, fetching fresh');
     }
   }
   
   // Get user authority
-  console.log('[eventActionPermissions] Fetching user authority...');
   const authority = await getUserAuthority(actualUserId, forceRefresh);
   const isAdminByAuthority = authority !== null && authority >= ADMIN_AUTHORITY_THRESHOLD;
   
-  console.log('[eventActionPermissions] Authority check:', {
-    eventId,
-    userId: actualUserId,
-    authority,
-    isAdminByAuthority,
-    threshold: ADMIN_AUTHORITY_THRESHOLD,
-  });
-  
   // If admin by authority, show all actions (backend will still validate)
   if (isAdminByAuthority) {
-    console.log('[eventActionPermissions] User is admin by authority, granting all permissions');
     const permissions: EventActionPermissions = {
       canView: true,
       canEdit: true,
@@ -702,10 +528,7 @@ export async function getEventActionPermissions(
   }
   
   // For non-admin users, fetch available actions from backend
-  console.log('[eventActionPermissions] Fetching available actions from backend...');
   const availableActions = await fetchAvailableActionsFromBackend(event, actualUserId);
-  
-  console.log('[eventActionPermissions] Available actions from backend:', availableActions);
   
   // Convert available actions array to permission flags
   const permissions: EventActionPermissions = {
@@ -716,8 +539,6 @@ export async function getEventActionPermissions(
     canCancel: availableActions.includes('cancel'),
     canDelete: availableActions.includes('delete'),
   };
-  
-  console.log('[eventActionPermissions] Final permissions:', permissions);
   
   // Cache the result
   permissionCache.set(cacheKey, {

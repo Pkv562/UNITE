@@ -55,11 +55,6 @@ export default function AddStakeholderModal({
       const roleId = firstRole._id || firstRole.id
       if (roleId) {
         setSelectedRole(String(roleId))
-        console.log('[DIAG] Add Modal - Auto-selected role:', {
-          roleId: String(roleId),
-          roleCode: firstRole.code,
-          roleName: firstRole.name
-        })
       }
     }
     
@@ -69,10 +64,6 @@ export default function AddStakeholderModal({
       const orgId = org._id
       if (orgId) {
         setSelectedOrganization(String(orgId))
-        console.log('[DIAG] Add Modal - Auto-selected organization:', {
-          orgId: String(orgId),
-          orgName: org.name
-        })
       }
     }
   }, [roleOptions, canChooseOrganization, organizationOptions, selectedRole, selectedOrganization])
@@ -99,24 +90,6 @@ export default function AddStakeholderModal({
     }
   }, [isOpen])
 
-  // Diagnostic logging for field states
-  useEffect(() => {
-    if (isOpen) {
-      console.log('[DIAG] Add Stakeholder Modal - Field States:', {
-        canChooseMunicipality,
-        canChooseOrganization,
-        isSystemAdmin,
-        roleOptionsCount: roleOptions.length,
-        municipalityOptionsCount: municipalityOptions.length,
-        barangayOptionsCount: barangayOptions.length,
-        organizationOptionsCount: organizationOptions.length,
-        selectedRole: selectedRole || 'none',
-        selectedMunicipality: selectedMunicipality || 'none',
-        selectedBarangay: selectedBarangay || 'none',
-        selectedOrganization: selectedOrganization || 'none'
-      });
-    }
-  }, [isOpen, hookLoading, canChooseMunicipality, canChooseOrganization, isSystemAdmin, roleOptions.length, municipalityOptions.length, barangayOptions.length, organizationOptions.length, selectedRole, selectedMunicipality, selectedBarangay, selectedOrganization]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -183,16 +156,6 @@ export default function AddStakeholderModal({
       pageContext: 'stakeholder-management', // Important: tells backend this is stakeholder creation
     }
 
-    console.log('[DIAG] Add Modal - Submitting data:', {
-      roleId: data.roles[0],
-      hasOrganizationId: !!data.organizationId,
-      organizationId: data.organizationId,
-      municipalityId: data.municipalityId,
-      barangayId: data.barangayId,
-      canChooseOrganization,
-      organizationOptionsCount: organizationOptions.length
-    })
-
     try {
       const response = await createStakeholder(data)
       if (response.success) {
@@ -258,6 +221,7 @@ export default function AddStakeholderModal({
                 </label>
                 <Select
                   isRequired
+                  aria-label="Role"
                   classNames={{
                     trigger: "border-gray-300",
                   }}
@@ -438,6 +402,7 @@ export default function AddStakeholderModal({
                 </label>
                 <Select
                   isRequired
+                  aria-label="Municipality"
                   classNames={{
                     trigger: "border-gray-300",
                   }}
@@ -491,6 +456,7 @@ export default function AddStakeholderModal({
                     Barangay <span className="text-gray-500 text-xs">(Optional)</span>
                   </label>
                   <Select
+                    aria-label="Barangay"
                     classNames={{
                       trigger: "border-gray-300",
                     }}
@@ -532,6 +498,7 @@ export default function AddStakeholderModal({
                 </label>
                 {canChooseOrganization && organizationOptions.length > 1 ? (
                   <Select
+                    aria-label="Organization"
                     classNames={{
                       trigger: "border-gray-300",
                     }}

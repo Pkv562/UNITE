@@ -87,24 +87,10 @@ export function useStakeholderManagement(): UseStakeholderManagementReturn {
         setBarangayOptions(context.barangayOptions || []);
         setOrganizationOptions(context.organizationOptions || []);
         setIsSystemAdmin(context.isSystemAdmin);
-        
-        // Diagnostic logging
-        console.log('[DIAG] Stakeholder Creation Context:', {
-          allowedRole: context.allowedRole,
-          roleOptionsCount: context.roleOptions?.length || 0,
-          roleOptions: context.roleOptions?.map(r => `${r.code} (${r.authority})`).join(', ') || 'none',
-          canChooseMunicipality: context.canChooseMunicipality,
-          canChooseOrganization: context.canChooseOrganization,
-          municipalityOptionsCount: context.municipalityOptions?.length || 0,
-          barangayOptionsCount: context.barangayOptions?.length || 0,
-          organizationOptionsCount: context.organizationOptions?.length || 0,
-          isSystemAdmin: context.isSystemAdmin
-        });
       } else {
         throw new Error(response.message || 'Failed to fetch creation context');
       }
     } catch (err: any) {
-      console.error('Failed to fetch creation context:', err);
       setError(err.message || 'Failed to fetch creation context');
     } finally {
       setLoading(false);
@@ -133,15 +119,10 @@ export function useStakeholderManagement(): UseStakeholderManagementReturn {
       
       if (response.success && response.data) {
         setBarangayOptions(response.data || []);
-        console.log('[DIAG] Fetched barangays:', {
-          municipalityId,
-          barangayCount: response.data?.length || 0
-        });
       } else {
         throw new Error(response.message || 'Failed to fetch barangays');
       }
     } catch (err: any) {
-      console.error('Failed to fetch barangays:', err);
       setError(err.message || 'Failed to fetch barangays');
       setBarangayOptions([]);
     } finally {

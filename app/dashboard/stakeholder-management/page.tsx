@@ -9,6 +9,7 @@ import { listStakeholders, deleteStakeholder } from "@/services/stakeholderServi
 import { useStakeholderManagement } from "@/hooks/useStakeholderManagement";
 import { getUserAuthority } from "@/utils/getUserAuthority";
 import { decodeJwt } from "@/utils/decodeJwt";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 import Topbar from "@/components/layout/topbar";
 import StakeholderToolbar from "@/components/stakeholder-management/stakeholder-management-toolbar";
@@ -97,11 +98,14 @@ export default function StakeholderManagement() {
   // Use a ref to track if initial fetch has been done to avoid double-fetch
   const initialFetchDone = useRef(false);
 
+  // Fetch current user from API
+  const { user: currentUser } = useCurrentUser();
+  
   // Do not call getUserInfo() synchronously — read it on mount so server and client
   // produce the same initial HTML; update user-derived state after hydration.
   const [userInfo, setUserInfo] = useState<any | null>(null);
-  const [displayName, setDisplayName] = useState("Bicol Medical Center");
-  const [displayEmail, setDisplayEmail] = useState("bmc@gmail.com");
+  const [displayName, setDisplayName] = useState("unite user");
+  const [displayEmail, setDisplayEmail] = useState("unite@health.tech");
   const [canManageStakeholders, setCanManageStakeholders] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [canApproveReject, setCanApproveReject] = useState(false);
@@ -114,6 +118,21 @@ export default function StakeholderManagement() {
 
   // Mobile navigation state (handled by MobileNav component)
   const [isMobile, setIsMobile] = useState(false);
+
+  // Update display name and email from API user data
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.fullName) {
+        setDisplayName(currentUser.fullName);
+      } else if (currentUser.firstName || currentUser.lastName) {
+        const nameParts = [currentUser.firstName, currentUser.middleName, currentUser.lastName].filter(Boolean);
+        setDisplayName(nameParts.join(" ") || "unite user");
+      }
+      if (currentUser.email) {
+        setDisplayEmail(currentUser.email);
+      }
+    }
+  }, [currentUser]);
 
   // Reset to page 1 when search or tab changes
   useEffect(() => {
@@ -291,8 +310,17 @@ export default function StakeholderManagement() {
 
         if (data.success && data.canAccess) {
           setCanManageStakeholders(true);
-          setDisplayName(info?.displayName || info?.raw?.First_Name || "Bicol Medical Center");
-          setDisplayEmail(info?.email || info?.raw?.Email || "bmc@gmail.com");
+          // Update user info if not already set or if we have better data
+          if (info?.displayName && !displayName) {
+            setDisplayName(info.displayName);
+          } else if (info?.raw?.First_Name && !displayName) {
+            setDisplayName(info.raw.First_Name);
+          }
+          if (info?.email && !displayEmail) {
+            setDisplayEmail(info.email);
+          } else if (info?.raw?.Email && !displayEmail) {
+            setDisplayEmail(info.raw.Email);
+          }
           
           // Check if user can approve/reject signup requests
           // Requirements: authority >= 60 AND staff.create permission (or admin)
@@ -309,9 +337,8 @@ export default function StakeholderManagement() {
             try {
               const decoded = decodeJwt(token);
               userId = decoded?.id || decoded?.userId || decoded?._id || null;
-              console.log('[StakeholderManagement] Extracted userId from JWT token:', userId);
             } catch (e) {
-              console.warn('[StakeholderManagement] Failed to decode JWT token:', e);
+              // JWT decode failed, continue
             }
           }
           
@@ -343,7 +370,6 @@ export default function StakeholderManagement() {
                            [];
             }
           } catch (e) {
-            console.warn('[StakeholderManagement] Failed to parse user from localStorage:', e);
             permissions = info?.raw?.permissions || info?.permissions || [];
           }
           
@@ -360,34 +386,8 @@ export default function StakeholderManagement() {
           
           const isAdmin = isAdminFromInfo || isAdminByStaffType || hasWildcardPermissions;
           
-          console.log('[StakeholderManagement] Checking approve/reject permissions:', {
-            userId,
-            rawId: info?.raw?.id,
-            rawIdType: typeof info?.raw?.id,
-            isAdminFromInfo,
-            rawIsAdmin,
-            rawIsAdminType: typeof rawIsAdmin,
-            isAdminByStaffType,
-            hasWildcardPermissions,
-            permissions,
-            isAdmin,
-            staffType,
-            infoKeys: info ? Object.keys(info).slice(0, 10) : [],
-            rawKeys: info?.raw ? Object.keys(info.raw).slice(0, 10) : [],
-            infoIsAdmin: info?.isAdmin,
-            rawIsSystemAdmin: info?.raw?.isSystemAdmin
-          });
-          
           // Quick check: if user is admin from info, grant permissions immediately
           if (isAdmin) {
-            console.log('[StakeholderManagement] Admin detected from user info, granting approve/reject permissions', {
-              isAdminFromInfo,
-              isAdminByStaffType,
-              hasWildcardPermissions,
-              staffType,
-              rawIsAdmin,
-              permissions
-            });
             setCanApproveReject(true);
             // Don't return early - continue to check userId for authority if available
           }
@@ -400,22 +400,8 @@ export default function StakeholderManagement() {
               const isOperationalAdmin = authority !== null && authority >= 80;
               const isAdmin = isAdminFromInfo || isSystemAdminByAuthority || isOperationalAdmin;
               
-              console.log('[StakeholderManagement] Authority check result:', {
-                authority,
-                isSystemAdminByAuthority,
-                isOperationalAdmin,
-                isAdminFromInfo,
-                isAdmin,
-                userId
-              });
-              
               // Admins (authority >= 80 or isAdmin flag) automatically get approve/reject permissions
               if (isAdmin) {
-                console.log('[StakeholderManagement] Admin detected, granting approve/reject permissions', {
-                  authority,
-                  isAdminFromInfo,
-                  userId
-                });
                 setCanApproveReject(true);
               } else {
                 // For non-admins, check staff.create permission via API
@@ -440,38 +426,21 @@ export default function StakeholderManagement() {
                   if (permissionResponse.ok) {
                     const permissionData = await permissionResponse.json();
                     hasStaffCreate = permissionData.success && permissionData.hasPermission;
-                    console.log('[StakeholderManagement] Permission check result:', {
-                      hasStaffCreate,
-                      authority,
-                      permissionData
-                    });
-                  } else {
-                    console.warn('[StakeholderManagement] Permission check failed:', permissionResponse.status);
                   }
                 } catch (permErr) {
-                  console.warn('Failed to check staff.create permission:', permErr);
                   // Default to false for security
                   hasStaffCreate = false;
                 }
                 
                 // User can approve/reject if: authority >= 60 AND has staff.create
                 const canApprove = authority !== null && authority >= 60 && hasStaffCreate;
-                console.log('[StakeholderManagement] Approve/reject permission:', {
-                  canApprove,
-                  authority,
-                  hasStaffCreate,
-                  meetsAuthorityRequirement: authority !== null && authority >= 60,
-                  userId
-                });
                 setCanApproveReject(canApprove);
               }
             } catch (permError) {
-              console.error('[StakeholderManagement] Error checking approve/reject permissions:', permError);
               // Default to false for security
               setCanApproveReject(false);
             }
           } else {
-            console.warn('[StakeholderManagement] No userId found for permission check');
             setCanApproveReject(false);
           }
           
@@ -488,7 +457,6 @@ export default function StakeholderManagement() {
           }
         }
       } catch (e) {
-        console.error('Error checking page access:', e);
         // On error, deny access for security
         setCanManageStakeholders(false);
         setCheckingAccess(false);
@@ -1278,7 +1246,6 @@ export default function StakeholderManagement() {
 
       setSignupRequests(mapped);
     } catch (err: any) {
-      console.error("Failed to fetch signup requests:", err);
       setError(err.message || "Failed to fetch signup requests");
     }
   };
@@ -1315,7 +1282,6 @@ export default function StakeholderManagement() {
       await fetchStakeholders();
       await fetchSignupRequests();
     } catch (err: any) {
-      console.error("Failed to accept request:", err);
       setError(err.message || "Failed to accept request");
     } finally {
       setPendingAcceptId(null);
@@ -1345,7 +1311,6 @@ export default function StakeholderManagement() {
       setSignupRequests(prev => prev.filter(req => req.id !== pendingRejectId));
       setRejectReason("");
     } catch (err: any) {
-      console.error("Failed to reject request:", err);
       setError(err.message || "Failed to reject request");
     } finally {
       setPendingRejectId(null);

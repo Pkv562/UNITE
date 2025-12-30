@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Radio, RadioGroup } from "@heroui/radio";
 import { useRoles } from "@/hooks/useRoles";
 import { roleHasCapability, getAssignableRoles } from "@/services/coordinatorService";
 import type { Role } from "@/types/coordinator.types";
@@ -110,38 +109,64 @@ export default function RoleAssignmentSection({
           roles are configured in the system.
         </div>
       ) : (
-        <RadioGroup
-          value={selectedRoleId}
-          onValueChange={handleRoleChange}
-          classNames={{
-            wrapper: "space-y-2 max-h-[200px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50",
-          }}
-        >
-          {availableRoles.map((role) => (
-            <Radio
-              key={role._id}
-              value={role._id}
-              classNames={{
-                label: "text-sm",
-                wrapper: "py-1 hover:bg-white rounded px-2 transition-colors",
-              }}
-            >
-              <div className="flex flex-col">
-                <span className="text-sm font-medium text-gray-900">
-                  {role.name}
-                </span>
-                {role.description && (
-                  <span className="text-xs text-gray-500 mt-0.5">
-                    {role.description}
-                  </span>
-                )}
-                <span className="text-xs text-gray-400 mt-0.5">
-                  Code: {role.code}
-                </span>
+        <div className="space-y-2 max-h-[300px] overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
+          {availableRoles.map((role) => {
+            const isSelected = selectedRoleId === role._id;
+            return (
+              <div
+                key={role._id}
+                onClick={() => handleRoleChange(role._id)}
+                className={`
+                  relative flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all
+                  ${isSelected 
+                    ? 'border-blue-500 bg-blue-50 shadow-sm' 
+                    : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
+                  }
+                `}
+              >
+                <div className="flex-shrink-0 mt-0.5">
+                  <div className={`
+                    w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all
+                    ${isSelected 
+                      ? 'border-blue-500 bg-blue-500' 
+                      : 'border-gray-300 bg-white'
+                    }
+                  `}>
+                    {isSelected && (
+                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-gray-900">
+                        {role.name}
+                      </div>
+                      {role.description && (
+                        <div className="text-xs text-gray-600 mt-1 line-clamp-2">
+                          {role.description}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3 mt-2">
+                        <span className="text-xs text-gray-500">
+                          Code: <span className="font-mono">{role.code}</span>
+                        </span>
+                        {role.authority !== undefined && (
+                          <span className="text-xs text-gray-500">
+                            Authority: <span className="font-semibold">{role.authority}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </Radio>
-          ))}
-        </RadioGroup>
+            );
+          })}
+        </div>
       )}
 
       {!selectedRoleId && isRequired && (

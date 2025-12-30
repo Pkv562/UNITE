@@ -45,6 +45,7 @@ import { transformEventData } from "@/components/calendar/calendar-event-utils";
 import Topbar from "@/components/layout/topbar";
 import { fetchWithAuth } from "@/utils/fetchWithAuth";
 import { getUserInfo } from "@/utils/getUserInfo";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { getEventActionPermissions, isAdminByAuthority, clearPermissionCache } from "@/utils/eventActionPermissions";
 import MobileNav from "@/components/tools/mobile-nav";
 import { useLocations } from "@/components/providers/locations-provider";
@@ -84,55 +85,29 @@ export default function CalendarPage(props: any) {
   const [eventPermissionsLoading, setEventPermissionsLoading] = useState<
     Record<string, boolean>
   >({});
+  // Fetch current user from API
+  const { user: currentUser } = useCurrentUser();
+  
   const [currentUserName, setCurrentUserName] = useState<string>(
-    "Bicol Medical Center",
+    "unite user",
   );
   const [currentUserEmail, setCurrentUserEmail] =
-    useState<string>("bmc@gmail.com");
+    useState<string>("unite@health.tech");
 
-  // Initialize displayed user name/email from localStorage (match campaign page logic)
+  // Update display name and email from API user data
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("unite_user");
-
-      if (raw) {
-        const u = JSON.parse(raw);
-        const first =
-          u.First_Name ||
-          u.FirstName ||
-          u.first_name ||
-          u.firstName ||
-          u.First ||
-          "";
-        const middle =
-          u.Middle_Name ||
-          u.MiddleName ||
-          u.middle_name ||
-          u.middleName ||
-          u.Middle ||
-          "";
-        const last =
-          u.Last_Name ||
-          u.LastName ||
-          u.last_name ||
-          u.lastName ||
-          u.Last ||
-          "";
-        const parts = [first, middle, last]
-          .map((p: any) => (p || "").toString().trim())
-          .filter(Boolean);
-        const full = parts.join(" ");
-        const email =
-          u.Email || u.email || u.Email_Address || u.emailAddress || "";
-
-        if (full) setCurrentUserName(full);
-        else if (u.name) setCurrentUserName(u.name);
-        if (email) setCurrentUserEmail(email);
+    if (currentUser) {
+      if (currentUser.fullName) {
+        setCurrentUserName(currentUser.fullName);
+      } else if (currentUser.firstName || currentUser.lastName) {
+        const nameParts = [currentUser.firstName, currentUser.middleName, currentUser.lastName].filter(Boolean);
+        setCurrentUserName(nameParts.join(" ") || "unite user");
       }
-    } catch (err) {
-      // ignore malformed localStorage entry
+      if (currentUser.email) {
+        setCurrentUserEmail(currentUser.email);
+      }
     }
-  }, []);
+  }, [currentUser]);
   
   // Initialize locations provider for location resolution
   const { getProvinceName, getDistrictName, getMunicipalityName, locations } = useLocations();
@@ -659,19 +634,6 @@ export default function CalendarPage(props: any) {
     // Prefer normalized local key; fallback to ISO UTC key or raw date string if present
     const isoKey = date.toISOString().split("T")[0];
     
-    // Debug logging for event lookup
-    if (process.env.NODE_ENV === "development") {
-      console.log("[getEventsForDate] Looking up events:", {
-        date: date.toISOString(),
-        key,
-        isoKey,
-        activeView,
-        sourceKeys: Object.keys(source),
-        sourceHasKey: key in source,
-        sourceHasIsoKey: isoKey in source,
-        sourceSize: Object.keys(source).length,
-      });
-    }
     
     let raw: any =
       source[key] || source[isoKey] || source[date.toString()] || [];
@@ -685,18 +647,6 @@ export default function CalendarPage(props: any) {
 
     raw = Array.isArray(raw) ? raw : [];
 
-    // Debug logging for raw events found
-    if (process.env.NODE_ENV === "development") {
-      console.log("[getEventsForDate] Raw events found:", {
-        date: key,
-        rawCount: raw.length,
-        rawEvents: raw.map((e: any) => ({
-          id: e.Event_ID || e.EventId,
-          title: e.Event_Title || e.title,
-          startDate: e.Start_Date,
-        })),
-      });
-    }
 
     // Events from public API are already approved, no additional filtering needed
     const approved = raw;
@@ -733,13 +683,6 @@ export default function CalendarPage(props: any) {
         }
       } catch (err) {
         // If parsing fails, but event is in source for this date, allow it
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[filterByStartDate] Failed to parse start date, allowing event:", {
-            eventId: ev.Event_ID || ev.EventId,
-            Start_Date: ev.Start_Date,
-            error: err,
-          });
-      }
         return true; // Be lenient - if it's in the source for this date, show it
       }
       
@@ -750,30 +693,11 @@ export default function CalendarPage(props: any) {
 
       const eventKey = dateToLocalKey(start);
       const matches = eventKey === key;
-      
-      if (process.env.NODE_ENV === "development" && !matches) {
-        console.log("[filterByStartDate] Date mismatch (filtering out):", {
-          eventId: ev.Event_ID || ev.EventId,
-          eventKey,
-          targetKey: key,
-          matches,
-        });
-      }
 
       return matches;
     };
 
     const finalList = deduped.filter(filterByStartDate);
-    
-    // Debug logging for filtering results
-    if (process.env.NODE_ENV === "development") {
-      console.log("[getEventsForDate] Filtering results:", {
-        date: key,
-        dedupedCount: deduped.length,
-        finalListCount: finalList.length,
-        filteredOut: deduped.length - finalList.length,
-      });
-    }
 
     // Apply quick / advanced filters
     const afterQuick = finalList
@@ -886,23 +810,6 @@ export default function CalendarPage(props: any) {
         }
       );
 
-      // Debug logging
-      if (process.env.NODE_ENV === "development") {
-        console.log("[getEventsForDate] Transformed event for date:", {
-          date: key,
-          eventId,
-          title: transformed.title,
-          ownerName: transformed.ownerName,
-          category: transformed.category,
-          categoryLabel: transformed.categoryLabel,
-          countType: transformed.countType,
-          count: transformed.count,
-          hasDetailedEvent: !!detailedEvent,
-          eventCategory: e.category || e.Category,
-          eventCategoryData: e.categoryData,
-        });
-      }
-
       // Return transformed event with backward-compatible fields for month view
       return {
         ...transformed,
@@ -1006,18 +913,6 @@ export default function CalendarPage(props: any) {
       if (eventsResp.ok && eventsJson.success && Array.isArray(eventsJson.data)) {
         const monthEvents = eventsJson.data;
 
-        // Debug logging: log first event to see backend response structure
-        if (process.env.NODE_ENV === "development" && monthEvents.length > 0) {
-          console.log("[refreshCalendarData] First event from backend:", {
-            Event_ID: monthEvents[0].Event_ID,
-            Event_Title: monthEvents[0].Event_Title,
-            category: monthEvents[0].category,
-            Category: monthEvents[0].Category,
-            categoryData: monthEvents[0].categoryData,
-            hasCategoryData: !!monthEvents[0].categoryData,
-          });
-        }
-
         // Events from new endpoints are already populated with location names, category data, etc.
         // No need for batch fetch - data is already complete
 
@@ -1062,21 +957,6 @@ export default function CalendarPage(props: any) {
             weekEvents[dateKey] = events;
           }
         });
-
-        // Debug logging for week events population
-        if (process.env.NODE_ENV === "development") {
-          console.log("[refreshCalendarData] Setting weekEventsByDate:", {
-            weekStart: wkStart.toISOString(),
-            weekEnd: wkEnd.toISOString(),
-            weekDateKeys: Array.from(weekDateKeys),
-            weekEventsKeys: Object.keys(weekEvents),
-            weekEventsCount: Object.values(weekEvents).reduce((sum, arr) => sum + arr.length, 0),
-            normalizedMonthKeys: Object.keys(normalizedMonth),
-            normalizedMonthCount: Object.values(normalizedMonth).reduce((sum, arr) => sum + arr.length, 0),
-            endpoint: token ? "/api/me/events" : "/api/events/all",
-            totalEvents: monthEvents.length,
-          });
-        }
 
         setWeekEventsByDate(weekEvents);
       } else {
@@ -1416,108 +1296,6 @@ export default function CalendarPage(props: any) {
     }),
   };
 
-  // Helper to fetch and cache permissions for an event
-  const fetchEventPermissions = async (event: any) => {
-    const evRaw = event.raw || event;
-    const evId = evRaw.Event_ID || evRaw.EventId || evRaw.id;
-    
-    console.log("[Calendar] fetchEventPermissions called:", {
-      eventId: evId,
-      hasRaw: !!event.raw,
-      eventKeys: evRaw ? Object.keys(evRaw).slice(0, 20) : [],
-      alreadyCached: !!eventPermissionsCache[evId],
-    });
-    
-    if (!evId) {
-      console.warn("[Calendar] No event ID found:", { event, evRaw });
-      return;
-    }
-    
-    // Check if already cached
-    if (eventPermissionsCache[evId]) {
-      console.log("[Calendar] Permissions already cached for event:", evId);
-      return;
-    }
-    
-    // Check if already loading
-    if (eventPermissionsLoading[evId]) {
-      console.log("[Calendar] Permissions already loading for event:", evId);
-      return;
-    }
-    
-    // Set loading state
-    setEventPermissionsLoading((prev) => ({
-      ...prev,
-      [evId]: true,
-    }));
-    
-    try {
-      // Get user ID
-      const rawUserStr =
-        typeof window !== "undefined" ? localStorage.getItem("unite_user") : null;
-      let parsedUser: any = null;
-      try {
-        parsedUser = rawUserStr ? JSON.parse(rawUserStr) : null;
-      } catch (e) {
-        parsedUser = null;
-      }
-      
-      const userId = parsedUser?._id || parsedUser?.id || parsedUser?.User_ID || parsedUser?.userId || parsedUser?.ID || null;
-      
-      console.log("[Calendar] User info:", {
-        hasRawUser: !!rawUserStr,
-        userId,
-        userKeys: parsedUser ? Object.keys(parsedUser).slice(0, 20) : [],
-        allIdFields: parsedUser ? {
-          _id: parsedUser._id,
-          id: parsedUser.id,
-          User_ID: parsedUser.User_ID,
-          userId: parsedUser.userId,
-          ID: parsedUser.ID,
-          Admin_ID: parsedUser.Admin_ID,
-          Coordinator_ID: parsedUser.Coordinator_ID,
-          Stakeholder_ID: parsedUser.Stakeholder_ID,
-        } : {},
-      });
-      
-      // Fetch permissions
-      console.log("[Calendar] Fetching permissions for event:", evId);
-      const permissions = await getEventActionPermissions(evRaw, userId, false);
-      
-      console.log("[Calendar] Permissions fetched:", {
-        eventId: evId,
-        permissions,
-      });
-      
-      // Update cache
-      setEventPermissionsCache((prev) => ({
-        ...prev,
-        [evId]: permissions,
-      }));
-    } catch (error) {
-      console.error("[Calendar] Error fetching event permissions:", error);
-      // On error, cache default permissions (view only)
-      setEventPermissionsCache((prev) => ({
-        ...prev,
-        [evId]: {
-          canView: true,
-          canEdit: false,
-          canManageStaff: false,
-          canReschedule: false,
-          canCancel: false,
-          canDelete: false,
-        },
-      }));
-    } finally {
-      // Clear loading state
-      setEventPermissionsLoading((prev) => {
-        const updated = { ...prev };
-        delete updated[evId];
-        return updated;
-      });
-    }
-  };
-
   // Build dropdown menus using permission-based evaluation
   const getMenuByStatus = (event: any) => {
     // Calendar events are from public API; determine status from event
@@ -1550,12 +1328,8 @@ export default function CalendarPage(props: any) {
       );
     }
 
-    // Fetch permissions asynchronously (will cache for next render)
-    if (evId && !eventPermissionsCache[evId] && !eventPermissionsLoading[evId]) {
-      fetchEventPermissions(event);
-    }
-
     // Check if permissions are loading
+    // Note: Permission fetching is handled by useEffect hook, not during render
     const isLoading = evId ? eventPermissionsLoading[evId] || false : false;
 
     // Get cached permissions (or default to view-only if not yet loaded)
@@ -1569,15 +1343,6 @@ export default function CalendarPage(props: any) {
           canCancel: false,
           canDelete: false,
         };
-    
-    console.log("[Calendar] getMenuByStatus - permissions for event:", {
-      eventId: evId,
-      status,
-      isLoading,
-      hasCachedPermissions: !!(evId && eventPermissionsCache[evId]),
-      permissions,
-      cacheKeys: Object.keys(eventPermissionsCache),
-    });
 
     // Determine event status for action availability
     const normalizedStatus = String(status || "Approved").toLowerCase();
@@ -1633,7 +1398,6 @@ export default function CalendarPage(props: any) {
                 }
                 onPress={() => {
                   // TODO: Implement delete handler
-                  console.warn("Delete action not yet implemented");
                 }}
               >
                 Delete
@@ -1953,20 +1717,6 @@ export default function CalendarPage(props: any) {
               <div className="grid grid-cols-7 gap-1.5 sm:gap-2 md:gap-4 mt-3 sm:mt-4 md:mt-6 w-full min-w-[320px] sm:min-w-[600px]">
                 {days.map((day, index) => {
                   const dayEvents = getEventsForDate(day.fullDate);
-                  
-                  // Debug logging for day events before rendering
-                  if (process.env.NODE_ENV === "development") {
-                    console.log("[WeekView] Rendering day:", {
-                      dayIndex: index,
-                      dayDate: day.fullDate.toISOString(),
-                      dayKey: dateToLocalKey(day.fullDate),
-                      dayEventsCount: dayEvents.length,
-                      dayEvents: dayEvents.map((e: any) => ({
-                        title: e.title,
-                        eventId: e.raw?.Event_ID || e.raw?.EventId,
-                      })),
-                    });
-                  }
 
                   return (
                     <div key={index} className="min-h-[300px] sm:min-h-[400px] md:min-h-[500px]">
