@@ -92,8 +92,10 @@ export default function CampaignPage() {
   const [viewLoading, setViewLoading] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editRequest, setEditRequest] = useState<any>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const isRefreshingRef = useRef(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -637,6 +639,38 @@ export default function CampaignPage() {
     debug("Exporting data...");
   };
 
+  // Handler for refresh requests
+  const handleRefreshRequests = async () => {
+    // Prevent multiple simultaneous refreshes
+    if (isRefreshingRef.current) {
+      return;
+    }
+    
+    try {
+      isRefreshingRef.current = true;
+      setIsRefreshing(true);
+      
+      debug("[Campaign] Manual refresh triggered");
+      
+      // Invalidate cache for event-requests
+      invalidateCache(/event-requests/);
+      
+      // Cancel any pending requests
+      cancelRequests(/event-requests/);
+      
+      // Fetch fresh data (will use current filters/pagination from state)
+      await fetchRequests();
+      
+      debug("[Campaign] Manual refresh completed");
+    } catch (error) {
+      console.error("[Campaign] Error refreshing requests:", error);
+      // Error is already handled in fetchRequests
+    } finally {
+      setIsRefreshing(false);
+      isRefreshingRef.current = false;
+    }
+  };
+
   // Handler for quick filter
   const handleQuickFilter = (filter: any) => {
     setQuickFilter(filter);
@@ -1126,6 +1160,8 @@ export default function CampaignPage() {
         onDistrictFetch={fetchDistricts}
         onQuickFilter={handleQuickFilter}
         onTabChange={handleTabChange}
+        onRefresh={handleRefreshRequests}
+        isRefreshing={isRefreshing}
         totalPages={totalPages}
         totalRequests={totalRequests}
       />

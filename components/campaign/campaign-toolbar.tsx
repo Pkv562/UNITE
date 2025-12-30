@@ -15,7 +15,8 @@ import { Popover, PopoverTrigger, PopoverContent } from "@heroui/popover";
 import { Select, SelectItem } from "@heroui/select";
 import { Avatar } from "@heroui/avatar";
 import { Tooltip } from "@heroui/tooltip";
-import { ArrowDownToSquare, Funnel, Ticket, ChevronDown, Wrench } from "@gravity-ui/icons";
+import { Spinner } from "@heroui/spinner";
+import { ArrowDownToSquare, Funnel, Ticket, ChevronDown, Wrench, ArrowRotateRight } from "@gravity-ui/icons";
 import {
   Modal,
   ModalContent,
@@ -42,6 +43,8 @@ interface CampaignToolbarProps {
   onAdvancedFilter?: (filter: any) => void;
   onCreateEvent?: (eventType: string, eventData: any) => void;
   onTabChange?: (tab: string) => void;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
   defaultTab?: string;
   currentPage: number;
   totalPages: number;
@@ -61,6 +64,8 @@ export default function CampaignToolbar({
   onAdvancedFilter,
   onCreateEvent,
   onTabChange,
+  onRefresh,
+  isRefreshing = false,
   defaultTab = "all",
   currentPage,
   totalPages,
@@ -836,6 +841,24 @@ export default function CampaignToolbar({
                 Export
               </Button>
             </Button>*/}
+
+            {/* Refresh Button */}
+            {onRefresh && (
+              <Tooltip content="Refresh requests list">
+                <Button
+                  className="border-default-200 bg-white font-medium text-xs"
+                  radius="md"
+                  size="sm"
+                  variant="bordered"
+                  startContent={!isRefreshing ? <ArrowRotateRight className="w-4 h-4" /> : undefined}
+                  onPress={onRefresh}
+                  isDisabled={isRefreshing}
+                  isLoading={isRefreshing}
+                >
+                  {isRefreshing ? "Refreshing..." : "Refresh"}
+                </Button>
+              </Tooltip>
+            )}
 
             {/* Quick Filter Popover (mimicking a custom dropdown) */}
             <Popover offset={10} placement="bottom" showArrow>
