@@ -483,11 +483,12 @@ export default function CampaignPage() {
         const now = Date.now();
         const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
         const minRefreshInterval = 500; // Minimum 500ms between refreshes
+        const forceRefresh = evt?.detail?.forceRefresh || evt?.detail?.shouldRefresh;
 
         debug(
           "[Campaign] unite:requests-changed received, refreshing requests",
           evt?.detail,
-          { timeSinceLastRefresh }
+          { timeSinceLastRefresh, forceRefresh }
         );
 
         // Clear any pending refresh
@@ -496,19 +497,30 @@ export default function CampaignPage() {
           refreshDebounceTimerRef.current = null;
         }
 
-        // Debounce: wait a bit before refreshing to batch multiple events
-        const debounceDelay = Math.max(0, minRefreshInterval - timeSinceLastRefresh);
+        // If force refresh is requested (from backend UI flags), skip debounce
+        const debounceDelay = forceRefresh ? 0 : Math.max(0, minRefreshInterval - timeSinceLastRefresh);
         
         // Cancel any pending requests for this endpoint
         cancelRequests(/event-requests/);
         
+        // Invalidate cache immediately if cache keys provided
+        if (evt?.detail?.cacheKeysToInvalidate && Array.isArray(evt.detail.cacheKeysToInvalidate)) {
+          evt.detail.cacheKeysToInvalidate.forEach((key: string) => {
+            const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
+            invalidateCache(cachePattern);
+            debug(`[Campaign] Invalidated cache for: ${key}`);
+          });
+        } else {
+          // Fallback: invalidate all event-requests cache
+          invalidateCache(/event-requests/);
+        }
+        
         refreshDebounceTimerRef.current = setTimeout(async () => {
           try {
             lastRefreshTimeRef.current = Date.now();
-            debug("[Campaign] Executing debounced refresh after request change");
+            debug("[Campaign] Executing refresh after request change", { forceRefresh });
             
-            // Invalidate cache and refresh requests
-            invalidateCache(/event-requests/);
+            // Fetch fresh requests (cache already invalidated above)
             await fetchRequests().catch(err => {
               console.error("[Campaign] Error refreshing requests:", err);
             });
@@ -525,10 +537,50 @@ export default function CampaignPage() {
       }
     };
 
+    // Handler for force-refresh events (bypasses debounce completely)
+    const forceRefreshHandler = async (evt: any) => {
+      try {
+        debug("[Campaign] unite:force-refresh-requests received, forcing immediate refresh", evt?.detail);
+        
+        // Clear any pending debounced refresh
+        if (refreshDebounceTimerRef.current) {
+          clearTimeout(refreshDebounceTimerRef.current);
+          refreshDebounceTimerRef.current = null;
+        }
+        
+        // Cancel any pending requests
+        cancelRequests(/event-requests/);
+        
+        // Invalidate cache immediately
+        if (evt?.detail?.cacheKeysToInvalidate && Array.isArray(evt.detail.cacheKeysToInvalidate)) {
+          evt.detail.cacheKeysToInvalidate.forEach((key: string) => {
+            const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
+            invalidateCache(cachePattern);
+          });
+        } else {
+          invalidateCache(/event-requests/);
+        }
+        
+        // Force immediate refresh (no debounce)
+        lastRefreshTimeRef.current = Date.now();
+        await fetchRequests().catch(err => {
+          console.error("[Campaign] Error in force refresh:", err);
+        });
+        
+        debug("[Campaign] Force refresh completed");
+      } catch (e) {
+        console.error("[Campaign] Error in force refresh handler:", e);
+      }
+    };
+
     if (typeof window !== "undefined") {
       window.addEventListener(
         "unite:requests-changed",
         handler as EventListener,
+      );
+      window.addEventListener(
+        "unite:force-refresh-requests",
+        forceRefreshHandler as EventListener,
       );
     }
 
@@ -543,6 +595,10 @@ export default function CampaignPage() {
         window.removeEventListener(
           "unite:requests-changed",
           handler as EventListener,
+        );
+        window.removeEventListener(
+          "unite:force-refresh-requests",
+          forceRefreshHandler as EventListener,
         );
       } catch (e) {}
     };
@@ -999,6 +1055,920 @@ export default function CampaignPage() {
     }
   };
 
+  // Handle accept event action coming from EventCard
+  const handleAcceptEvent = async (reqObj: any, note?: string) => {
+    const startTime = Date.now();
+    console.log("[CampaignPage] ====== handleAcceptEvent START ======", {
+      timestamp: new Date().toISOString(),
+      reqObj: reqObj ? "present" : "null",
+      reqObjKeys: reqObj ? Object.keys(reqObj) : [],
+      note,
+    });
+
+    if (!reqObj) {
+      console.error("[CampaignPage] ❌ ERROR: reqObj is null");
+      return;
+    }
+
+    // Check if request is already approved before attempting to accept
+    const currentStatus = reqObj?.status || reqObj?.Status;
+    const normalizedStatus = currentStatus ? String(currentStatus).toLowerCase().trim() : '';
+    const isAlreadyApproved = normalizedStatus === 'approved' || normalizedStatus.includes('approv');
+    
+    if (isAlreadyApproved) {
+      console.warn("[CampaignPage] ⚠️ Request is already approved, skipping accept action", {
+        currentStatus,
+        normalizedStatus,
+      });
+      // Return success without making API call
+      return {
+        success: true,
+        message: 'Request is already approved',
+        data: { request: reqObj }
+      };
+    }
+
+    const requestId =
+      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.requestId;
+
+    console.log("[CampaignPage] ✅ Step 1: Resolved requestId for accept:", requestId);
+
+    if (!requestId) {
+      console.error("[CampaignPage] ❌ ERROR: Unable to determine request id for accept");
+      setErrorModalMessage("Unable to determine request id for accept");
+      setErrorModalOpen(true);
+      return;
+    }
+
+    try {
+      console.log("[CampaignPage] ✅ Step 2: Getting authentication token");
+      const token =
+        localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token");
+      const hasToken = !!token;
+      console.log("[CampaignPage] ✅ Step 2 COMPLETE: Token", hasToken ? "found" : "not found");
+
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const body: any = {
+        action: "accept",
+      };
+      // Note: Backend validator doesn't allow note for accept action, so we don't include it
+
+      const url = `${API_URL}/api/event-requests/${requestId}/actions`;
+      console.log("[CampaignPage] ✅ Step 3: Preparing fetch request:", {
+        url,
+        method: "POST",
+        body: JSON.stringify(body),
+        hasToken,
+        headers: { ...headers, Authorization: hasToken ? "Bearer ***" : undefined },
+      });
+
+      console.log("[CampaignPage] 📡 Step 4: Sending fetch request (starting now)...");
+      const fetchStartTime = Date.now();
+      
+      // Add timeout to fetch - shorter timeout to trigger recovery faster
+      const timeoutMs = 10000; // 10 seconds (reduced from 30s to trigger recovery sooner)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Request timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+
+      const fetchPromise = fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      let res: Response;
+      let fetchTimedOut = false;
+      try {
+        res = await Promise.race([fetchPromise, timeoutPromise]);
+        const fetchElapsed = Date.now() - fetchStartTime;
+        console.log("[CampaignPage] ✅ Step 4 COMPLETE: Fetch completed", {
+          status: res.status,
+          statusText: res.statusText,
+          elapsed: `${fetchElapsed}ms`,
+        });
+      } catch (fetchError: any) {
+        const fetchElapsed = Date.now() - fetchStartTime;
+        const isTimeout = fetchError?.message?.includes("timeout");
+        fetchTimedOut = isTimeout;
+        
+        // If timeout, check if backend actually succeeded before logging error
+        if (isTimeout) {
+          console.log("[CampaignPage] ⚠️ Step 4: Request timeout detected, checking if backend succeeded...", {
+            elapsed: `${fetchElapsed}ms`,
+          });
+          
+          try {
+            // Poll the request status to see if it was updated
+            const maxRetries = 5;
+            const retryDelay = 2000; // 2 seconds between checks
+            
+            for (let retry = 0; retry < maxRetries; retry++) {
+              if (retry > 0) {
+                console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Retry ${retry}/${maxRetries - 1} checking request status...`);
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+              }
+              
+              try {
+                const checkToken = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token");
+                const checkHeaders: any = { "Content-Type": "application/json" };
+                if (checkToken) checkHeaders["Authorization"] = `Bearer ${checkToken}`;
+                
+                const checkUrl = `${API_URL}/api/event-requests/${requestId}`;
+                console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Fetching request status from: ${checkUrl}`);
+                
+                const checkRes = await fetch(checkUrl, {
+                  headers: checkHeaders,
+                  credentials: "include",
+                });
+                
+                if (checkRes.ok) {
+                  const checkBody = await checkRes.json();
+                  const updatedRequest = checkBody?.data?.request || checkBody?.data || checkBody?.request || checkBody;
+                  const updatedStatus = updatedRequest?.status || updatedRequest?.Status;
+                  const originalStatus = reqObj?.status || reqObj?.Status;
+                  
+                  console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Request status check`, {
+                    originalStatus,
+                    updatedStatus,
+                    statusChanged: originalStatus !== updatedStatus,
+                    isApproved: updatedStatus === 'approved' || updatedStatus === 'APPROVED',
+                  });
+                  
+                  // If status changed to approved, backend succeeded!
+                  if (updatedStatus === 'approved' || updatedStatus === 'APPROVED' || 
+                      (originalStatus !== updatedStatus && (updatedStatus?.includes('approv') || updatedStatus?.includes('Approv')))) {
+                    console.log(`[CampaignPage] ✅ Step 4a-${retry}: Backend succeeded despite timeout! Status updated to: ${updatedStatus}`);
+                    // Treat as success - continue to refresh
+                    fetchTimedOut = false;
+                    // Create a mock successful response
+                    res = {
+                      ok: true,
+                      status: 200,
+                      statusText: 'OK',
+                      json: async () => ({
+                        success: true,
+                        message: 'Request accepted successfully (recovered from timeout)',
+                        data: { request: updatedRequest }
+                      }),
+                    } as Response;
+                    break;
+                  }
+                }
+              } catch (checkError: any) {
+                console.log(`[CampaignPage] ⚠️ Step 4a-${retry}: Status check failed, will retry:`, checkError?.message);
+                // Continue to next retry
+              }
+            }
+            
+            if (fetchTimedOut) {
+              // Only log as error if recovery failed
+              console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch timeout and recovery failed", {
+                error: fetchError,
+                message: fetchError?.message,
+                elapsed: `${fetchElapsed}ms`,
+              });
+              throw fetchError; // Re-throw original timeout error
+            } else {
+              console.log("[CampaignPage] ✅ Step 4a: Backend succeeded, continuing with success path (no error)");
+            }
+          } catch (recoveryError: any) {
+            // Only log as error if recovery attempt itself failed
+            console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch timeout and recovery attempt failed", {
+              fetchError: fetchError?.message,
+              recoveryError: recoveryError?.message,
+              elapsed: `${fetchElapsed}ms`,
+            });
+            throw fetchError; // Re-throw original timeout error
+          }
+        } else {
+          // Non-timeout errors are always logged
+          console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch error", {
+            error: fetchError,
+            message: fetchError?.message,
+            elapsed: `${fetchElapsed}ms`,
+          });
+          throw fetchError;
+        }
+      }
+
+      console.log("[CampaignPage] ✅ Step 5: Parsing response JSON");
+      let resp: any;
+      try {
+        resp = await res.json();
+        console.log("[CampaignPage] ✅ Step 5 COMPLETE: Response parsed", {
+          success: resp?.success,
+          hasData: !!resp?.data,
+          message: resp?.message,
+        });
+      } catch (parseError: any) {
+        console.error("[CampaignPage] ❌ Step 5 FAILED: JSON parse error", {
+          error: parseError,
+          status: res.status,
+          statusText: res.statusText,
+        });
+        throw new Error(`Failed to parse response: ${parseError.message}`);
+      }
+
+      if (!res.ok) {
+        const errorMsg = resp.message || resp.errors?.join(", ") || "Failed to accept request";
+        console.error("[CampaignPage] ❌ Step 6: Response not OK", {
+          status: res.status,
+          statusText: res.statusText,
+          errorMsg,
+          response: resp,
+        });
+        throw new Error(errorMsg);
+      }
+
+      console.log("[CampaignPage] ✅ Step 6: Response OK, accept succeeded");
+      console.log("[CampaignPage] ✅ Step 7: Starting cache invalidation and refresh");
+      
+      // Invalidate cache and refresh requests list
+      console.log("[CampaignPage] 🔄 Step 7a: Invalidating cache");
+      invalidateCache(/event-requests/);
+      console.log("[CampaignPage] ✅ Step 7a COMPLETE: Cache invalidated");
+      
+      console.log("[CampaignPage] 🔄 Step 7b: Calling fetchRequests()");
+      const refreshStartTime = Date.now();
+      try {
+        await fetchRequests();
+        const refreshElapsed = Date.now() - refreshStartTime;
+        console.log("[CampaignPage] ✅ Step 7b COMPLETE: fetchRequests() completed", {
+          elapsed: `${refreshElapsed}ms`,
+        });
+        
+        // Dispatch custom event to force EventCard components to check for updates
+        // Wait a bit for fetchRequests to fully update the state
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        console.log("[CampaignPage] 📢 Step 7b-event: Dispatching refresh event for request:", requestId);
+        try {
+          window.dispatchEvent(
+            new CustomEvent("unite:force-refresh-requests", { 
+              detail: { 
+                requestId,
+                expectedStatus: 'approved',
+                originalStatus: reqObj?.status || reqObj?.Status,
+              } 
+            })
+          );
+          console.log("[CampaignPage] ✅ Step 7b-event COMPLETE: Refresh event dispatched");
+          
+          // Dispatch a second event after a delay to ensure cards get the update
+          setTimeout(() => {
+            console.log("[CampaignPage] 📢 Step 7b-event-2: Dispatching second refresh event");
+            window.dispatchEvent(
+              new CustomEvent("unite:force-refresh-requests", { 
+                detail: { 
+                  requestId,
+                  expectedStatus: 'approved',
+                  originalStatus: reqObj?.status || reqObj?.Status,
+                } 
+              })
+            );
+          }, 300);
+        } catch (eventError: any) {
+          console.warn("[CampaignPage] ⚠️ Step 7b-event: Failed to dispatch event:", eventError?.message);
+        }
+      } catch (refreshError: any) {
+        console.error("[CampaignPage] ❌ Step 7b FAILED: fetchRequests() error", {
+          error: refreshError,
+          message: refreshError?.message,
+        });
+        // Don't throw - we still want to return success even if refresh fails
+      }
+      
+      console.log("[CampaignPage] 🔄 Step 7c: Waiting 500ms for React state propagation");
+      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log("[CampaignPage] ✅ Step 7c COMPLETE: Delay completed");
+
+      const totalElapsed = Date.now() - startTime;
+      console.log("[CampaignPage] ====== handleAcceptEvent SUCCESS ======", {
+        elapsed: `${totalElapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+
+      return resp;
+    } catch (err: any) {
+      const totalElapsed = Date.now() - startTime;
+      console.error("[CampaignPage] ❌ ====== handleAcceptEvent ERROR ======", {
+        error: err,
+        message: err?.message,
+        stack: err?.stack,
+        name: err?.name,
+        elapsed: `${totalElapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      const errorMessage = err?.message || err?.errors?.join(", ") || "Failed to accept request";
+      console.error("[CampaignPage] Setting error modal:", errorMessage);
+      setErrorModalMessage(errorMessage);
+      setErrorModalOpen(true);
+      throw err;
+    }
+  };
+
+  // Handle confirm event action coming from EventCard
+  const handleConfirmEvent = async (reqObj: any) => {
+    const startTime = Date.now();
+    console.log("[CampaignPage] ====== handleConfirmEvent START ======", {
+      timestamp: new Date().toISOString(),
+      reqObj: reqObj ? "present" : "null",
+      reqObjKeys: reqObj ? Object.keys(reqObj) : [],
+    });
+
+    if (!reqObj) {
+      console.error("[CampaignPage] ❌ ERROR: reqObj is null");
+      return;
+    }
+
+    const requestId =
+      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.requestId;
+
+    console.log("[CampaignPage] ✅ Step 1: Resolved requestId for confirm:", requestId);
+
+    if (!requestId) {
+      console.error("[CampaignPage] ❌ ERROR: Unable to determine request id for confirm");
+      setErrorModalMessage("Unable to determine request id for confirm");
+      setErrorModalOpen(true);
+      return;
+    }
+
+    try {
+      console.log("[CampaignPage] ✅ Step 2: Getting authentication token");
+      const token =
+        localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token");
+      const hasToken = !!token;
+      console.log("[CampaignPage] ✅ Step 2 COMPLETE: Token", hasToken ? "found" : "not found");
+
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const body: any = {
+        action: "confirm",
+      };
+      // Note: Backend validator doesn't allow note for confirm action
+
+      const url = `${API_URL}/api/event-requests/${requestId}/actions`;
+      console.log("[CampaignPage] ✅ Step 3: Preparing fetch request:", {
+        url,
+        method: "POST",
+        body: JSON.stringify(body),
+        hasToken,
+        headers: { ...headers, Authorization: hasToken ? "Bearer ***" : undefined },
+      });
+
+      console.log("[CampaignPage] 📡 Step 4: Sending fetch request (starting now)...");
+      const fetchStartTime = Date.now();
+      
+      // Add timeout to fetch - shorter timeout to trigger recovery faster
+      const timeoutMs = 10000; // 10 seconds (reduced from 30s to trigger recovery sooner)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Request timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+
+      const fetchPromise = fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      let res: Response;
+      let fetchTimedOut = false;
+      try {
+        res = await Promise.race([fetchPromise, timeoutPromise]);
+        const fetchElapsed = Date.now() - fetchStartTime;
+        console.log("[CampaignPage] ✅ Step 4 COMPLETE: Fetch completed", {
+          status: res.status,
+          statusText: res.statusText,
+          elapsed: `${fetchElapsed}ms`,
+        });
+      } catch (fetchError: any) {
+        const fetchElapsed = Date.now() - fetchStartTime;
+        const isTimeout = fetchError?.message?.includes("timeout");
+        fetchTimedOut = isTimeout;
+        
+        // If timeout, check if backend actually succeeded before logging error
+        if (isTimeout) {
+          console.log("[CampaignPage] ⚠️ Step 4: Request timeout detected, checking if backend succeeded...", {
+            elapsed: `${fetchElapsed}ms`,
+          });
+          
+          try {
+            // Poll the request status to see if it was updated
+            const maxRetries = 5;
+            const retryDelay = 2000; // 2 seconds between checks
+            
+            for (let retry = 0; retry < maxRetries; retry++) {
+              if (retry > 0) {
+                console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Retry ${retry}/${maxRetries - 1} checking request status...`);
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+              }
+              
+              try {
+                const checkToken = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token");
+                const checkHeaders: any = { "Content-Type": "application/json" };
+                if (checkToken) checkHeaders["Authorization"] = `Bearer ${checkToken}`;
+                
+                const checkUrl = `${API_URL}/api/event-requests/${requestId}`;
+                console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Fetching request status from: ${checkUrl}`);
+                
+                const checkRes = await fetch(checkUrl, {
+                  headers: checkHeaders,
+                  credentials: "include",
+                });
+                
+                if (checkRes.ok) {
+                  const checkBody = await checkRes.json();
+                  const updatedRequest = checkBody?.data?.request || checkBody?.data || checkBody?.request || checkBody;
+                  const updatedStatus = updatedRequest?.status || updatedRequest?.Status;
+                  const originalStatus = reqObj?.status || reqObj?.Status;
+                  
+                  console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Request status check`, {
+                    originalStatus,
+                    updatedStatus,
+                    statusChanged: originalStatus !== updatedStatus,
+                    isApproved: updatedStatus === 'approved' || updatedStatus === 'APPROVED',
+                  });
+                  
+                  // For confirm action: check if status changed from review-rescheduled to approved
+                  // or any status change that indicates success
+                  const isApproved = updatedStatus === 'approved' || updatedStatus === 'APPROVED';
+                  const wasReviewRescheduled = originalStatus === 'review-rescheduled' || originalStatus === 'REVIEW_RESCHEDULED' || 
+                                               (originalStatus?.includes('rescheduled') && originalStatus?.includes('review'));
+                  const statusChanged = originalStatus !== updatedStatus;
+                  
+                  // If status changed to approved, or changed from review-rescheduled to approved, backend succeeded!
+                  if (isApproved || 
+                      (wasReviewRescheduled && isApproved) ||
+                      (statusChanged && (updatedStatus?.includes('approv') || updatedStatus?.includes('Approv')))) {
+                    console.log(`[CampaignPage] ✅ Step 4a-${retry}: Backend succeeded despite timeout! Status updated from "${originalStatus}" to "${updatedStatus}"`);
+                    // Treat as success - continue to refresh
+                    fetchTimedOut = false;
+                    // Create a mock successful response
+                    res = {
+                      ok: true,
+                      status: 200,
+                      statusText: 'OK',
+                      json: async () => ({
+                        success: true,
+                        message: 'Request confirmed successfully (recovered from timeout)',
+                        data: { request: updatedRequest }
+                      }),
+                    } as Response;
+                    break;
+                  }
+                }
+              } catch (checkError: any) {
+                console.log(`[CampaignPage] ⚠️ Step 4a-${retry}: Status check failed, will retry:`, checkError?.message);
+                // Continue to next retry
+              }
+            }
+            
+            if (fetchTimedOut) {
+              // Only log as error if recovery failed
+              console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch timeout and recovery failed", {
+                error: fetchError,
+                message: fetchError?.message,
+                elapsed: `${fetchElapsed}ms`,
+              });
+              throw fetchError; // Re-throw original timeout error
+            } else {
+              console.log("[CampaignPage] ✅ Step 4a: Backend succeeded, continuing with success path (no error)");
+            }
+          } catch (recoveryError: any) {
+            // Only log as error if recovery attempt itself failed
+            console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch timeout and recovery attempt failed", {
+              fetchError: fetchError?.message,
+              recoveryError: recoveryError?.message,
+              elapsed: `${fetchElapsed}ms`,
+            });
+            throw fetchError; // Re-throw original timeout error
+          }
+        } else {
+          // Non-timeout errors are always logged
+          console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch error", {
+            error: fetchError,
+            message: fetchError?.message,
+            elapsed: `${fetchElapsed}ms`,
+          });
+          throw fetchError;
+        }
+      }
+
+      console.log("[CampaignPage] ✅ Step 5: Parsing response JSON");
+      let resp: any;
+      try {
+        resp = await res.json();
+        console.log("[CampaignPage] ✅ Step 5 COMPLETE: Response parsed", {
+          success: resp?.success,
+          hasData: !!resp?.data,
+          message: resp?.message,
+        });
+      } catch (parseError: any) {
+        console.error("[CampaignPage] ❌ Step 5 FAILED: JSON parse error", {
+          error: parseError,
+          status: res.status,
+          statusText: res.statusText,
+        });
+        throw new Error(`Failed to parse response: ${parseError.message}`);
+      }
+
+      if (!res.ok) {
+        const errorMsg = resp.message || resp.errors?.join(", ") || "Failed to confirm request";
+        console.error("[CampaignPage] ❌ Step 6: Response not OK", {
+          status: res.status,
+          statusText: res.statusText,
+          errorMsg,
+          response: resp,
+        });
+        throw new Error(errorMsg);
+      }
+
+      console.log("[CampaignPage] ✅ Step 6: Response OK, confirm succeeded");
+      
+      // Extract updated request from response if available
+      const responseRequest = resp?.data?.request || resp?.data || resp?.request;
+      const responseStatus = responseRequest?.status || responseRequest?.Status;
+      const originalStatus = reqObj?.status || reqObj?.Status;
+      
+      console.log("[CampaignPage] 📊 Step 6a: Status comparison", {
+        originalStatus,
+        responseStatus,
+        statusChanged: originalStatus !== responseStatus,
+        hasResponseRequest: !!responseRequest,
+      });
+      
+      console.log("[CampaignPage] ✅ Step 7: Starting cache invalidation and refresh");
+      
+      // Invalidate cache and refresh requests list
+      console.log("[CampaignPage] 🔄 Step 7a: Invalidating cache");
+      invalidateCache(/event-requests/);
+      console.log("[CampaignPage] ✅ Step 7a COMPLETE: Cache invalidated");
+      
+      console.log("[CampaignPage] 🔄 Step 7b: Calling fetchRequests()");
+      const refreshStartTime = Date.now();
+      try {
+        await fetchRequests();
+        const refreshElapsed = Date.now() - refreshStartTime;
+        console.log("[CampaignPage] ✅ Step 7b COMPLETE: fetchRequests() completed", {
+          elapsed: `${refreshElapsed}ms`,
+        });
+        
+        // Verify the request was actually updated by checking the requests list
+        console.log("[CampaignPage] 🔍 Step 7b-verify: Verifying request was updated in list");
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Force a second refresh to ensure UI is updated (sometimes React needs an extra cycle)
+        console.log("[CampaignPage] 🔄 Step 7b-verify: Force refreshing to ensure UI update");
+        invalidateCache(/event-requests/);
+        await fetchRequests();
+        console.log("[CampaignPage] ✅ Step 7b-verify COMPLETE: Force refresh completed");
+      } catch (refreshError: any) {
+        console.error("[CampaignPage] ❌ Step 7b FAILED: fetchRequests() error", {
+          error: refreshError,
+          message: refreshError?.message,
+        });
+        // Don't throw - we still want to return success even if refresh fails
+      }
+      
+      console.log("[CampaignPage] 🔄 Step 7c: Waiting 300ms for React state propagation");
+      await new Promise(resolve => setTimeout(resolve, 300));
+      console.log("[CampaignPage] ✅ Step 7c COMPLETE: Delay completed");
+
+      const totalElapsed = Date.now() - startTime;
+      console.log("[CampaignPage] ====== handleConfirmEvent SUCCESS ======", {
+        elapsed: `${totalElapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+
+      return resp;
+    } catch (err: any) {
+      const totalElapsed = Date.now() - startTime;
+      console.error("[CampaignPage] ❌ ====== handleConfirmEvent ERROR ======", {
+        error: err,
+        message: err?.message,
+        stack: err?.stack,
+        name: err?.name,
+        elapsed: `${totalElapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      const errorMessage = err?.message || err?.errors?.join(", ") || "Failed to confirm request";
+      console.error("[CampaignPage] Setting error modal:", errorMessage);
+      setErrorModalMessage(errorMessage);
+      setErrorModalOpen(true);
+      throw err;
+    }
+  };
+
+  // Handle reject event action coming from EventCard
+  const handleRejectEvent = async (reqObj: any, note?: string) => {
+    const startTime = Date.now();
+    console.log("[CampaignPage] ====== handleRejectEvent START ======", {
+      timestamp: new Date().toISOString(),
+      reqObj: reqObj ? "present" : "null",
+      reqObjKeys: reqObj ? Object.keys(reqObj) : [],
+      note,
+    });
+
+    if (!reqObj) {
+      console.error("[CampaignPage] ❌ ERROR: reqObj is null");
+      return;
+    }
+
+    const requestId =
+      reqObj.Request_ID || reqObj.RequestId || reqObj._id || reqObj.requestId;
+
+    console.log("[CampaignPage] ✅ Step 1: Resolved requestId for reject:", requestId);
+
+    if (!requestId) {
+      console.error("[CampaignPage] ❌ ERROR: Unable to determine request id for reject");
+      setErrorModalMessage("Unable to determine request id for reject");
+      setErrorModalOpen(true);
+      return;
+    }
+
+    try {
+      console.log("[CampaignPage] ✅ Step 2: Getting authentication token");
+      const token =
+        localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token");
+      const hasToken = !!token;
+      console.log("[CampaignPage] ✅ Step 2 COMPLETE: Token", hasToken ? "found" : "not found");
+
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const body: any = {
+        action: "reject",
+        note: note || "",
+      };
+
+      const url = `${API_URL}/api/event-requests/${requestId}/actions`;
+      console.log("[CampaignPage] ✅ Step 3: Preparing fetch request:", {
+        url,
+        method: "POST",
+        body: JSON.stringify(body),
+        hasToken,
+        headers: { ...headers, Authorization: hasToken ? "Bearer ***" : undefined },
+      });
+
+      console.log("[CampaignPage] 📡 Step 4: Sending fetch request (starting now)...");
+      const fetchStartTime = Date.now();
+      
+      // Add timeout to fetch - shorter timeout to trigger recovery faster
+      const timeoutMs = 10000; // 10 seconds (reduced from 30s to trigger recovery sooner)
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Request timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+      });
+
+      const fetchPromise = fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      let res: Response;
+      let fetchTimedOut = false;
+      try {
+        res = await Promise.race([fetchPromise, timeoutPromise]);
+        const fetchElapsed = Date.now() - fetchStartTime;
+        console.log("[CampaignPage] ✅ Step 4 COMPLETE: Fetch completed", {
+          status: res.status,
+          statusText: res.statusText,
+          elapsed: `${fetchElapsed}ms`,
+        });
+      } catch (fetchError: any) {
+        const fetchElapsed = Date.now() - fetchStartTime;
+        const isTimeout = fetchError?.message?.includes("timeout");
+        fetchTimedOut = isTimeout;
+        
+        // If timeout, check if backend actually succeeded before logging error
+        if (isTimeout) {
+          console.log("[CampaignPage] ⚠️ Step 4: Request timeout detected, checking if backend succeeded...", {
+            elapsed: `${fetchElapsed}ms`,
+          });
+          
+          try {
+            // Poll the request status to see if it was updated
+            const maxRetries = 5;
+            const retryDelay = 2000; // 2 seconds between checks
+            
+            for (let retry = 0; retry < maxRetries; retry++) {
+              if (retry > 0) {
+                console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Retry ${retry}/${maxRetries - 1} checking request status...`);
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
+              }
+              
+              try {
+                const checkToken = localStorage.getItem("unite_token") || sessionStorage.getItem("unite_token");
+                const checkHeaders: any = { "Content-Type": "application/json" };
+                if (checkToken) checkHeaders["Authorization"] = `Bearer ${checkToken}`;
+                
+                const checkUrl = `${API_URL}/api/event-requests/${requestId}`;
+                console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Fetching request status from: ${checkUrl}`);
+                
+                const checkRes = await fetch(checkUrl, {
+                  headers: checkHeaders,
+                  credentials: "include",
+                });
+                
+                if (checkRes.ok) {
+                  const checkBody = await checkRes.json();
+                  const updatedRequest = checkBody?.data?.request || checkBody?.data || checkBody?.request || checkBody;
+                  const updatedStatus = updatedRequest?.status || updatedRequest?.Status;
+                  const originalStatus = reqObj?.status || reqObj?.Status;
+                  
+                  console.log(`[CampaignPage] 🔍 Step 4a-${retry}: Request status check`, {
+                    originalStatus,
+                    updatedStatus,
+                    statusChanged: originalStatus !== updatedStatus,
+                    isRejected: updatedStatus === 'rejected' || updatedStatus === 'REJECTED',
+                  });
+                  
+                  // If status changed to rejected, backend succeeded!
+                  if (updatedStatus === 'rejected' || updatedStatus === 'REJECTED' || 
+                      (originalStatus !== updatedStatus && (updatedStatus?.includes('reject') || updatedStatus?.includes('Reject')))) {
+                    console.log(`[CampaignPage] ✅ Step 4a-${retry}: Backend succeeded despite timeout! Status updated to: ${updatedStatus}`);
+                    // Treat as success - continue to refresh
+                    fetchTimedOut = false;
+                    // Create a mock successful response
+                    res = {
+                      ok: true,
+                      status: 200,
+                      statusText: 'OK',
+                      json: async () => ({
+                        success: true,
+                        message: 'Request rejected successfully (recovered from timeout)',
+                        data: { request: updatedRequest }
+                      }),
+                    } as Response;
+                    break;
+                  }
+                }
+              } catch (checkError: any) {
+                console.log(`[CampaignPage] ⚠️ Step 4a-${retry}: Status check failed, will retry:`, checkError?.message);
+                // Continue to next retry
+              }
+            }
+            
+            if (fetchTimedOut) {
+              // Only log as error if recovery failed
+              console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch timeout and recovery failed", {
+                error: fetchError,
+                message: fetchError?.message,
+                elapsed: `${fetchElapsed}ms`,
+              });
+              throw fetchError; // Re-throw original timeout error
+            } else {
+              console.log("[CampaignPage] ✅ Step 4a: Backend succeeded, continuing with success path (no error)");
+            }
+          } catch (recoveryError: any) {
+            // Only log as error if recovery attempt itself failed
+            console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch timeout and recovery attempt failed", {
+              fetchError: fetchError?.message,
+              recoveryError: recoveryError?.message,
+              elapsed: `${fetchElapsed}ms`,
+            });
+            throw fetchError; // Re-throw original timeout error
+          }
+        } else {
+          // Non-timeout errors are always logged
+          console.error("[CampaignPage] ❌ Step 4 FAILED: Fetch error", {
+            error: fetchError,
+            message: fetchError?.message,
+            elapsed: `${fetchElapsed}ms`,
+          });
+          throw fetchError;
+        }
+      }
+
+      console.log("[CampaignPage] ✅ Step 5: Parsing response JSON");
+      let resp: any;
+      try {
+        resp = await res.json();
+        console.log("[CampaignPage] ✅ Step 5 COMPLETE: Response parsed", {
+          success: resp?.success,
+          hasData: !!resp?.data,
+          message: resp?.message,
+        });
+      } catch (parseError: any) {
+        console.error("[CampaignPage] ❌ Step 5 FAILED: JSON parse error", {
+          error: parseError,
+          status: res.status,
+          statusText: res.statusText,
+        });
+        throw new Error(`Failed to parse response: ${parseError.message}`);
+      }
+
+      if (!res.ok) {
+        const errorMsg = resp.message || resp.errors?.join(", ") || "Failed to reject request";
+        console.error("[CampaignPage] ❌ Step 6: Response not OK", {
+          status: res.status,
+          statusText: res.statusText,
+          errorMsg,
+          response: resp,
+        });
+        throw new Error(errorMsg);
+      }
+
+      console.log("[CampaignPage] ✅ Step 6: Response OK, reject succeeded");
+      console.log("[CampaignPage] ✅ Step 7: Starting cache invalidation and refresh");
+      
+      // Invalidate cache and refresh requests list
+      console.log("[CampaignPage] 🔄 Step 7a: Invalidating cache");
+      invalidateCache(/event-requests/);
+      console.log("[CampaignPage] ✅ Step 7a COMPLETE: Cache invalidated");
+      
+      console.log("[CampaignPage] 🔄 Step 7b: Calling fetchRequests()");
+      const refreshStartTime = Date.now();
+      try {
+        await fetchRequests();
+        const refreshElapsed = Date.now() - refreshStartTime;
+        console.log("[CampaignPage] ✅ Step 7b COMPLETE: fetchRequests() completed", {
+          elapsed: `${refreshElapsed}ms`,
+        });
+        
+        // Dispatch custom event to force EventCard components to check for updates
+        // Wait a bit for fetchRequests to fully update the state
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        console.log("[CampaignPage] 📢 Step 7b-event: Dispatching refresh event for request:", requestId);
+        try {
+          window.dispatchEvent(
+            new CustomEvent("unite:force-refresh-requests", { 
+              detail: { 
+                requestId,
+                expectedStatus: 'approved',
+                originalStatus: reqObj?.status || reqObj?.Status,
+              } 
+            })
+          );
+          console.log("[CampaignPage] ✅ Step 7b-event COMPLETE: Refresh event dispatched");
+          
+          // Dispatch a second event after a delay to ensure cards get the update
+          setTimeout(() => {
+            console.log("[CampaignPage] 📢 Step 7b-event-2: Dispatching second refresh event");
+            window.dispatchEvent(
+              new CustomEvent("unite:force-refresh-requests", { 
+                detail: { 
+                  requestId,
+                  expectedStatus: 'approved',
+                  originalStatus: reqObj?.status || reqObj?.Status,
+                } 
+              })
+            );
+          }, 300);
+        } catch (eventError: any) {
+          console.warn("[CampaignPage] ⚠️ Step 7b-event: Failed to dispatch event:", eventError?.message);
+        }
+      } catch (refreshError: any) {
+        console.error("[CampaignPage] ❌ Step 7b FAILED: fetchRequests() error", {
+          error: refreshError,
+          message: refreshError?.message,
+        });
+        // Don't throw - we still want to return success even if refresh fails
+      }
+      
+      console.log("[CampaignPage] 🔄 Step 7c: Waiting 500ms for React state propagation");
+      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log("[CampaignPage] ✅ Step 7c COMPLETE: Delay completed");
+
+      const totalElapsed = Date.now() - startTime;
+      console.log("[CampaignPage] ====== handleRejectEvent SUCCESS ======", {
+        elapsed: `${totalElapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+
+      return resp;
+    } catch (err: any) {
+      const totalElapsed = Date.now() - startTime;
+      console.error("[CampaignPage] ❌ ====== handleRejectEvent ERROR ======", {
+        error: err,
+        message: err?.message,
+        stack: err?.stack,
+        name: err?.name,
+        elapsed: `${totalElapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      const errorMessage = err?.message || err?.errors?.join(", ") || "Failed to reject request";
+      console.error("[CampaignPage] Setting error modal:", errorMessage);
+      setErrorModalMessage(errorMessage);
+      setErrorModalOpen(true);
+      throw err;
+    }
+  };
+
   // Handle cancel event action coming from EventCard
   const handleCancelEvent = async (reqObj: any) => {
     if (!reqObj) return;
@@ -1345,9 +2315,12 @@ export default function CampaignPage() {
                   displayDistrict = event.District || "";
                 }
 
+                // Use request ID as key to ensure React tracks updates properly
+                const requestKey = req.Request_ID || req.RequestId || req._id || req.requestId || `request-${index}`;
+                
                 return (
                   <EventCard
-                    key={index}
+                    key={requestKey}
                     category={category}
                     date={dateStr}
                     district={displayDistrict}
@@ -1372,6 +2345,9 @@ export default function CampaignPage() {
                     ) =>
                       handleRescheduleEvent(req, currentDate, newDateISO, note)
                     }
+                    onAcceptEvent={(note?: string) => handleAcceptEvent(req, note)}
+                    onConfirmEvent={() => handleConfirmEvent(req)}
+                    onRejectEvent={(reqObj: any, note?: string) => handleRejectEvent(reqObj, note)}
                     onViewEvent={() => handleOpenView(req)}
                   />
                 );

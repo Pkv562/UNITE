@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { DatePicker } from "@heroui/date-picker";
 import { Card, CardHeader, CardBody, CardFooter } from "@heroui/card";
 import { Chip } from "@heroui/chip";
@@ -19,6 +19,7 @@ import {
   ModalFooter,
 } from "@heroui/modal";
 import { Avatar } from "@heroui/avatar";
+import { Spinner } from "@heroui/spinner";
 import {
   EllipsisVertical,
   Eye,
@@ -86,7 +87,8 @@ interface EventCardProps {
   request?: any;
   onCancelEvent?: () => void;
   onAcceptEvent?: (note?: string) => void;
-  onRejectEvent?: (note?: string) => void;
+  onRejectEvent?: (reqObj: any, note?: string) => void;
+  onConfirmEvent?: () => void;
 }
 
 /**
@@ -110,6 +112,7 @@ const EventCard: React.FC<EventCardProps> = ({
   onCancelEvent,
   onAcceptEvent,
   onRejectEvent,
+  onConfirmEvent,
 }) => {
   // Dialog state management
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
@@ -121,6 +124,16 @@ const EventCard: React.FC<EventCardProps> = ({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [successModal, setSuccessModal] = useState(false);
   const [fullRequest, setFullRequest] = useState<any>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isAccepting, setIsAccepting] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
+  const [isRescheduling, setIsRescheduling] = useState(false);
+  
+  // Ref-based locks to prevent race conditions (set synchronously before state updates)
+  const isAcceptingRef = React.useRef(false);
+  const isConfirmingRef = React.useRef(false);
+  const isRejectingRef = React.useRef(false);
+  const isReschedulingRef = React.useRef(false);
 
   const { getDistrictName, getProvinceName, locations } = useLocations();
 
@@ -393,6 +406,212 @@ const EventCard: React.FC<EventCardProps> = ({
     };
   }, [request, district, getDistrictName, getProvinceName, locations.districts, locations.provinces]);
 
+  // Sync fullRequest with request prop when it changes (e.g., after refresh)
+  // This ensures the card shows the updated status after actions complete
+  useEffect(() => {
+    console.log("[EventCard] 🔄 useEffect: Checking if request prop changed", {
+      hasRequest: !!request,
+      viewOpen,
+      requestId: request?.Request_ID || request?.RequestId || request?._id,
+      requestStatus: request?.status || request?.Status,
+      fullRequestId: fullRequest?.Request_ID || fullRequest?.RequestId || fullRequest?._id,
+      fullRequestStatus: fullRequest?.status || fullRequest?.Status,
+    });
+
+    if (request && !viewOpen) {
+      // Only update if view modal is closed (to avoid overwriting modal data)
+      // Check if request has been updated (status changed)
+      const currentStatus = fullRequest?.status || fullRequest?.Status;
+      const newStatus = request?.status || request?.Status;
+      const requestId = request?.Request_ID || request?.RequestId || request?._id;
+      const fullRequestId = fullRequest?.Request_ID || fullRequest?.RequestId || fullRequest?._id;
+      
+      console.log("[EventCard] 🔄 useEffect: Comparing statuses", {
+        currentStatus,
+        newStatus,
+        statusChanged: currentStatus !== newStatus,
+        requestId,
+        fullRequestId,
+        idsMatch: requestId === fullRequestId,
+        hasFullRequest: !!fullRequest,
+      });
+      
+      // Normalize statuses for comparison (handle case variations)
+      const normalizeStatusForCompare = (s: string | undefined | null) => {
+        if (!s) return '';
+        return String(s).toLowerCase().trim();
+      };
+      
+      const normalizedCurrent = normalizeStatusForCompare(currentStatus);
+      const normalizedNew = normalizeStatusForCompare(newStatus);
+      
+      // Define status hierarchy to prevent downgrading (e.g., approved -> review-rescheduled)
+      const getStatusPriority = (status: string) => {
+        if (!status) return 0;
+        const s = status.toLowerCase();
+        if (s.includes('approved') || s === 'approved') return 5;
+        if (s.includes('rejected') || s === 'rejected') return 4;
+        if (s.includes('review-rescheduled') || s.includes('rescheduled')) return 3;
+        if (s.includes('pending') || s.includes('review')) return 2;
+        if (s.includes('cancelled') || s === 'cancelled') return 1;
+        return 0;
+      };
+      
+      const currentPriority = getStatusPriority(normalizedCurrent);
+      const newPriority = getStatusPriority(normalizedNew);
+      
+      // Check for status transitions that indicate success (e.g., review-rescheduled -> approved)
+      const wasPending = normalizedCurrent.includes('pending') || normalizedCurrent.includes('review');
+      const isNowApproved = normalizedNew === 'approved' || normalizedNew.includes('approv');
+      const statusTransitioned = wasPending && isNowApproved;
+      
+      // Prevent downgrading status (e.g., approved -> review-rescheduled)
+      const wouldDowngrade = currentPriority > newPriority;
+      
+      // Also check if fullRequest has old status but request prop might have new status
+      // This handles cases where the request prop updates but fullRequest hasn't
+      const shouldUpdate = (normalizedCurrent !== normalizedNew || 
+                          !fullRequest || 
+                          requestId !== fullRequestId || 
+                          statusTransitioned ||
+                          // Force update if fullRequest exists but request prop is different object
+                          (fullRequest && request && JSON.stringify(fullRequest) !== JSON.stringify(request)))
+                          && !wouldDowngrade; // Don't update if it would downgrade status
+      
+      if (shouldUpdate) {
+        console.log("[EventCard] ✅ useEffect: Updating fullRequest with new request data", {
+          oldStatus: currentStatus,
+          newStatus,
+          normalizedCurrent,
+          normalizedNew,
+          statusTransitioned,
+          currentPriority,
+          newPriority,
+          wouldDowngrade,
+          requestId,
+          shouldUpdate,
+          fullRequestExists: !!fullRequest,
+          requestExists: !!request,
+        });
+        // Request has been updated, sync fullRequest
+        setFullRequest(request);
+        console.log("[EventCard] ✅ useEffect: fullRequest updated successfully");
+      } else {
+        if (wouldDowngrade) {
+          console.log("[EventCard] ⏭️ useEffect: Skipping update (would downgrade status)", {
+            normalizedCurrent,
+            normalizedNew,
+            currentPriority,
+            newPriority,
+          });
+        } else {
+          console.log("[EventCard] ⏭️ useEffect: Skipping update (no changes detected)", {
+            normalizedCurrent,
+            normalizedNew,
+            statusTransitioned,
+          });
+        }
+      }
+    } else {
+      if (!request) {
+        console.log("[EventCard] ⏭️ useEffect: Skipping (no request prop)");
+      } else if (viewOpen) {
+        console.log("[EventCard] ⏭️ useEffect: Skipping (view modal is open)");
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request, viewOpen]);
+
+  // Listen for force refresh events (when we know a status change occurred)
+  useEffect(() => {
+    const handleForceRefresh = (event: CustomEvent) => {
+      const { requestId: eventRequestId, expectedStatus, originalStatus } = event.detail || {};
+      const currentRequestId = request?.Request_ID || request?.RequestId || request?._id;
+      const currentStatus = fullRequest?.status || fullRequest?.Status || request?.status || request?.Status;
+      const normalizedCurrentStatus = currentStatus ? String(currentStatus).toLowerCase().trim() : '';
+      const normalizedOriginalStatus = originalStatus ? String(originalStatus).toLowerCase().trim() : '';
+      const normalizedExpectedStatus = expectedStatus ? String(expectedStatus).toLowerCase().trim() : '';
+      
+      // Match by ID if available, or by status if ID is not available
+      const idMatches = eventRequestId && currentRequestId && String(eventRequestId) === String(currentRequestId);
+      const statusMatches = normalizedOriginalStatus && normalizedCurrentStatus === normalizedOriginalStatus;
+      
+      console.log("[EventCard] 📢 Received force refresh event", {
+        eventRequestId,
+        currentRequestId,
+        expectedStatus,
+        originalStatus,
+        currentStatus,
+        normalizedCurrentStatus,
+        normalizedOriginalStatus,
+        normalizedExpectedStatus,
+        idMatches,
+        statusMatches,
+        shouldUpdate: idMatches || statusMatches,
+      });
+      
+      // If this event is for this card's request (by ID or by status match), force update
+      if (idMatches || statusMatches) {
+        console.log("[EventCard] ✅ Force refresh matches this card (ID or status), updating fullRequest", {
+          matchType: idMatches ? 'ID' : 'status',
+        });
+        
+        // If request prop already has the expected status, use it directly
+        if (request) {
+          const requestStatus = request?.status || request?.Status;
+          const normalizedRequestStatus = requestStatus ? String(requestStatus).toLowerCase().trim() : '';
+          
+          if (normalizedRequestStatus === normalizedExpectedStatus) {
+            console.log("[EventCard] ✅ Request prop has expected status, updating fullRequest directly");
+            setFullRequest(request);
+          } else {
+            // Request prop doesn't have expected status yet, but we know it should be updated
+            // Create an updated version of the request with the expected status
+            console.log("[EventCard] 🔄 Request prop doesn't have expected status yet, creating updated request object");
+            const updatedRequest = {
+              ...request,
+              status: expectedStatus,
+              Status: expectedStatus,
+            };
+            setFullRequest(updatedRequest);
+            console.log("[EventCard] ✅ Force refresh: fullRequest updated with expected status:", expectedStatus);
+            
+            // Also try to update from request prop after a delay in case it gets updated
+            setTimeout(() => {
+              if (request) {
+                const delayedStatus = request?.status || request?.Status;
+                const normalizedDelayedStatus = delayedStatus ? String(delayedStatus).toLowerCase().trim() : '';
+                if (normalizedDelayedStatus === normalizedExpectedStatus) {
+                  console.log("[EventCard] ✅ Delayed update: Request prop now has expected status, updating");
+                  setFullRequest(request);
+                }
+              }
+            }, 200);
+          }
+        } else if (fullRequest) {
+          // No request prop, but we have fullRequest - update it directly with expected status
+          console.log("[EventCard] 🔄 No request prop, updating fullRequest directly with expected status");
+          const updatedRequest = {
+            ...fullRequest,
+            status: expectedStatus,
+            Status: expectedStatus,
+          };
+          setFullRequest(updatedRequest);
+          console.log("[EventCard] ✅ Force refresh: fullRequest updated with expected status:", expectedStatus);
+        } else {
+          // No request prop or fullRequest - clear to trigger re-fetch
+          console.log("[EventCard] 🔄 No request prop or fullRequest, clearing to trigger refresh");
+          setFullRequest(null);
+        }
+      }
+    };
+    
+    window.addEventListener("unite:force-refresh-requests", handleForceRefresh as EventListener);
+    return () => {
+      window.removeEventListener("unite:force-refresh-requests", handleForceRefresh as EventListener);
+    };
+  }, [request, fullRequest]);
+
   const resolvedRequest =
     fullRequest || request || (request && (request as any).event) || null;
 
@@ -498,7 +717,9 @@ const EventCard: React.FC<EventCardProps> = ({
     rescheduledISO: string,
     noteText: string,
   ) => {
-    console.log("[EventCard] handleRescheduleConfirm called with:", {
+    const startTime = Date.now();
+    console.log("[EventCard] ====== handleRescheduleConfirm START ======", {
+      timestamp: new Date().toISOString(),
       currentDateStr,
       rescheduledISO,
       noteText,
@@ -506,53 +727,292 @@ const EventCard: React.FC<EventCardProps> = ({
       hasOnRescheduleEvent: !!onRescheduleEvent,
     });
 
+    // Prevent duplicate actions
+    if (isRescheduling) {
+      console.warn("[EventCard] ❌ BLOCKED: Reschedule already in progress, ignoring duplicate call");
+      return;
+    }
+
     try {
+      // Close modal first so user can see the loading animation
+      console.log("[EventCard] ✅ Step 0: Closing reschedule modal");
+      setRescheduleOpen(false);
+      console.log("[EventCard] ✅ Step 0 COMPLETE: Modal closed");
+      
+      console.log("[EventCard] ✅ Step 1: Setting loading state (isRescheduling = true)");
+      setIsRescheduling(true);
+      console.log("[EventCard] ✅ Step 1 COMPLETE: Loading state set");
+
       if (onRescheduleEvent) {
-        console.log("[EventCard] Using onRescheduleEvent callback");
+        console.log("[EventCard] ✅ Step 2: Using onRescheduleEvent callback path");
+        console.log("[EventCard] 📞 Step 2a: Calling onRescheduleEvent callback");
         await onRescheduleEvent(currentDateStr, rescheduledISO, noteText);
+        console.log("[EventCard] ✅ Step 2b: onRescheduleEvent callback completed successfully");
       } else {
-        console.log("[EventCard] Using direct API call");
+        console.log("[EventCard] ✅ Step 2: Using direct API call path (no callback)");
         
         if (!resolvedRequestId) {
-          console.error("[EventCard] Request ID not found");
+          console.error("[EventCard] ❌ ERROR: Request ID not found");
           alert("Request ID not found. Cannot reschedule.");
           throw new Error("Request ID not found");
         }
         
         if (!rescheduledISO) {
-          console.error("[EventCard] Rescheduled date is missing");
+          console.error("[EventCard] ❌ ERROR: Rescheduled date is missing");
           alert("Rescheduled date is required.");
           throw new Error("Rescheduled date is required");
         }
 
-        console.log("[EventCard] Calling svcPerformRequestAction with:", {
-          requestId: resolvedRequestId,
-          action: "reschedule",
-          note: noteText,
-          proposedDate: rescheduledISO,
-        });
-
+        console.log("[EventCard] 📞 Step 2a: Calling svcPerformRequestAction");
         await svcPerformRequestAction(
           resolvedRequestId,
           "reschedule",
           noteText,
           rescheduledISO,
         );
-
-        console.log("[EventCard] Reschedule action completed successfully");
+        console.log("[EventCard] ✅ Step 2b: svcPerformRequestAction completed");
       }
-    } catch (e) {
-      console.error("[EventCard] Reschedule error:", e);
+      
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ====== handleRescheduleConfirm SUCCESS ======", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      
+      if (viewOpen) {
+        await openViewRequest();
+      }
+    } catch (e: any) {
+      const elapsed = Date.now() - startTime;
+      console.error("[EventCard] ❌ ====== handleRescheduleConfirm ERROR ======", {
+        error: e,
+        message: e?.message,
+        stack: e?.stack,
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
       const errorMessage = (e as Error).message || "Failed to reschedule request";
       alert(`Failed to reschedule: ${errorMessage}`);
       throw e; // Re-throw so modal can handle it
+    } finally {
+      console.log("[EventCard] 🔄 Step 3: Clearing loading state (isRescheduling = false)");
+      setIsRescheduling(false);
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ✅ Step 3 COMPLETE: Loading state cleared", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("[EventCard] ====== handleRescheduleConfirm END ======");
+    }
+  };
+
+  // Unified action handler with refresh - used by ACCEPT, CONFIRM, and similar actions
+  // Ensures consistent UI refresh behavior across all actions
+  const handleActionWithRefresh = async (
+    actionFn: () => Promise<any>,
+    actionName: string
+  ) => {
+    if (!resolvedRequestId) {
+      alert("Request ID not found");
+      return;
+    }
+
+    const loadingSetter = actionName === 'accept' ? setIsAccepting : setIsConfirming;
+    
+    // Prevent duplicate actions
+    if (actionName === 'accept' && isAccepting) {
+      console.warn("[EventCard] Accept already in progress, ignoring duplicate call");
+      return;
+    }
+    if (actionName === 'confirm' && isConfirming) {
+      console.warn("[EventCard] Confirm already in progress, ignoring duplicate call");
+      return;
     }
     
-    // Only close modal and refresh if successful
-    setRescheduleOpen(false);
-    
-    if (viewOpen) {
-      await openViewRequest();
+    try {
+      loadingSetter(true);
+      console.log(`[EventCard] handleActionWithRefresh called for ${actionName}, request:`, resolvedRequestId);
+      
+      // Execute action
+      const response = await actionFn();
+      console.log(`[EventCard] ${actionName} action response:`, response);
+      
+      // Extract response data - handle both response structures
+      // performConfirmAction returns: { success, data: { request, ui: {...} } }
+      // performRequestAction returns: { success, data: { request, ui: {...} } }
+      // Both services should return the same structure, but handle edge cases
+      const responseRequest = response?.data?.request || response?.data || response?.request || response;
+      const uiFlags = response?.data?.ui || response?.ui || {};
+      const shouldRefresh = uiFlags?.shouldRefresh !== undefined 
+        ? uiFlags.shouldRefresh 
+        : true; // Default to true for state changes
+      const shouldCloseModal = uiFlags?.shouldCloseModal !== undefined 
+        ? uiFlags.shouldCloseModal 
+        : true;
+      const cacheKeysToInvalidate = uiFlags?.cacheKeysToInvalidate || [];
+      
+      console.log(`[EventCard] Extracted response data for ${actionName}:`, {
+        hasRequest: !!responseRequest,
+        shouldRefresh,
+        shouldCloseModal,
+        cacheKeysCount: cacheKeysToInvalidate.length
+      });
+      
+      // Update UI immediately with response data
+      if (responseRequest) {
+        console.log(`[EventCard] Updating UI with response data immediately for ${actionName}`);
+        setFullRequest(responseRequest);
+      }
+      
+      // Clear permission cache and invalidate request cache (async, don't wait)
+      (async () => {
+        try {
+          const { clearPermissionCache } = await import("@/utils/eventActionPermissions");
+          clearPermissionCache();
+        } catch (permCacheError) {
+          console.error(`[EventCard] Error clearing permission cache:`, permCacheError);
+        }
+        
+        try {
+          const { invalidateCache } = await import("@/utils/requestCache");
+          
+          // Invalidate specific cache keys if provided
+          if (cacheKeysToInvalidate && cacheKeysToInvalidate.length > 0) {
+            cacheKeysToInvalidate.forEach((key: string) => {
+              const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
+              invalidateCache(cachePattern);
+            });
+          } else {
+            invalidateCache(/event-requests/);
+          }
+        } catch (cacheError) {
+          console.error(`[EventCard] Error invalidating cache:`, cacheError);
+        }
+      })();
+      
+      // Dispatch refresh events AFTER state update
+      if (typeof window !== "undefined") {
+        try {
+          window.dispatchEvent(new CustomEvent("unite:requests-changed", {
+            detail: { 
+              requestId: resolvedRequestId, 
+              action: actionName, 
+              forceRefresh: shouldRefresh,
+              shouldRefresh,
+              shouldCloseModal,
+              cacheKeysToInvalidate
+            }
+          }));
+          
+          if (shouldRefresh) {
+            window.dispatchEvent(new CustomEvent("unite:force-refresh-requests", {
+              detail: { 
+                requestId: resolvedRequestId, 
+                reason: `${actionName}-action`, 
+                cacheKeysToInvalidate 
+              }
+            }));
+          }
+        } catch (e) {
+          console.error(`[EventCard] Failed to dispatch events:`, e);
+        }
+      }
+      
+      // Close modal after state update and event dispatch
+      setViewOpen(false);
+    } catch (error: any) {
+      console.error(`[EventCard] ${actionName} action error:`, error);
+      
+      // Check if this is a timeout error - backend might have succeeded
+      const isTimeoutError = error?.message?.includes("timeout");
+      
+      if (isTimeoutError) {
+        console.log(`[EventCard] Timeout detected for ${actionName}, checking if backend succeeded...`);
+        
+        // Try to refetch the request multiple times with delays (backend might still be processing)
+        const maxRetries = 3;
+        const retryDelay = 2000; // 2 seconds between retries
+        
+        for (let retry = 0; retry < maxRetries; retry++) {
+          try {
+            if (retry > 0) {
+              console.log(`[EventCard] Retry ${retry}/${maxRetries - 1} checking backend status...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+            }
+            
+            const updatedRequest = await svcFetchRequestDetails(resolvedRequestId, true);
+            
+            if (updatedRequest) {
+              // Check if the request status changed (indicating backend succeeded)
+              const currentStatus = fullRequest?.status || fullRequest?.Status;
+              const newStatus = updatedRequest?.status || updatedRequest?.Status;
+              
+              // Check for approved state or any state change for confirm/accept actions
+              const isApproved = newStatus === 'approved' || newStatus === 'APPROVED';
+              const statusChanged = newStatus !== currentStatus;
+              
+              if (statusChanged && (isApproved || actionName === 'confirm' || actionName === 'accept')) {
+                console.log(`[EventCard] Backend succeeded despite timeout! Updating UI... (retry ${retry + 1})`);
+                
+                // Update UI with the new status
+                setFullRequest(updatedRequest);
+                
+                // Clear permission cache and invalidate request cache
+                (async () => {
+                  try {
+                    const { clearPermissionCache } = await import("@/utils/eventActionPermissions");
+                    clearPermissionCache();
+                  } catch (permCacheError) {
+                    console.error(`[EventCard] Error clearing permission cache:`, permCacheError);
+                  }
+                  
+                  try {
+                    const { invalidateCache } = await import("@/utils/requestCache");
+                    invalidateCache(/event-requests/);
+                  } catch (cacheError) {
+                    console.error(`[EventCard] Error invalidating cache:`, cacheError);
+                  }
+                })();
+                
+                // Dispatch refresh events
+                if (typeof window !== "undefined") {
+                  window.dispatchEvent(new CustomEvent("unite:requests-changed", {
+                    detail: { 
+                      requestId: resolvedRequestId, 
+                      action: actionName, 
+                      forceRefresh: true,
+                      shouldRefresh: true
+                    }
+                  }));
+                  window.dispatchEvent(new CustomEvent("unite:force-refresh-requests", {
+                    detail: { 
+                      requestId: resolvedRequestId, 
+                      reason: `${actionName}-timeout-recovery` 
+                    }
+                  }));
+                }
+                
+                // Close modal
+                setViewOpen(false);
+                
+                // Don't show error - backend succeeded
+                return;
+              }
+            }
+          } catch (refetchError) {
+            console.error(`[EventCard] Error refetching after timeout (retry ${retry + 1}):`, refetchError);
+            // Continue to next retry
+          }
+        }
+        
+        console.warn(`[EventCard] Backend status check failed after ${maxRetries} retries for ${actionName}`);
+      }
+      
+      // Show error if it's not a recoverable timeout
+      alert(`Failed to ${actionName} request: ${error?.message || "Unknown error"}`);
+    } finally {
+      loadingSetter(false);
+      console.log(`[EventCard] ${actionName} action completed, loading state cleared`);
     }
   };
 
@@ -725,54 +1185,242 @@ const EventCard: React.FC<EventCardProps> = ({
     setRejectOpen(false);
   };
 
-  const handleAccept = (note?: string) => {
-    (async () => {
-      try {
-        if (resolvedRequestId) {
-          // Accept actions don't include notes - backend validator doesn't allow it
-          await svcPerformRequestAction(
-            resolvedRequestId,
-            "accept",
-            undefined, // Don't pass note for accept actions
-          );
-        } else if (onAcceptEvent) {
-          try {
-            onAcceptEvent(note);
-          } catch (e) {}
+  const handleAccept = async (note?: string) => {
+    const startTime = Date.now();
+    console.log("[EventCard] ====== handleAccept START ======", {
+      timestamp: new Date().toISOString(),
+      note,
+      resolvedRequestId,
+      hasOnAcceptEvent: !!onAcceptEvent,
+      hasRequest: !!request,
+      requestId: request?.Request_ID || request?.RequestId || request?._id,
+    });
+
+    // Prevent duplicate actions - check ref first (synchronous, prevents race conditions)
+    if (isAcceptingRef.current) {
+      console.warn("[EventCard] ❌ BLOCKED: Accept already in progress (ref check), ignoring duplicate call");
+      return;
+    }
+    
+    // Also check state (redundant but safe)
+    if (isAccepting) {
+      console.warn("[EventCard] ❌ BLOCKED: Accept already in progress (state check), ignoring duplicate call");
+      return;
+    }
+
+    // Check if request is already approved
+    const currentStatus = fullRequest?.status || fullRequest?.Status || request?.status || request?.Status;
+    const normalizedStatus = currentStatus ? String(currentStatus).toLowerCase().trim() : '';
+    const isAlreadyApproved = normalizedStatus === 'approved' || normalizedStatus.includes('approv');
+    
+    if (isAlreadyApproved) {
+      console.warn("[EventCard] ❌ BLOCKED: Request is already approved, cannot accept again", {
+        currentStatus,
+        normalizedStatus,
+      });
+      // Close modal if open
+      setAcceptOpen(false);
+      return;
+    }
+
+    try {
+      // Set ref immediately (synchronous) to prevent race conditions
+      isAcceptingRef.current = true;
+      
+      // Set loading state FIRST to prevent duplicate calls
+      console.log("[EventCard] ✅ Step 0: Setting loading state (isAccepting = true)");
+      setIsAccepting(true);
+      console.log("[EventCard] ✅ Step 0 COMPLETE: Loading state set");
+      
+      // Close modal after setting loading state
+      console.log("[EventCard] ✅ Step 1: Closing accept modal");
+      setAcceptOpen(false);
+      console.log("[EventCard] ✅ Step 1 COMPLETE: Modal closed");
+      
+      // Check if callback is provided (preferred path - direct refresh from page)
+      if (onAcceptEvent && request) {
+        console.log("[EventCard] ✅ Step 2: Using onAcceptEvent callback path");
+        console.log("[EventCard] 📞 Step 2a: Calling onAcceptEvent callback with request:", {
+          requestId: request?.Request_ID || request?.RequestId || request?._id,
+          requestStatus: request?.status || request?.Status,
+          note,
+        });
+        
+        try {
+          await onAcceptEvent(request, note);
+          console.log("[EventCard] ✅ Step 2b: onAcceptEvent callback completed successfully");
+          // Modal already closed in Step 0
+          const elapsed = Date.now() - startTime;
+          console.log("[EventCard] ====== handleAccept SUCCESS (callback path) ======", {
+            elapsed: `${elapsed}ms`,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        } catch (callbackError: any) {
+          console.error("[EventCard] ❌ Step 2c: onAcceptEvent callback FAILED:", {
+            error: callbackError,
+            message: callbackError?.message,
+            stack: callbackError?.stack,
+            elapsed: `${Date.now() - startTime}ms`,
+          });
+          throw callbackError;
         }
-      } catch (e) {
-        console.error("Accept error:", e);
-        alert(
-          "Failed to accept request: " +
-            ((e as Error).message || "Unknown error"),
-        );
-      } finally {
-        setAcceptOpen(false);
       }
-    })();
+
+      // Fallback to direct API call if no callback
+      console.log("[EventCard] ✅ Step 2: Using direct API call path (no callback)");
+      
+      if (!resolvedRequestId) {
+        console.error("[EventCard] ❌ ERROR: Request ID not found");
+        alert("Request ID not found. Cannot accept.");
+        throw new Error("Request ID not found");
+      }
+
+      console.log("[EventCard] 📞 Step 2a: Calling handleActionWithRefresh");
+      // Use unified action handler with refresh
+      await handleActionWithRefresh(
+        () => svcPerformRequestAction(resolvedRequestId, "accept", undefined),
+        'accept'
+      );
+      console.log("[EventCard] ✅ Step 2b: handleActionWithRefresh completed");
+      
+      // Modal already closed in Step 0
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ====== handleAccept SUCCESS (direct API path) ======", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e: any) {
+      const elapsed = Date.now() - startTime;
+      console.error("[EventCard] ❌ ====== handleAccept ERROR ======", {
+        error: e,
+        message: e?.message,
+        stack: e?.stack,
+        name: e?.name,
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      const errorMessage = e?.message || "Failed to accept request";
+      alert(`Failed to accept: ${errorMessage}`);
+      throw e; // Re-throw so modal can handle it
+    } finally {
+      console.log("[EventCard] 🔄 Step 3: Clearing loading state (isAccepting = false)");
+      setIsAccepting(false);
+      // Reset ref in finally to ensure it's always cleared
+      isAcceptingRef.current = false;
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ✅ Step 3 COMPLETE: Loading state cleared", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("[EventCard] ====== handleAccept END ======");
+    }
   };
 
   // New: handle reject with admin note
-  const handleRejectWithNote = (note?: string) => {
-    (async () => {
-      try {
-        if (resolvedRequestId) {
-          await svcPerformRequestAction(
-            resolvedRequestId,
-            "reject",
-            note || "",
-          );
-        } else if (onRejectEvent) {
-          try {
-            onRejectEvent(note);
-          } catch (e) {}
+  const handleRejectWithNote = async (note?: string) => {
+    const startTime = Date.now();
+    console.log("[EventCard] ====== handleRejectWithNote START ======", {
+      timestamp: new Date().toISOString(),
+      note,
+      resolvedRequestId,
+      hasOnRejectEvent: !!onRejectEvent,
+      hasRequest: !!request,
+      requestId: request?.Request_ID || request?.RequestId || request?._id,
+    });
+
+    // Prevent duplicate actions
+    if (isRejecting) {
+      console.warn("[EventCard] ❌ BLOCKED: Reject already in progress, ignoring duplicate call");
+      return;
+    }
+
+    try {
+      // Close modal first so user can see the loading animation
+      console.log("[EventCard] ✅ Step 0: Closing reject modal");
+      setRejectOpen(false);
+      console.log("[EventCard] ✅ Step 0 COMPLETE: Modal closed");
+      
+      console.log("[EventCard] ✅ Step 1: Setting loading state (isRejecting = true)");
+      setIsRejecting(true);
+      console.log("[EventCard] ✅ Step 1 COMPLETE: Loading state set");
+      
+      // Check if callback is provided (preferred path - direct refresh from page)
+      if (onRejectEvent && request) {
+        console.log("[EventCard] ✅ Step 2: Using onRejectEvent callback path");
+        console.log("[EventCard] 📞 Step 2a: Calling onRejectEvent callback with request:", {
+          requestId: request?.Request_ID || request?.RequestId || request?._id,
+          requestStatus: request?.status || request?.Status,
+          note,
+        });
+        
+        try {
+          await onRejectEvent(request, note);
+          console.log("[EventCard] ✅ Step 2b: onRejectEvent callback completed successfully");
+          // Modal already closed in Step 0
+          const elapsed = Date.now() - startTime;
+          console.log("[EventCard] ====== handleRejectWithNote SUCCESS (callback path) ======", {
+            elapsed: `${elapsed}ms`,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        } catch (callbackError: any) {
+          console.error("[EventCard] ❌ Step 2c: onRejectEvent callback FAILED:", {
+            error: callbackError,
+            message: callbackError?.message,
+            stack: callbackError?.stack,
+            elapsed: `${Date.now() - startTime}ms`,
+          });
+          throw callbackError;
         }
-      } catch (e) {
-        // ignore
-      } finally {
-        setRejectOpen(false);
       }
-    })();
+
+      // Fallback to direct API call if no callback
+      console.log("[EventCard] ✅ Step 2: Using direct API call path (no callback)");
+      
+      if (!resolvedRequestId) {
+        console.error("[EventCard] ❌ ERROR: Request ID not found");
+        alert("Request ID not found. Cannot reject.");
+        throw new Error("Request ID not found");
+      }
+
+      console.log("[EventCard] 📞 Step 2a: Calling svcPerformRequestAction");
+      await svcPerformRequestAction(
+        resolvedRequestId,
+        "reject",
+        note || "",
+      );
+      console.log("[EventCard] ✅ Step 2b: svcPerformRequestAction completed");
+      
+      // Modal already closed in Step 0
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ====== handleRejectWithNote SUCCESS (direct API path) ======", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e: any) {
+      const elapsed = Date.now() - startTime;
+      console.error("[EventCard] ❌ ====== handleRejectWithNote ERROR ======", {
+        error: e,
+        message: e?.message,
+        stack: e?.stack,
+        name: e?.name,
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      const errorMessage = e?.message || "Failed to reject request";
+      alert(`Failed to reject: ${errorMessage}`);
+      throw e; // Re-throw so modal can handle it
+    } finally {
+      console.log("[EventCard] 🔄 Step 3: Clearing loading state (isRejecting = false)");
+      setIsRejecting(false);
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ✅ Step 3 COMPLETE: Loading state cleared", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("[EventCard] ====== handleRejectWithNote END ======");
+    }
   };
 
   // Menu for Approved status
@@ -1003,23 +1651,135 @@ const EventCard: React.FC<EventCardProps> = ({
     }
   };
 
+  // Unified confirm action handler - uses same pattern as ACCEPT
+  // Uses callback from page for direct refresh (like RESCHEDULE)
+  const handleConfirmAction = async () => {
+    const startTime = Date.now();
+    console.log("[EventCard] ====== handleConfirmAction START ======", {
+      timestamp: new Date().toISOString(),
+      resolvedRequestId,
+      hasOnConfirmEvent: !!onConfirmEvent,
+      hasRequest: !!request,
+      requestId: request?.Request_ID || request?.RequestId || request?._id,
+      currentStatus: resolvedRequest?.status || resolvedRequest?.Status,
+    });
+    
+    // Prevent duplicate actions
+    if (isConfirming) {
+      console.warn("[EventCard] ❌ BLOCKED: Confirm already in progress, ignoring duplicate call");
+      return;
+    }
+    
+    // Check if already approved to prevent duplicate confirm
+    const currentStatus = resolvedRequest?.status || resolvedRequest?.Status;
+    if (currentStatus === 'approved' || currentStatus === 'Approved') {
+      console.warn("[EventCard] ❌ BLOCKED: Request already approved, cannot confirm again");
+      alert("This request has already been approved and cannot be confirmed again.");
+      return;
+    }
+
+    try {
+      console.log("[EventCard] ✅ Step 1: Setting loading state (isConfirming = true)");
+      setIsConfirming(true);
+      console.log("[EventCard] ✅ Step 1 COMPLETE: Loading state set");
+      
+      // Check if callback is provided (preferred path - direct refresh from page)
+      if (onConfirmEvent && request) {
+        console.log("[EventCard] ✅ Step 2: Using onConfirmEvent callback path");
+        console.log("[EventCard] 📞 Step 2a: Calling onConfirmEvent callback with request:", {
+          requestId: request?.Request_ID || request?.RequestId || request?._id,
+          requestStatus: request?.status || request?.Status,
+        });
+        
+        try {
+          await onConfirmEvent(request);
+          console.log("[EventCard] ✅ Step 2b: onConfirmEvent callback completed successfully");
+          const elapsed = Date.now() - startTime;
+          console.log("[EventCard] ====== handleConfirmAction SUCCESS (callback path) ======", {
+            elapsed: `${elapsed}ms`,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        } catch (callbackError: any) {
+          console.error("[EventCard] ❌ Step 2c: onConfirmEvent callback FAILED:", {
+            error: callbackError,
+            message: callbackError?.message,
+            stack: callbackError?.stack,
+            elapsed: `${Date.now() - startTime}ms`,
+          });
+          throw callbackError;
+        }
+      }
+
+      // Fallback to direct API call if no callback
+      console.log("[EventCard] ✅ Step 2: Using direct API call path (no callback)");
+      
+      if (!resolvedRequestId) {
+        console.error("[EventCard] ❌ ERROR: Request ID not found");
+        alert("Request ID not found");
+        return;
+      }
+      
+      console.log("[EventCard] 📞 Step 2a: Calling handleActionWithRefresh");
+      // Use unified action handler with refresh
+      await handleActionWithRefresh(
+        () => svcPerformConfirmAction(resolvedRequestId),
+        'confirm'
+      );
+      console.log("[EventCard] ✅ Step 2b: handleActionWithRefresh completed");
+      
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ====== handleConfirmAction SUCCESS (direct API path) ======", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e: any) {
+      const elapsed = Date.now() - startTime;
+      console.error("[EventCard] ❌ ====== handleConfirmAction ERROR ======", {
+        error: e,
+        message: e?.message,
+        stack: e?.stack,
+        name: e?.name,
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      const errorMessage = e?.message || "Failed to confirm request";
+      alert(`Failed to confirm: ${errorMessage}`);
+      throw e; // Re-throw so caller can handle it
+    } finally {
+      console.log("[EventCard] 🔄 Step 3: Clearing loading state (isConfirming = false)");
+      setIsConfirming(false);
+      const elapsed = Date.now() - startTime;
+      console.log("[EventCard] ✅ Step 3 COMPLETE: Loading state cleared", {
+        elapsed: `${elapsed}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      console.log("[EventCard] ====== handleConfirmAction END ======");
+    }
+  };
+
   // Stakeholder confirm action moved to services
   // Unified confirm action - no need for role-specific functions
+  // Note: This function is kept for backward compatibility but now uses handleConfirmAction
   const runStakeholderDecision = async (decision: "Accepted" | "Rejected") => {
-    try {
-      if (!resolvedRequestId) {
-        throw new Error("Unable to determine request id");
+    if (decision === "Accepted") {
+      // Use unified handleConfirmAction for consistency
+      await handleConfirmAction();
+    } else {
+      // For rejected/declined, use the existing logic
+      try {
+        if (!resolvedRequestId) {
+          throw new Error("Unable to determine request id");
+        }
+        // Decline action would use performRequestAction with "decline"
+        // For now, just show error as this path shouldn't be used
+        throw new Error("Decline action should use performRequestAction");
+      } catch (err: any) {
+        console.error("Decline decision error:", err);
+        alert(
+          `Failed to decline request: ${err?.message || "Unknown error"}`,
+        );
       }
-      // Use unified confirm endpoint - backend validates permissions
-      await svcPerformConfirmAction(resolvedRequestId);
-      setViewOpen(false);
-    } catch (err: any) {
-      console.error("Confirm decision error:", err);
-      alert(
-        `Failed to ${
-          decision === "Accepted" ? "confirm" : "decline"
-        } request: ${err?.message || "Unknown error"}`,
-      );
     }
   };
 
@@ -1105,27 +1865,20 @@ const EventCard: React.FC<EventCardProps> = ({
 
     // Show Confirm action when permission-based check allows it
     // Backend validates permissions when action is performed
+    // Disable if already confirming/accepting or request is already approved
     if (flagFor("canConfirm", "confirm")) {
+      const isAlreadyApproved = resolvedRequest?.status === 'approved' || 
+                                 resolvedRequest?.Status === 'Approved' ||
+                                 resolvedRequest?.status === 'APPROVED';
       actions.push(
         <DropdownItem
           key="confirm"
           description="Confirm the reviewer decision"
           startContent={<Check />}
-          onPress={async () => {
-            try {
-              // Use unified confirm endpoint - backend validates permissions
-              await svcPerformConfirmAction(resolvedRequestId);
-              setViewOpen(false);
-            } catch (e) {
-              console.error("Confirm error:", e);
-              alert(
-                "Failed to confirm request: " + (e as any)?.message ||
-                  "Unknown error",
-              );
-            }
-          }}
+          onPress={handleConfirmAction}
+          isDisabled={isConfirming || isAccepting || isAlreadyApproved}
         >
-          Confirm
+          {isConfirming ? "Confirming..." : "Confirm"}
         </DropdownItem>,
       );
     }
@@ -1208,26 +1961,8 @@ const EventCard: React.FC<EventCardProps> = ({
           key="footer-confirm"
           className="bg-black text-white"
           color="default"
-          onPress={async () => {
-            setViewOpen(false);
-            try {
-              if (!resolvedRequestId) return alert("Request id not found");
-              await svcPerformConfirmAction(resolvedRequestId);
-              try {
-                window.dispatchEvent(
-                  new CustomEvent("unite:requests-changed", {
-                    detail: { requestId: resolvedRequestId },
-                  }),
-                );
-              } catch (e) {}
-            } catch (e) {
-              console.error("Footer confirm error:", e);
-              alert(
-                "Failed to confirm request: " +
-                  ((e as any)?.message || "Unknown error"),
-              );
-            }
-          }}
+          onPress={handleConfirmAction}
+          isDisabled={isConfirming || isAccepting}
         >
           Confirm
         </Button>,
@@ -1242,8 +1977,9 @@ const EventCard: React.FC<EventCardProps> = ({
             setViewOpen(false);
             setAcceptOpen(true);
           }}
+          isDisabled={isAccepting || isConfirming}
         >
-          Accept
+          {isAccepting ? "Accepting..." : "Accept"}
         </Button>,
       );
     }
@@ -1302,8 +2038,9 @@ const EventCard: React.FC<EventCardProps> = ({
 
   // Determine a human-friendly pending-stage label for Pending requests
   const getPendingStageLabel = (): string | null => {
+    // Always prefer fullRequest first (it has the most up-to-date status)
     const r =
-      resolvedRequest || request || (request && (request as any).event) || {};
+      fullRequest || resolvedRequest || request || (request && (request as any).event) || {};
 
     // Prefer a human-friendly label returned by the backend when present
     const backendLabel =
@@ -1403,8 +2140,15 @@ const EventCard: React.FC<EventCardProps> = ({
   const headerStatusLabel = (() => {
     try {
       const pendingLabel = getPendingStageLabel();
-      const r = resolvedRequest || request || {};
-      const rawStatus = String(r?.Status || r?.status || status || "").toLowerCase();
+      // Always prefer fullRequest first (it has the most up-to-date status)
+      const r = fullRequest || resolvedRequest || request || {};
+      // Use fullRequest status first, then fallback to status prop only if fullRequest doesn't have status
+      const rawStatus = String(
+        (fullRequest?.Status || fullRequest?.status) || 
+        (r?.Status || r?.status) || 
+        status || 
+        ""
+      ).toLowerCase();
 
       // If pending subtype indicates 'completed', don't show it
       if (rawStatus.includes("pending") && pendingLabel) {
@@ -1417,7 +2161,14 @@ const EventCard: React.FC<EventCardProps> = ({
       if (rawStatus.includes("reject") || rawStatus.includes("rejected")) return "Rejected";
       if (rawStatus.includes("cancel")) return "Cancelled";
 
-      return (r?.statusLabel || r?.StatusLabel || r?.status || r?.Status || status) || null;
+      // Prefer fullRequest status over status prop
+      return (
+        (fullRequest?.statusLabel || fullRequest?.StatusLabel) ||
+        (r?.statusLabel || r?.StatusLabel) ||
+        (fullRequest?.status || fullRequest?.Status) ||
+        (r?.status || r?.Status) ||
+        status
+      ) || null;
     } catch (e) {
       return null;
     }
@@ -1706,9 +2457,39 @@ const EventCard: React.FC<EventCardProps> = ({
     return null;
   }, [resolvedRequest, request, fullRequest]);
 
+  // Compute display status from fullRequest first, then fallback to status prop
+  // This ensures the status Chip updates when fullRequest changes (e.g., after accept action)
+  const displayStatus = (() => {
+    try {
+      // Always prefer fullRequest first (it has the most up-to-date status)
+      const r = fullRequest || resolvedRequest || request || {};
+      const statusRaw = String(r?.status || r?.Status || status || "pending-review").toLowerCase();
+      
+      if (statusRaw.includes("reject") || statusRaw.includes("rejected")) return "Rejected";
+      if (statusRaw.includes("approv") || statusRaw.includes("approved") || 
+          statusRaw.includes("complete") || statusRaw.includes("completed")) return "Approved";
+      if (statusRaw.includes("cancel") || statusRaw.includes("cancelled")) return "Cancelled";
+      return "Pending";
+    } catch (e) {
+      return status || "Pending";
+    }
+  })();
+
   return (
     <>
-      <Card className="w-full rounded-xl border border-gray-200 shadow-none bg-white">
+      <Card className="w-full rounded-xl border border-gray-200 shadow-none bg-white relative">
+        {/* Loading overlay to prevent interaction during confirm or accept */}
+        {(isConfirming || isAccepting || isRejecting || isRescheduling) && (
+          <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center rounded-xl">
+            <div className="flex flex-col items-center gap-3">
+              <Spinner size="lg" color="primary" />
+              <p className="text-sm font-medium text-gray-700">
+                {isAccepting ? "Accepting request..." : isRejecting ? "Rejecting request..." : isRescheduling ? "Rescheduling request..." : "Confirming request..."}
+              </p>
+              <p className="text-xs text-gray-500">Please wait while we update the request</p>
+            </div>
+          </div>
+        )}
         <CardHeader className="flex justify-between items-start">
           {/* Title and Organization */}
           <div>
@@ -1761,21 +2542,8 @@ const EventCard: React.FC<EventCardProps> = ({
                 try {
                   if (!resolvedRequestId)
                     throw new Error("Request id not found");
-                  if (
-                    viewerRoleString.includes("coordinator") &&
-                    viewerIsAssignedCoordinator
-                  ) {
-                    await svcPerformConfirmAction(resolvedRequestId);
-                  } else {
-                    await runStakeholderDecision("Accepted");
-                  }
-                  try {
-                    window.dispatchEvent(
-                      new CustomEvent("unite:requests-changed", {
-                        detail: { requestId: resolvedRequestId },
-                      }),
-                    );
-                  } catch (e) {}
+                  // Use unified handleConfirmAction for all confirm actions
+                  await handleConfirmAction();
                 } catch (e) {
                   console.error("Dropdown confirm error:", e);
                   try {
@@ -1812,9 +2580,9 @@ const EventCard: React.FC<EventCardProps> = ({
             </Chip>
             <Chip
               color={
-                status === "Approved"
+                displayStatus === "Approved"
                   ? "success"
-                  : status === "Pending"
+                  : displayStatus === "Pending"
                     ? "warning"
                     : "danger"
               }
@@ -1822,7 +2590,7 @@ const EventCard: React.FC<EventCardProps> = ({
               size="sm"
               variant="flat"
             >
-              {status}
+              {displayStatus}
             </Chip>
           </div>
           <div className="space-y-2">

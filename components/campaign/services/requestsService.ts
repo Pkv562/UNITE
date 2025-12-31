@@ -77,19 +77,35 @@ export const performRequestAction = async (
 
       // Check if response is ok
       if (!res || !res.ok) {
-        const resp = await res.json().catch(() => ({}));
-        const errorMsg = resp.message || resp.errors?.join(", ") || `Failed to perform action: ${action}`;
+        let resp: any = {};
+        let errorMsg = `Failed to perform action: ${action}`;
+        
+        // Only try to parse JSON if res exists
+        if (res) {
+          try {
+            resp = await res.json();
+            errorMsg = resp.message || resp.errors?.join(", ") || errorMsg;
+          } catch (parseError) {
+            // If JSON parse fails, use default error message
+            errorMsg = `Failed to perform action: ${action} (${res.status || 'unknown status'})`;
+          }
+        } else {
+          // res is null/undefined (timeout or network error)
+          errorMsg = `Network error or timeout while performing action: ${action}`;
+        }
+        
         const error = new Error(errorMsg);
         
-        // Log full error details
+        // Log full error details (only if res exists)
         console.error(`[performRequestAction] ${action} failed (attempt ${attempt + 1}/${maxRetries + 1}):`, {
-          status: res?.status,
-          statusText: res?.statusText,
+          status: res?.status || 'N/A',
+          statusText: res?.statusText || 'N/A',
           response: resp,
           error: errorMsg,
+          hasResponse: !!res,
         });
 
-        // Don't retry on 4xx errors (client errors)
+        // Don't retry on 4xx errors (client errors) - only if res exists
         if (res?.status && res.status >= 400 && res.status < 500) {
           throw error;
         }
@@ -101,16 +117,73 @@ export const performRequestAction = async (
       const resp = await res.json();
       console.log(`[performRequestAction] ${action} succeeded:`, resp);
 
+      // Check backend response for UI refresh flags
+      const uiFlags = resp?.data?.ui;
+      const shouldRefresh = uiFlags?.shouldRefresh || res.headers.get('X-Should-Refresh') === 'true';
+      const shouldCloseModal = uiFlags?.shouldCloseModal || res.headers.get('X-Should-Close-Modal') === 'true';
+      const cacheKeysToInvalidate = uiFlags?.cacheKeysToInvalidate || [];
+
+      console.log(`[performRequestAction] Response UI flags:`, {
+        shouldRefresh,
+        shouldCloseModal,
+        cacheKeysToInvalidate,
+        newState: uiFlags?.newState,
+        actionResult: uiFlags?.actionResult
+      });
+
+      // Immediately invalidate cache if backend says to refresh
+      if (shouldRefresh && typeof window !== "undefined") {
+        try {
+          // Import invalidateCache dynamically to avoid circular dependencies
+          const { invalidateCache } = await import("@/utils/requestCache");
+          
+          // Invalidate specific cache keys from backend response
+          if (cacheKeysToInvalidate && cacheKeysToInvalidate.length > 0) {
+            cacheKeysToInvalidate.forEach((key: string) => {
+              // Convert API path to cache key pattern
+              const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
+              invalidateCache(cachePattern);
+              console.log(`[performRequestAction] Invalidated cache for: ${key}`);
+            });
+          } else {
+            // Fallback: invalidate all event-requests cache
+            invalidateCache(/event-requests/);
+            console.log(`[performRequestAction] Invalidated all event-requests cache (fallback)`);
+          }
+        } catch (cacheError) {
+          console.error(`[performRequestAction] Error invalidating cache:`, cacheError);
+        }
+      }
+
       // Dispatch event reliably - must happen synchronously after response
+      // Include UI flags in event detail so listeners can act on them
       try {
         if (typeof window !== "undefined") {
           const event = new CustomEvent("unite:requests-changed", { 
-            detail: { requestId, action, timestamp: Date.now() },
+            detail: { 
+              requestId, 
+              action, 
+              timestamp: Date.now(),
+              shouldRefresh,
+              shouldCloseModal,
+              cacheKeysToInvalidate,
+              forceRefresh: shouldRefresh // Force immediate refresh
+            },
             bubbles: true,
             cancelable: true
           });
           const dispatched = window.dispatchEvent(event);
-          console.log(`[performRequestAction] Dispatched unite:requests-changed event for request ${requestId}, action: ${action}, dispatched: ${dispatched}`);
+          console.log(`[performRequestAction] Dispatched unite:requests-changed event for request ${requestId}, action: ${action}, dispatched: ${dispatched}, shouldRefresh: ${shouldRefresh}`);
+          
+          // If backend says to refresh, also trigger immediate refresh via custom event
+          if (shouldRefresh) {
+            // Dispatch a force-refresh event that bypasses debounce
+            window.dispatchEvent(new CustomEvent("unite:force-refresh-requests", {
+              detail: { requestId, reason: `${action}-action`, cacheKeysToInvalidate },
+              bubbles: true
+            }));
+            console.log(`[performRequestAction] Dispatched force-refresh event`);
+          }
           
           // Verify event was actually dispatched by checking if listeners exist
           if (!dispatched) {
@@ -125,8 +198,13 @@ export const performRequestAction = async (
         try {
           if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("unite:requests-changed", { 
-              detail: { requestId, action }
+              detail: { requestId, action, shouldRefresh, forceRefresh: shouldRefresh }
             }));
+            if (shouldRefresh) {
+              window.dispatchEvent(new CustomEvent("unite:force-refresh-requests", {
+                detail: { requestId, reason: `${action}-action` }
+              }));
+            }
             console.log(`[performRequestAction] Fallback event dispatch succeeded`);
           }
         } catch (e2) {
@@ -184,7 +262,7 @@ export const performConfirmAction = async (requestId: string, note?: string) => 
   const retryDelay = 500; // ms
   let lastError: Error | null = null;
 
-  // Retry logic with exponential backoff
+  // Retry logic with exponential backoff (matching performRequestAction)
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
@@ -205,39 +283,101 @@ export const performConfirmAction = async (requestId: string, note?: string) => 
       // Race between fetch and timeout
       const res = await Promise.race([fetchPromise, timeoutPromise]);
 
+      // Check if response is ok
       if (!res || !res.ok) {
         const resp = await res.json().catch(() => ({}));
         const errorMsg = resp.message || "Failed to confirm decision";
+        const error = new Error(errorMsg);
         
+        // Log full error details
         console.error(`[performConfirmAction] Failed (attempt ${attempt + 1}/${maxRetries + 1}):`, {
           status: res?.status,
           statusText: res?.statusText,
           response: resp,
+          error: errorMsg,
         });
 
-        // Don't retry on 4xx errors
+        // Don't retry on 4xx errors (client errors)
         if (res?.status && res.status >= 400 && res.status < 500) {
-          throw new Error(errorMsg);
+          throw error;
         }
 
-        lastError = new Error(errorMsg);
-        continue;
+        lastError = error;
+        continue; // Retry on 5xx errors or network errors
       }
 
       const resp = await res.json();
+      console.log(`[performConfirmAction] Succeeded:`, resp);
+
+      // Check backend response for UI refresh flags
+      const uiFlags = resp?.data?.ui;
+      const shouldRefresh = uiFlags?.shouldRefresh || res.headers.get('X-Should-Refresh') === 'true';
+      const shouldCloseModal = uiFlags?.shouldCloseModal || res.headers.get('X-Should-Close-Modal') === 'true';
+      const cacheKeysToInvalidate = uiFlags?.cacheKeysToInvalidate || [];
+
+      console.log(`[performConfirmAction] Response UI flags:`, {
+        shouldRefresh,
+        shouldCloseModal,
+        cacheKeysToInvalidate,
+        newState: uiFlags?.newState,
+        actionResult: uiFlags?.actionResult
+      });
+
+      // Immediately invalidate cache if backend says to refresh
+      if (shouldRefresh && typeof window !== "undefined") {
+        try {
+          // Import invalidateCache dynamically to avoid circular dependencies
+          const { invalidateCache } = await import("@/utils/requestCache");
+          
+          // Invalidate specific cache keys from backend response
+          if (cacheKeysToInvalidate && cacheKeysToInvalidate.length > 0) {
+            cacheKeysToInvalidate.forEach((key: string) => {
+              // Convert API path to cache key pattern
+              const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
+              invalidateCache(cachePattern);
+              console.log(`[performConfirmAction] Invalidated cache for: ${key}`);
+            });
+          } else {
+            // Fallback: invalidate all event-requests cache
+            invalidateCache(/event-requests/);
+            console.log(`[performConfirmAction] Invalidated all event-requests cache (fallback)`);
+          }
+        } catch (cacheError) {
+          console.error(`[performConfirmAction] Error invalidating cache:`, cacheError);
+        }
+      }
 
       // Dispatch event reliably - must happen synchronously after response
+      // Include UI flags in event detail so listeners can act on them
       try {
         if (typeof window !== "undefined") {
           const event = new CustomEvent("unite:requests-changed", { 
-            detail: { requestId, action: "confirm", timestamp: Date.now() },
+            detail: { 
+              requestId, 
+              action: "confirm", 
+              timestamp: Date.now(),
+              shouldRefresh,
+              shouldCloseModal,
+              cacheKeysToInvalidate,
+              forceRefresh: shouldRefresh // Force immediate refresh
+            },
             bubbles: true,
             cancelable: true
           });
           const dispatched = window.dispatchEvent(event);
-          console.log(`[performConfirmAction] Dispatched unite:requests-changed event for request ${requestId}, dispatched: ${dispatched}`);
+          console.log(`[performConfirmAction] Dispatched unite:requests-changed event for request ${requestId}, dispatched: ${dispatched}, shouldRefresh: ${shouldRefresh}`);
           
-          // Verify event was actually dispatched
+          // If backend says to refresh, also trigger immediate refresh via custom event
+          if (shouldRefresh) {
+            // Dispatch a force-refresh event that bypasses debounce
+            window.dispatchEvent(new CustomEvent("unite:force-refresh-requests", {
+              detail: { requestId, reason: "confirm-action", cacheKeysToInvalidate },
+              bubbles: true
+            }));
+            console.log(`[performConfirmAction] Dispatched force-refresh event`);
+          }
+          
+          // Verify event was actually dispatched by checking if listeners exist
           if (!dispatched) {
             console.warn(`[performConfirmAction] Event was not dispatched (preventDefault called?)`);
           }
@@ -250,8 +390,13 @@ export const performConfirmAction = async (requestId: string, note?: string) => 
         try {
           if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("unite:requests-changed", { 
-              detail: { requestId, action: "confirm" }
+              detail: { requestId, action: "confirm", shouldRefresh, forceRefresh: shouldRefresh }
             }));
+            if (shouldRefresh) {
+              window.dispatchEvent(new CustomEvent("unite:force-refresh-requests", {
+                detail: { requestId, reason: "confirm-action" }
+              }));
+            }
             console.log(`[performConfirmAction] Fallback event dispatch succeeded`);
           }
         } catch (e2) {
@@ -263,12 +408,14 @@ export const performConfirmAction = async (requestId: string, note?: string) => 
     } catch (error: any) {
       lastError = error;
       
+      // Log full error details
       console.error(`[performConfirmAction] Error on attempt ${attempt + 1}/${maxRetries + 1}:`, {
         error: error.message,
         stack: error.stack,
+        name: error.name,
       });
 
-      // Don't retry on certain errors
+      // Don't retry on certain errors (validation errors, etc.)
       if (error.message?.includes("required") || 
           error.message?.includes("invalid") || 
           error.message?.includes("permission") ||
@@ -285,6 +432,7 @@ export const performConfirmAction = async (requestId: string, note?: string) => 
     }
   }
 
+  // Should never reach here, but TypeScript requires it
   throw lastError || new Error("Failed to confirm decision");
 };
 
@@ -308,28 +456,53 @@ export const performCoordinatorConfirm = async (requestId: string, action: "Acce
  * Fetch request details by ID
  * Uses the new /api/event-requests/:id endpoint
  */
-export const fetchRequestDetails = async (requestId: string) => {
+export const fetchRequestDetails = async (requestId: string, cacheBust: boolean = false) => {
   const token = getToken();
   const headers: any = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const url = `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}`;
-
-  let res;
-  if (token) {
-    try {
-      res = await fetchWithAuth(url, { method: "GET" });
-    } catch (e) {
-      res = await fetch(url, { headers });
-    }
-  } else {
-    res = await fetch(url, { headers, credentials: "include" });
+  
+  // Add cache busting if requested
+  const cacheBuster = cacheBust ? `?t=${Date.now()}` : '';
+  const url = `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}${cacheBuster}`;
+  
+  // Add cache control headers to prevent caching
+  if (cacheBust) {
+    headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    headers['Pragma'] = 'no-cache';
+    headers['Expires'] = '0';
   }
 
-  const body = await res.json().catch(() => ({}));
-  // Handle new response format: { success, data: { request } }
-  const data = body?.data?.request || body?.data || body?.request || body;
-  return data;
+  let res;
+  try {
+    if (token) {
+      try {
+        res = await fetchWithAuth(url, { 
+          method: "GET",
+          headers: cacheBust ? headers : undefined
+        });
+      } catch (e) {
+        // Fallback to regular fetch if fetchWithAuth fails
+        console.warn(`[fetchRequestDetails] fetchWithAuth failed, falling back to regular fetch:`, e);
+        res = await fetch(url, { headers, credentials: "include" });
+      }
+    } else {
+      res = await fetch(url, { headers, credentials: "include" });
+    }
+
+    if (!res || !res.ok) {
+      const errorBody = await res.json().catch(() => ({}));
+      const errorMsg = errorBody.message || `Failed to fetch request details: ${res?.status || 'Unknown error'}`;
+      throw new Error(errorMsg);
+    }
+
+    const body = await res.json().catch(() => ({}));
+    // Handle new response format: { success, data: { request } }
+    const data = body?.data?.request || body?.data || body?.request || body;
+    return data;
+  } catch (error: any) {
+    console.error(`[fetchRequestDetails] Error fetching request ${requestId}:`, error);
+    throw error;
+  }
 };
 
 /**
