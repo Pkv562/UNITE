@@ -394,27 +394,80 @@ export default function EditEventModal({
         
         console.log("[EditEventModal] Updating request:", { requestId, url, updateData: Object.keys(body) });
 
-        const res = await fetch(url, {
+        // Close modal immediately so user can see loading animation on card
+        console.log("[EditEventModal] ✅ Step 0: Closing edit modal");
+        onClose();
+        console.log("[EditEventModal] ✅ Step 0 COMPLETE: Modal closed");
+
+        // Dispatch loading event for EventCard to show loading animation
+        const requestIdForRefresh = requestId || request?.Request_ID || request?.RequestId || request?._id;
+        if (typeof window !== "undefined" && requestIdForRefresh) {
+          window.dispatchEvent(
+            new CustomEvent("unite:request-editing", {
+              detail: {
+                requestId: requestIdForRefresh,
+                isEditing: true,
+              },
+            })
+          );
+          console.log("[EditEventModal] ✅ Loading event dispatched (isEditing: true)");
+        }
+
+        // SIMPLIFIED: Send request and always refresh after a short delay
+        // Since backend processes requests even if response doesn't come back, we just refresh the list
+        console.log("[EditEventModal] ✅ Starting simplified edit flow", { requestIdForRefresh, url });
+        
+        // Fire the request (don't wait for response)
+        fetch(url, {
           method: "PUT",
           headers,
           body: JSON.stringify(body),
+        }).catch((err) => {
+          console.warn("[EditEventModal] ⚠️ Fetch error (non-blocking):", err?.message);
+          // Don't block - we'll refresh anyway
         });
-        const resp = await res.json();
 
-        if (!res.ok) {
-          console.error("[EditEventModal] Update failed:", { status: res.status, response: resp });
-          // New API format: errors array in response
-          if (resp && resp.errors && Array.isArray(resp.errors)) {
-            setValidationErrors(resp.errors);
-            return;
-          }
-          throw new Error(resp.message || "Failed to update request");
+        // Start parent refresh IMMEDIATELY so data is ready when loading animation ends
+        if (onSaved) {
+          onSaved().catch((err) => console.error("[EditEventModal] Error in onSaved:", err));
         }
 
-        // New API format: { success, data: { request } }
-        // refresh parent list
-        if (onSaved) onSaved();
-        onClose();
+        // Dispatch force refresh event immediately
+        if (typeof window !== "undefined" && requestIdForRefresh) {
+          window.dispatchEvent(
+            new CustomEvent("unite:force-refresh-requests", {
+              detail: {
+                requestId: requestIdForRefresh,
+                forceRefresh: true,
+                cacheKeysToInvalidate: [`/api/event-requests/${requestIdForRefresh}`, "/api/event-requests"],
+              },
+            })
+          );
+          console.log("[EditEventModal] ✅ Force refresh event dispatched immediately");
+        }
+
+        // DON'T clear loading state here - let EventCard polling clear it when it detects the change
+        // This ensures the loading animation stays active until the card is actually updated
+        setIsSubmitting(false);
+
+        // Backup refresh after 2 seconds in case backend is slow
+        setTimeout(() => {
+          console.log("[EditEventModal] ✅ Backup refresh after edit");
+          if (typeof window !== "undefined" && requestIdForRefresh) {
+            window.dispatchEvent(
+              new CustomEvent("unite:force-refresh-requests", {
+                detail: {
+                  requestId: requestIdForRefresh,
+                  forceRefresh: true,
+                  cacheKeysToInvalidate: [`/api/event-requests/${requestIdForRefresh}`, "/api/event-requests"],
+                },
+              })
+            );
+          }
+          if (onSaved) {
+            onSaved().catch((err) => console.error("[EditEventModal] Backup refresh error:", err));
+          }
+        }, 2000);
       } else {
         // Major changes - update request (backend handles review workflow)
         // Ensure Start_Date/End_Date are present in the payload
@@ -467,36 +520,90 @@ export default function EditEventModal({
         
         console.log("[EditEventModal] Updating request (major changes):", { requestId, url, updateData: Object.keys(body) });
 
-        // PUT to update existing request
-        const res = await fetch(url, {
+        // Close modal immediately so user can see loading animation on card
+        console.log("[EditEventModal] ✅ Step 0: Closing edit modal (major changes)");
+        onClose();
+        console.log("[EditEventModal] ✅ Step 0 COMPLETE: Modal closed");
+
+        // Dispatch loading event for EventCard to show loading animation
+        const requestIdForRefresh = requestId || request?.Request_ID || request?.RequestId || request?._id;
+        if (typeof window !== "undefined" && requestIdForRefresh) {
+          window.dispatchEvent(
+            new CustomEvent("unite:request-editing", {
+              detail: {
+                requestId: requestIdForRefresh,
+                isEditing: true,
+              },
+            })
+          );
+          console.log("[EditEventModal] ✅ Loading event dispatched (isEditing: true, major changes)");
+        }
+
+        // SIMPLIFIED: Send request and always refresh after a short delay
+        // Since backend processes requests even if response doesn't come back, we just refresh the list
+        console.log("[EditEventModal] ✅ Starting simplified edit flow (major changes)", { requestIdForRefresh, url });
+        
+        // Fire the request (don't wait for response)
+        fetch(url, {
           method: "PUT",
           headers,
           body: JSON.stringify(body),
+        }).catch((err) => {
+          console.warn("[EditEventModal] ⚠️ Fetch error (non-blocking, major changes):", err?.message);
+          // Don't block - we'll refresh anyway
         });
-        const resp = await res.json();
 
-        if (!res.ok) {
-          console.error("[EditEventModal] Update failed (major changes):", { status: res.status, response: resp });
-          // New API format: errors array in response
-          if (resp && resp.errors && Array.isArray(resp.errors)) {
-            setValidationErrors(resp.errors);
-            return;
-          }
-          throw new Error(resp.message || "Failed to update request");
+        // Start parent refresh IMMEDIATELY so data is ready when loading animation ends
+        if (onSaved) {
+          onSaved().catch((err) => console.error("[EditEventModal] Error in onSaved (major changes):", err));
         }
 
-        // New API format: { success, data: { request } }
-        if (onSaved) onSaved();
-        onClose();
+        // Dispatch force refresh event immediately
+        if (typeof window !== "undefined" && requestIdForRefresh) {
+          window.dispatchEvent(
+            new CustomEvent("unite:force-refresh-requests", {
+              detail: {
+                requestId: requestIdForRefresh,
+                forceRefresh: true,
+                cacheKeysToInvalidate: [`/api/event-requests/${requestIdForRefresh}`, "/api/event-requests"],
+              },
+            })
+          );
+          console.log("[EditEventModal] ✅ Force refresh event dispatched immediately (major changes)");
+        }
+
+        // DON'T clear loading state here - let EventCard polling clear it when it detects the change
+        // This ensures the loading animation stays active until the card is actually updated
+        setIsSubmitting(false);
+
+        // Backup refresh after 2 seconds in case backend is slow
+        setTimeout(() => {
+          console.log("[EditEventModal] ✅ Backup refresh after edit (major changes)");
+          if (typeof window !== "undefined" && requestIdForRefresh) {
+            window.dispatchEvent(
+              new CustomEvent("unite:force-refresh-requests", {
+                detail: {
+                  requestId: requestIdForRefresh,
+                  forceRefresh: true,
+                  cacheKeysToInvalidate: [`/api/event-requests/${requestIdForRefresh}`, "/api/event-requests"],
+                },
+              })
+            );
+          }
+          if (onSaved) {
+            onSaved().catch((err) => console.error("[EditEventModal] Backup refresh error (major changes):", err));
+          }
+        }, 2000);
       }
     } catch (err: any) {
       console.error("EditEventModal save error", err);
-      // show errors in modal instead of alert
-      const msg = err?.message || "Failed to save changes";
-
-      setValidationErrors([msg]);
-    } finally {
-      setIsSubmitting(false);
+      // If modal is still open, show errors in modal
+      // Otherwise, errors are handled in the async block above
+      if (isOpen) {
+        const msg = err?.message || "Failed to save changes";
+        setValidationErrors([msg]);
+        setIsSubmitting(false);
+      }
     }
   };
 

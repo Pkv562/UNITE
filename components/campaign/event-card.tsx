@@ -128,6 +128,7 @@ const EventCard: React.FC<EventCardProps> = ({
   const [isAccepting, setIsAccepting] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [isRescheduling, setIsRescheduling] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   
   // Ref-based locks to prevent race conditions (set synchronously before state updates)
   const isAcceptingRef = React.useRef(false);
@@ -467,17 +468,36 @@ const EventCard: React.FC<EventCardProps> = ({
       const statusTransitioned = (wasPending || wasReviewRescheduled) && isNowApproved;
       
       // Prevent downgrading status (e.g., approved -> review-rescheduled)
-      // BUT: Allow 'rejected' to override any status if it comes from the request prop (source of truth)
+      // BUT: Allow 'rejected' and 'review-rescheduled' to override any status if it comes from the request prop (source of truth)
       // This handles cases where an event handler incorrectly set the status and we need to correct it
+      // Also allows valid workflow transitions like approved -> review-rescheduled (after reschedule)
       const isRejectedStatus = normalizedNew === 'rejected' || normalizedNew.includes('reject');
-      const wouldDowngrade = currentPriority > newPriority && !isRejectedStatus; // Allow rejected to override
+      const isReviewRescheduledStatus = normalizedNew.includes('review-rescheduled') || 
+                                       (normalizedNew.includes('rescheduled') && normalizedNew.includes('review'));
+      // Allow rejected and review-rescheduled to override (they are valid state transitions from approved)
+      const wouldDowngrade = currentPriority > newPriority && !isRejectedStatus && !isReviewRescheduledStatus;
+      
+      // Check for field changes (title, location, etc.) - important for edit operations
+      const currentTitle = fullRequest?.Event_Title || fullRequest?.event?.Event_Title;
+      const newTitle = request?.Event_Title || request?.event?.Event_Title;
+      const currentLocation = fullRequest?.Location || fullRequest?.location;
+      const newLocation = request?.Location || request?.location;
+      const titleChanged = newTitle && newTitle !== currentTitle;
+      const locationChanged = newLocation && newLocation !== currentLocation;
       
       // Also check if fullRequest has old status but request prop might have new status
       // This handles cases where the request prop updates but fullRequest hasn't
+      // For edit operations, we want to be more aggressive - update if ANY field changed
+      const anyFieldChanged = titleChanged || locationChanged || 
+                             (fullRequest?.Email !== request?.Email) ||
+                             (fullRequest?.Phone_Number !== request?.Phone_Number) ||
+                             (fullRequest?.Event_Description !== request?.Event_Description);
+      
       const shouldUpdate = (normalizedCurrent !== normalizedNew || 
                           !fullRequest || 
                           requestId !== fullRequestId || 
                           statusTransitioned ||
+                          anyFieldChanged ||
                           // Force update if fullRequest exists but request prop is different object
                           (fullRequest && request && JSON.stringify(fullRequest) !== JSON.stringify(request)))
                           && !wouldDowngrade; // Don't update if it would downgrade status (unless it's rejected)
@@ -496,6 +516,10 @@ const EventCard: React.FC<EventCardProps> = ({
           shouldUpdate,
           fullRequestExists: !!fullRequest,
           requestExists: !!request,
+          titleChanged,
+          locationChanged,
+          oldTitle: currentTitle,
+          newTitle,
         });
         // Request has been updated, sync fullRequest
         setFullRequest(request);
@@ -525,6 +549,54 @@ const EventCard: React.FC<EventCardProps> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request, viewOpen]);
+
+  // Listen for staff update events
+  useEffect(() => {
+    const handleStaffUpdated = async (event: CustomEvent) => {
+      const { requestId: eventRequestId, eventId: eventEventId } = event.detail || {};
+      
+      // Get current request ID
+      const currentRequestId = request?.Request_ID || request?.RequestId || request?._id || request?.requestId || null;
+      
+      // Check if this event is for this card's request
+      if (eventRequestId && currentRequestId && eventRequestId === currentRequestId) {
+        console.log("[EventCard] Staff updated event received, refreshing request data", {
+          requestId: currentRequestId,
+          eventId: eventEventId,
+        });
+        
+        // Invalidate cache for this request
+        try {
+          const { invalidateCache } = await import("@/utils/requestCache");
+          invalidateCache(new RegExp(`event-requests/${encodeURIComponent(currentRequestId)}`));
+          invalidateCache(/event-requests\?/);
+        } catch (e) {
+          console.error("[EventCard] Error invalidating cache:", e);
+        }
+        
+        // Dispatch refresh event to trigger parent refresh
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("unite:requests-changed", {
+              detail: {
+                requestId: currentRequestId,
+                action: "staff-updated",
+                forceRefresh: true,
+                cacheKeysToInvalidate: [`/api/event-requests/${currentRequestId}`],
+              },
+            })
+          );
+        }
+      }
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("unite:staff-updated", handleStaffUpdated as EventListener);
+      return () => {
+        window.removeEventListener("unite:staff-updated", handleStaffUpdated as EventListener);
+      };
+    }
+  }, [request]);
 
   // Listen for force refresh events (when we know a status change occurred)
   useEffect(() => {
@@ -568,58 +640,69 @@ const EventCard: React.FC<EventCardProps> = ({
       // Only update if this event is specifically for THIS card's request ID
       // Do NOT match by status - that causes the visual bug where all requests with the same status get updated
       if (idMatches) {
-        console.log("[EventCard] ✅ Force refresh matches this card (ID match), updating fullRequest");
+        console.log("[EventCard] ✅ Force refresh matches this card (ID match), fetching updated data");
         
-        // Prefer using the updated request from the parent (request prop) if it has the expected status
-        // Otherwise, update fullRequest with the expected status
-        if (request) {
-          const requestStatus = request?.status || request?.Status;
-          const normalizedRequestStatus = requestStatus ? String(requestStatus).toLowerCase().trim() : '';
-          
-          if (normalizedRequestStatus === normalizedExpectedStatus) {
-            console.log("[EventCard] ✅ Request prop has expected status, updating fullRequest directly");
-            setFullRequest(request);
-          } else {
-            // Request prop doesn't have expected status yet, but we know it should be updated
-            // Create an updated version of the request with the expected status
-            console.log("[EventCard] 🔄 Request prop doesn't have expected status yet, creating updated request object");
-            const updatedRequest = {
-              ...request,
-              status: expectedStatus,
-              Status: expectedStatus,
-            };
-            setFullRequest(updatedRequest);
-            console.log("[EventCard] ✅ Force refresh: fullRequest updated with expected status:", expectedStatus);
+        // SIMPLE APPROACH: Just fetch the updated request directly from the API
+        // Wait a moment for backend to process, then fetch and update
+        const fetchUpdatedRequest = async () => {
+          try {
+            // Wait 500ms for backend to process the PUT request
+            await new Promise(resolve => setTimeout(resolve, 500));
             
-            // Also try to update from request prop after a delay in case it gets updated from fetchRequests()
-            setTimeout(() => {
-              // Re-read request prop in case it was updated by parent component
-              const updatedRequestProp = request;
-              if (updatedRequestProp) {
-                const delayedStatus = updatedRequestProp?.status || updatedRequestProp?.Status;
-                const normalizedDelayedStatus = delayedStatus ? String(delayedStatus).toLowerCase().trim() : '';
-                if (normalizedDelayedStatus === normalizedExpectedStatus) {
-                  console.log("[EventCard] ✅ Delayed update: Request prop now has expected status, updating");
-                  setFullRequest(updatedRequestProp);
-                }
+            console.log("[EventCard] 🔄 Fetching updated request from API:", currentRequestId);
+            const updatedRequest = await svcFetchRequestDetails(currentRequestId, true);
+            
+            if (updatedRequest) {
+              console.log("[EventCard] ✅ Fetched updated request, updating card", {
+                requestId: currentRequestId,
+                title: updatedRequest?.Event_Title || updatedRequest?.event?.Event_Title,
+              });
+              setFullRequest(updatedRequest);
+              
+              // Clear loading state now that we've updated the card
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("unite:request-editing", {
+                    detail: {
+                      requestId: currentRequestId,
+                      isEditing: false,
+                    },
+                  })
+                );
+                console.log("[EventCard] ✅ Loading state cleared - card updated successfully");
               }
-            }, 500);
+            } else {
+              console.warn("[EventCard] ⚠️ Fetched request but got no data");
+              // Clear loading state anyway
+              if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                  new CustomEvent("unite:request-editing", {
+                    detail: {
+                      requestId: currentRequestId,
+                      isEditing: false,
+                    },
+                  })
+                );
+              }
+            }
+          } catch (error: any) {
+            console.error("[EventCard] ❌ Error fetching updated request:", error);
+            // Clear loading state on error
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent("unite:request-editing", {
+                  detail: {
+                    requestId: currentRequestId,
+                    isEditing: false,
+                  },
+                })
+              );
+            }
           }
-        } else if (fullRequest) {
-          // No request prop, but we have fullRequest - update it directly with expected status
-          console.log("[EventCard] 🔄 No request prop, updating fullRequest directly with expected status");
-          const updatedRequest = {
-            ...fullRequest,
-            status: expectedStatus,
-            Status: expectedStatus,
-          };
-          setFullRequest(updatedRequest);
-          console.log("[EventCard] ✅ Force refresh: fullRequest updated with expected status:", expectedStatus);
-        } else {
-          // No request prop or fullRequest - clear to trigger re-fetch
-          console.log("[EventCard] 🔄 No request prop or fullRequest, clearing to trigger refresh");
-          setFullRequest(null);
-        }
+        };
+        
+        // Start fetching
+        fetchUpdatedRequest();
       } else {
         console.log("[EventCard] ⏭️ Force refresh event does not match this card (ID mismatch), ignoring", {
           eventRequestId,
@@ -647,6 +730,40 @@ const EventCard: React.FC<EventCardProps> = ({
     resolvedRequest?.requestId ||
     null;
 
+  // Listen for edit events to show loading animation
+  React.useEffect(() => {
+    if (!resolvedRequestId) return;
+    
+    const handleEditEvent = (evt: any) => {
+      const eventRequestId = evt?.detail?.requestId;
+      const currentRequestId = resolvedRequestId;
+      
+      if (eventRequestId && currentRequestId && String(eventRequestId) === String(currentRequestId)) {
+        const isEditing = evt?.detail?.isEditing === true;
+        const error = evt?.detail?.error;
+        
+        console.log("[EventCard] Edit event received:", {
+          eventRequestId,
+          currentRequestId,
+          isEditing,
+          error,
+        });
+        
+        setIsEditing(isEditing);
+        
+        if (error) {
+          console.error("[EventCard] Edit error:", error);
+          // Error is already shown by the edit modal
+        }
+      }
+    };
+    
+    window.addEventListener("unite:request-editing", handleEditEvent as EventListener);
+    return () => {
+      window.removeEventListener("unite:request-editing", handleEditEvent as EventListener);
+    };
+  }, [resolvedRequestId]);
+
   // Note: resolveActorEndpoint removed - we now use unified /api/event-requests/:id/actions endpoint
   // Backend validates permissions automatically based on user's token
 
@@ -662,39 +779,6 @@ const EventCard: React.FC<EventCardProps> = ({
     resolvedRequest,
   });
   
-  // Debug: log permission-based allowed actions
-  try {
-    const dbg = {
-      requestId: resolvedRequestId,
-      viewerId,
-      // Role string for context only - action visibility is permission-driven
-      viewerRole: viewerRoleString,
-      // Permission-based allowed actions from backend
-      allowedActions: Array.from(allowedActionSet || []),
-      status: resolvedRequest?.Status || resolvedRequest?.status,
-      // Backend-computed permissions (from API response)
-      backendAllowedActions: resolvedRequest?.allowedActions ?? resolvedRequest?.allowed_actions ?? null,
-      rootAllowedActions: request?.allowedActions ?? request?.allowed_actions ?? null,
-    };
-    console.debug("[EventCard] Permission-based allowed actions", dbg);
-    
-    // Detailed request snapshot for debugging permission issues
-    if (viewerRoleString.includes("coordinator") || viewerRoleString.includes("admin")) {
-      try {
-        console.debug("[EventCard] Request details", {
-          Request_ID: resolvedRequest?.Request_ID || resolvedRequest?._id,
-          Status: resolvedRequest?.Status || resolvedRequest?.status,
-          reviewer: resolvedRequest?.reviewer,
-          // Backend validates these permissions
-          allowedActions: resolvedRequest?.allowedActions || resolvedRequest?.allowed_actions || null,
-          event: resolvedRequest?.event ? { 
-            Event_ID: resolvedRequest.event.Event_ID || resolvedRequest.event._id, 
-            Status: resolvedRequest.event.Status || resolvedRequest.event.status 
-          } : null,
-        });
-      } catch (e) {}
-    }
-  } catch (e) {}
   const hasAllowedAction = React.useCallback(
     hasAllowedActionFactory(allowedActionSet),
     [allowedActionSet],
@@ -883,37 +967,51 @@ const EventCard: React.FC<EventCardProps> = ({
         cacheKeysCount: cacheKeysToInvalidate.length
       });
       
-      // Update UI immediately with response data
+      // Clear permission cache and invalidate request cache IMMEDIATELY (synchronous, before state update)
+      try {
+        const { clearPermissionCache } = await import("@/utils/eventActionPermissions");
+        const { invalidateCache } = await import("@/utils/requestCache");
+        
+        // Extract event ID from response or request for targeted cache clearing
+        const eventId = responseRequest?.Event_ID || 
+                       responseRequest?.eventId || 
+                       responseRequest?.event?.Event_ID || 
+                       responseRequest?.event?.EventId ||
+                       resolvedRequest?.Event_ID ||
+                       resolvedRequest?.eventId ||
+                       resolvedRequest?.event?.Event_ID ||
+                       resolvedRequest?.event?.EventId ||
+                       null;
+        
+        // Clear permission cache for specific event (immediate, synchronous)
+        if (eventId) {
+          clearPermissionCache(String(eventId));
+          console.log(`[EventCard] Cleared permission cache for event ${eventId} (${actionName} action)`);
+        } else {
+          // Fallback: clear all permission cache if eventId not available
+          clearPermissionCache();
+          console.log(`[EventCard] Cleared all permission cache (eventId not available, ${actionName} action)`);
+        }
+        
+        // Invalidate request cache (immediate, synchronous)
+        if (cacheKeysToInvalidate && cacheKeysToInvalidate.length > 0) {
+          cacheKeysToInvalidate.forEach((key: string) => {
+            const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
+            invalidateCache(cachePattern);
+          });
+        } else {
+          invalidateCache(/event-requests/);
+        }
+        console.log(`[EventCard] Invalidated request cache (${actionName} action)`);
+      } catch (cacheError) {
+        console.error(`[EventCard] Error clearing caches:`, cacheError);
+      }
+      
+      // Update UI immediately with response data (after cache clearing)
       if (responseRequest) {
         console.log(`[EventCard] Updating UI with response data immediately for ${actionName}`);
         setFullRequest(responseRequest);
       }
-      
-      // Clear permission cache and invalidate request cache (async, don't wait)
-      (async () => {
-        try {
-          const { clearPermissionCache } = await import("@/utils/eventActionPermissions");
-          clearPermissionCache();
-        } catch (permCacheError) {
-          console.error(`[EventCard] Error clearing permission cache:`, permCacheError);
-        }
-        
-        try {
-          const { invalidateCache } = await import("@/utils/requestCache");
-          
-          // Invalidate specific cache keys if provided
-          if (cacheKeysToInvalidate && cacheKeysToInvalidate.length > 0) {
-            cacheKeysToInvalidate.forEach((key: string) => {
-              const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
-              invalidateCache(cachePattern);
-            });
-          } else {
-            invalidateCache(/event-requests/);
-          }
-        } catch (cacheError) {
-          console.error(`[EventCard] Error invalidating cache:`, cacheError);
-        }
-      })();
       
       // Dispatch refresh events AFTER state update
       if (typeof window !== "undefined") {
@@ -1476,6 +1574,61 @@ const EventCard: React.FC<EventCardProps> = ({
       return false;
     }
   };
+
+  // Debug: log permission-based allowed actions with detailed reschedule check (after flagFor is defined)
+  React.useEffect(() => {
+    try {
+      const extractedActions = Array.from(allowedActionSet || []);
+      const hasRescheduleDirect = extractedActions.includes('reschedule');
+      const hasReschedDirect = extractedActions.includes('resched');
+      const canRescheduleCheck = flagFor("canReschedule", ["resched", "reschedule"]);
+      const hasRescheduleViaHasAllowed = hasAllowedAction(["resched", "reschedule"]);
+      
+      const dbg = {
+        requestId: resolvedRequestId,
+        viewerId,
+        // Role string for context only - action visibility is permission-driven
+        viewerRole: viewerRoleString,
+        // Permission-based allowed actions from backend
+        allowedActions: extractedActions,
+        actionCount: extractedActions.length,
+        status: resolvedRequest?.Status || resolvedRequest?.status,
+        // Backend-computed permissions (from API response)
+        backendAllowedActions: resolvedRequest?.allowedActions ?? resolvedRequest?.allowed_actions ?? null,
+        rootAllowedActions: request?.allowedActions ?? request?.allowed_actions ?? null,
+        // Reschedule-specific debugging
+        hasRescheduleDirect,
+        hasReschedDirect,
+        canRescheduleCheck,
+        hasRescheduleViaHasAllowed,
+        // Check what flagFor sees
+        canRescheduleFlag: (resolvedRequest || request || {})?.canReschedule,
+      };
+      console.log("[EventCard] 🔍 Permission-based allowed actions DEBUG:", dbg);
+      
+      // Detailed request snapshot for debugging permission issues (especially for coordinators)
+      if (viewerRoleString.includes("coordinator") || viewerRoleString.includes("admin")) {
+        try {
+          console.log("[EventCard] 🔍 Coordinator/Admin Request details:", {
+            Request_ID: resolvedRequest?.Request_ID || resolvedRequest?._id,
+            Status: resolvedRequest?.Status || resolvedRequest?.status,
+            reviewer: resolvedRequest?.reviewer,
+            // Backend validates these permissions
+            allowedActions: resolvedRequest?.allowedActions || resolvedRequest?.allowed_actions || null,
+            event: resolvedRequest?.event ? { 
+              Event_ID: resolvedRequest.event.Event_ID || resolvedRequest.event._id, 
+              Status: resolvedRequest.event.Status || resolvedRequest.event.status 
+            } : null,
+            // Debug reschedule visibility
+            canRescheduleViaFlag: canRescheduleCheck,
+            hasRescheduleInSet: hasRescheduleDirect || hasReschedDirect,
+          });
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.error("[EventCard] Error in permission debugging:", e);
+    }
+  }, [allowedActionSet, resolvedRequest, request, resolvedRequestId, viewerId, viewerRoleString, flagFor, hasAllowedAction]);
 
   // Menus are now rendered by EventActionMenu which uses the same flags and setters
 
@@ -2503,13 +2656,13 @@ const EventCard: React.FC<EventCardProps> = ({
   return (
     <>
       <Card className="w-full rounded-xl border border-gray-200 shadow-none bg-white relative">
-        {/* Loading overlay to prevent interaction during confirm or accept */}
-        {(isConfirming || isAccepting || isRejecting || isRescheduling) && (
+        {/* Loading overlay to prevent interaction during confirm, accept, reject, reschedule, or edit */}
+        {(isConfirming || isAccepting || isRejecting || isRescheduling || isEditing) && (
           <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center rounded-xl">
             <div className="flex flex-col items-center gap-3">
               <Spinner size="lg" color="primary" />
               <p className="text-sm font-medium text-gray-700">
-                {isAccepting ? "Accepting request..." : isRejecting ? "Rejecting request..." : isRescheduling ? "Rescheduling request..." : "Confirming request..."}
+                {isEditing ? "Editing event..." : isAccepting ? "Accepting request..." : isRejecting ? "Rejecting request..." : isRescheduling ? "Rescheduling request..." : "Confirming request..."}
               </p>
               <p className="text-xs text-gray-500">Please wait while we update the request</p>
             </div>
@@ -2551,7 +2704,7 @@ const EventCard: React.FC<EventCardProps> = ({
               hasAllowedAction={hasAllowedAction}
               flagFor={flagFor}
               status={status}
-              request={request}
+              request={resolvedRequest || fullRequest || request}
               onViewEvent={onViewEvent}
               onEditEvent={onEditEvent}
               openViewRequest={openViewRequest}
@@ -2580,6 +2733,20 @@ const EventCard: React.FC<EventCardProps> = ({
                 }
               }}
             />
+            {/* Debug: Log what we're passing to EventActionMenu */}
+            {(() => {
+              const actionsArray = Array.from(allowedActionSet || []);
+              console.log("[EventCard] 📤 Passing to EventActionMenu:", {
+                requestId: resolvedRequestId,
+                allowedActionSetSize: allowedActionSet?.size || 0,
+                allowedActions: actionsArray,
+                hasReschedule: actionsArray.includes('reschedule') || actionsArray.includes('resched'),
+                requestAllowedActions: request?.allowedActions,
+                fullRequestAllowedActions: fullRequest?.allowedActions,
+                resolvedRequestAllowedActions: resolvedRequest?.allowedActions,
+              });
+              return null;
+            })()}
           </Dropdown>
         </CardHeader>
         <CardBody className="py-4">
@@ -3053,7 +3220,21 @@ const EventCard: React.FC<EventCardProps> = ({
         requestId={request?.Request_ID}
         onClose={() => setManageStaffOpen(false)}
         onSaved={async () => {
-          // onSaved hook: you can refresh data here if needed
+          // onSaved hook: refresh request data and dispatch event
+          const requestId = request?.Request_ID || request?.RequestId || request?._id || null;
+          if (requestId && typeof window !== "undefined") {
+            // Dispatch refresh event to trigger parent refresh
+            window.dispatchEvent(
+              new CustomEvent("unite:requests-changed", {
+                detail: {
+                  requestId,
+                  action: "staff-updated",
+                  forceRefresh: true,
+                  cacheKeysToInvalidate: [`/api/event-requests/${requestId}`],
+                },
+              })
+            );
+          }
         }}
       />
 

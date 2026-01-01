@@ -14,11 +14,12 @@ import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 
 import { fetchWithAuth } from "@/utils/fetchWithAuth";
+import { fetchWithRetry } from "@/utils/fetchWithRetry";
+import { invalidateCache } from "@/utils/requestCache";
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  // prefer requestId when available (campaign cards have it); otherwise eventId can be provided
   requestId?: string | null;
   eventId?: string | null;
   request?: any;
@@ -48,136 +49,121 @@ export default function ManageStaffModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(
-    propRequestId || null,
-  );
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    setRequestId(propRequestId || null);
-  }, [propRequestId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    let mounted = true;
-
-    (async () => {
-      try {
-        setError(null);
-        setLoading(true);
-
-        // Determine requestId: prefer prop, then request object, then fetch from eventId
-        let rid = propRequestId || null;
-
-        if (!rid && request) {
-          rid = 
-            request.Request_ID || 
-            request.RequestId || 
-            request.requestId ||
-            request._id || 
-            (request.request && (
-              request.request.Request_ID || 
-              request.request.RequestId || 
+  // Get requestId
+  const getRequestId = (): string | null => {
+    return (
+      propRequestId ||
+      (request &&
+        (request.Request_ID ||
+          request.RequestId ||
+          request.requestId ||
+          request._id ||
+          (request.request &&
+            (request.request.Request_ID ||
+              request.request.RequestId ||
               request.request.requestId ||
-              request.request._id
-            )) ||
-            null;
+              request.request._id)))) ||
+      null
+    );
+  };
+
+  // Get eventId
+  const getEventId = (): string | null => {
+    return (
+      eventId ||
+      (request &&
+        (request.Event_ID ||
+          request.eventId ||
+          (request.event && request.event.Event_ID))) ||
+      null
+    );
+  };
+
+  // Simple function to fetch staff list with timeout and retry
+  const fetchStaff = async () => {
+    const rid = getRequestId();
+    if (!rid) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const token =
+        typeof window !== "undefined"
+          ? localStorage.getItem("unite_token") ||
+            sessionStorage.getItem("unite_token")
+          : null;
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // Use fetchWithRetry for timeout and retry handling
+      const res = await fetchWithRetry(
+        `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}`,
+        {
+          headers,
+          method: "GET",
+        },
+        {
+          maxRetries: 2,
+          timeout: 30000, // 30 second timeout
         }
+      );
 
-        if (!rid && eventId) {
-          try {
-            const token =
-              typeof window !== "undefined"
-                ? localStorage.getItem("unite_token") ||
-                  sessionStorage.getItem("unite_token")
-                : null;
-            const headers: any = { "Content-Type": "application/json" };
-            if (token) headers["Authorization"] = `Bearer ${token}`;
+      const body = await res.json();
 
-            const res = await fetchWithAuth(
-              `${API_BASE}/api/events/${encodeURIComponent(eventId)}`,
-              { method: "GET" }
-            );
-            const body = await res.json();
-
-            if (res.ok) {
-              const data = body.data?.event || body.data || body.event || body;
-              rid =
-                data?.request?.Request_ID ||
-                data?.request?.RequestId ||
-                data?.request?.requestId ||
-                data?.Request_ID ||
-                data?.RequestId ||
-                data?.requestId ||
-                null;
-            }
-          } catch (e) {
-            console.warn("Failed to fetch requestId from eventId:", e);
-          }
-        }
-
-        setRequestId(rid || null);
-        
-        console.log("[ManageStaffModal] Resolved requestId:", {
-          rid,
-          propRequestId,
-          eventId,
-          hasRequest: !!request,
-          requestKeys: request ? Object.keys(request).slice(0, 10) : []
-        });
-
-        if (rid) {
-          const token =
-            typeof window !== "undefined"
-              ? localStorage.getItem("unite_token") ||
-                sessionStorage.getItem("unite_token")
-              : null;
-          const headers: any = { "Content-Type": "application/json" };
-
-          if (token) headers["Authorization"] = `Bearer ${token}`;
-          const r = await fetch(
-            `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}`,
-            { headers },
-          );
-          const rb = await r.json();
-
-          if (!r.ok)
-            throw new Error(rb.message || "Failed to fetch request details");
-          // New API format: { success, data: { request, staff } }
-          const reqData = rb.data?.request || rb.data || rb.request || rb;
-          // Staff can be in data.staff or request.staff
-          const staff = rb.data?.staff || reqData?.staff || [];
-
-          if (mounted) {
-            setStaffMembers(
-              Array.isArray(staff)
-                ? staff.map((s: any) => ({
-                    FullName:
-                      s.FullName || s.Staff_FullName || s.Staff_Fullname || "",
-                    Role: s.Role || "",
-                  }))
-                : [],
-            );
-          }
-        } else {
-          if (mounted) setStaffMembers([]);
-        }
-      } catch (e: any) {
-        if (mounted) setError(e?.message || "Failed to load staff");
-      } finally {
-        if (mounted) setLoading(false);
+      if (!res.ok) {
+        throw new Error(body.message || "Failed to fetch staff");
       }
-    })();
 
-    return () => {
-      mounted = false;
-    };
-  }, [isOpen, propRequestId, eventId, request]);
+      const reqData = body.data?.request || body.data || body.request || body;
+      const staff = body.data?.staff || reqData?.staff || [];
+
+      setStaffMembers(
+        Array.isArray(staff)
+          ? staff.map((s: any) => ({
+              FullName: s.FullName || s.Staff_FullName || s.Staff_Fullname || "",
+              Role: s.Role || "",
+            }))
+          : []
+      );
+    } catch (e: any) {
+      const errorMessage = e?.message || "Failed to load staff";
+      // Provide user-friendly error messages
+      if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
+        setError("Request timed out. Please check your connection and try again.");
+      } else if (errorMessage.includes("Failed to fetch") || errorMessage.includes("network")) {
+        setError("Network error. Please check your connection and try again.");
+      } else {
+        setError(errorMessage);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load staff when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchStaff();
+    } else {
+      // Reset when modal closes
+      setStaffMembers([]);
+      setNewFullName("");
+      setNewRole("");
+      setError(null);
+    }
+  }, [isOpen, propRequestId, eventId]);
 
   const addStaff = () => {
-    if (!newFullName || !newRole) return setError("Name and role are required");
+    if (!newFullName.trim() || !newRole.trim()) {
+      setError("Name and role are required");
+      return;
+    }
     setError(null);
-    setStaffMembers([
-      ...staffMembers,
+    setStaffMembers((prev) => [
+      ...prev,
       { FullName: newFullName.trim(), Role: newRole.trim() },
     ]);
     setNewFullName("");
@@ -185,144 +171,128 @@ export default function ManageStaffModal({
   };
 
   const removeStaff = (idx: number) => {
-    setStaffMembers(staffMembers.filter((_, i) => i !== idx));
+    setStaffMembers((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const save = async () => {
-    // Extract requestId from multiple possible sources
-    let rid = 
-      requestId || 
-      propRequestId ||
-      (request && (
-        request.Request_ID || 
-        request.RequestId || 
-        request.requestId ||
-        request._id ||
-        (request.request && (
-          request.request.Request_ID || 
-          request.request.RequestId || 
-          request.request.requestId ||
-          request.request._id
-        ))
-      )) ||
-      null;
+    const rid = getRequestId();
+    const evtId = getEventId();
 
-    // If still no requestId, try to fetch from eventId
-    if (!rid && eventId) {
-      try {
-        const token =
-          typeof window !== "undefined"
-            ? localStorage.getItem("unite_token") ||
-              sessionStorage.getItem("unite_token")
-            : null;
-        const headers: any = { "Content-Type": "application/json" };
-        if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (!rid) {
+      setError("Request ID not found");
+      return;
+    }
 
-        const res = await fetchWithAuth(
-          `${API_BASE}/api/events/${encodeURIComponent(eventId)}`,
-          { method: "GET" }
-        );
-        const body = await res.json();
+    if (!evtId) {
+      setError("Event ID not found");
+      return;
+    }
 
-        if (res.ok && body.data) {
-          const eventData = body.data.event || body.data || body;
-          rid = 
-            eventData?.request?.Request_ID ||
-            eventData?.request?.RequestId ||
-            eventData?.request?.requestId ||
-            eventData?.Request_ID ||
-            eventData?.requestId ||
-            null;
-        }
-      } catch (e) {
-        console.warn("Failed to fetch requestId from eventId:", e);
+    if (staffMembers.length === 0) {
+      setError("Please add at least one staff member");
+      return;
+    }
+
+    // Validate staff members before sending
+    for (const staff of staffMembers) {
+      if (!staff.FullName?.trim() || !staff.Role?.trim()) {
+        setError("All staff members must have both name and role");
+        return;
       }
     }
 
-    if (!rid) {
-      console.error("[ManageStaffModal] Request ID not found:", {
-        requestId,
-        propRequestId,
-        eventId,
-        hasRequest: !!request,
-        requestKeys: request ? Object.keys(request).slice(0, 10) : []
-      });
-      return setError("Request info not available");
-    }
     try {
       setSaving(true);
       setError(null);
+      // Store current staff for rollback if needed
+      const previousStaff = [...staffMembers];
+      // Optimistically update UI - clear list to show loading state
+      setStaffMembers([]);
+      setIsRefreshing(true);
+
       const token =
         typeof window !== "undefined"
           ? localStorage.getItem("unite_token") ||
             sessionStorage.getItem("unite_token")
           : null;
       const headers: any = { "Content-Type": "application/json" };
-
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      // Get eventId from request or event object
-      const evtId =
-        eventId ||
-        (request &&
-          (request.Event_ID || 
-           request.eventId ||
-           (request.event && request.event.Event_ID))) ||
-        null;
-
-      if (!evtId) {
-        return setError("Event ID is required");
-      }
-
-      const body: any = {
+      const body = {
         eventId: evtId,
-        staffMembers,
+        staffMembers: previousStaff.map(s => ({
+          FullName: s.FullName.trim(),
+          Role: s.Role.trim(),
+        })),
       };
 
-      let res;
+      const url = `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}/staff`;
 
-      if (token) {
-        res = await fetchWithAuth(
-          `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}/staff`,
-          { method: "POST", body: JSON.stringify(body) },
-        );
-      } else {
-        res = await fetch(
-          `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}/staff`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify(body),
-            credentials: "include",
-          },
-        );
-      }
+      // Use fetchWithRetry for timeout and retry handling
+      const res = await fetchWithRetry(
+        url,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          credentials: "include",
+        },
+        {
+          maxRetries: 2,
+          timeout: 30000, // 30 second timeout
+        }
+      );
 
       const resp = await res.json();
 
       if (!res.ok) {
-        // Handle new API error format
-        const errorMsg = resp.message || 
-                        (resp.errors && Array.isArray(resp.errors) ? resp.errors.join(", ") : null) ||
-                        "Failed to assign staff";
-        throw new Error(errorMsg);
+        // Rollback on error
+        setStaffMembers(previousStaff);
+        throw new Error(resp.message || "Failed to save staff");
       }
 
-      // New API format: { success, data: { event, staff } }
-      // Refresh staff list from response if available
-      if (resp.data?.staff && Array.isArray(resp.data.staff)) {
-        setStaffMembers(
-          resp.data.staff.map((s: any) => ({
-            FullName: s.FullName || s.Staff_FullName || s.Staff_Fullname || "",
-            Role: s.Role || "",
-          }))
+      // Invalidate cache for this request
+      invalidateCache(new RegExp(`event-requests/${encodeURIComponent(rid)}`));
+      invalidateCache(/event-requests\?/);
+
+      // Dispatch custom event to notify other components
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("unite:staff-updated", {
+            detail: {
+              requestId: rid,
+              eventId: evtId,
+              staffCount: previousStaff.length,
+            },
+          })
         );
       }
 
-      if (onSaved) await onSaved();
-      onClose();
+      // After successful save, fetch fresh data
+      await fetchStaff();
+      setIsRefreshing(false);
+
+      // Clear input fields
+      setNewFullName("");
+      setNewRole("");
+
+      // Call onSaved callback with updated data
+      if (onSaved) {
+        onSaved();
+      }
     } catch (e: any) {
-      setError(e?.message || "Failed to save staff");
+      setIsRefreshing(false);
+      const errorMessage = e?.message || "Failed to save staff";
+      // Provide user-friendly error messages
+      if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
+        setError("Request timed out. Please check your connection and try again.");
+      } else if (errorMessage.includes("Failed to fetch") || errorMessage.includes("network")) {
+        setError("Network error. Please check your connection and try again.");
+      } else if (errorMessage.includes("validation") || errorMessage.includes("Invalid")) {
+        setError(`Validation error: ${errorMessage}`);
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setSaving(false);
     }
@@ -418,22 +388,22 @@ export default function ManageStaffModal({
               </div>
 
               <div className="bg-white">
-                {loading && (
+                {(loading || isRefreshing) && (
                   <div className="px-4 py-6 text-center text-sm text-default-600 border-t border-default-100">
                     <div className="flex items-center justify-center gap-2">
                       <Spinner size="sm" />
-                      <span>Loading staff...</span>
+                      <span>{loading ? "Loading staff..." : "Saving changes..."}</span>
                     </div>
                   </div>
                 )}
 
-                {!loading && staffMembers.length === 0 && (
+                {!loading && !isRefreshing && staffMembers.length === 0 && (
                   <div className="px-4 py-8 text-center text-sm text-default-500">
                     No staff assigned yet.
                   </div>
                 )}
 
-                {staffMembers.map((s, idx) => (
+                {!loading && !isRefreshing && staffMembers.map((s, idx) => (
                   <div
                     key={idx}
                     className="grid grid-cols-12 gap-4 px-4 py-3 border-t border-default-100 hover:bg-default-50 transition-colors"
@@ -472,7 +442,9 @@ export default function ManageStaffModal({
             </div>
           )}
 
-          {saving && <div className="text-sm text-default-600">Saving...</div>}
+          {saving && (
+            <div className="text-sm text-default-600">Saving...</div>
+          )}
         </ModalBody>
 
         <ModalFooter>

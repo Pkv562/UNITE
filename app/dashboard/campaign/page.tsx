@@ -22,6 +22,7 @@ import { useLoading } from "@/components/ui/loading-overlay";
 import { useLocations } from "../../../components/providers/locations-provider";
 import { fetchWithRetry, cancelRequests } from "@/utils/fetchWithRetry";
 import { getCachedResponse, cacheResponse, invalidateCache, DEFAULT_TTL } from "@/utils/requestCache";
+import { clearPermissionCache } from "@/utils/eventActionPermissions";
 
 /**
  * Campaign Page Component
@@ -221,7 +222,7 @@ export default function CampaignPage() {
   // Note: fetchGlobalCounts removed - counts are now included in fetchRequests response
 
   // Optimized fetchRequests with caching, retry, and deduplication
-  const fetchRequests = async (): Promise<void> => {
+  const fetchRequests = async (options?: { forceRefresh?: boolean }): Promise<void> => {
     setIsLoadingRequests(true);
     setRequestsError("");
 
@@ -277,29 +278,34 @@ export default function CampaignPage() {
         cache: "no-store"
       };
 
-      // Check cache first - show cached data immediately if available
-      const cachedData = getCachedResponse(url, fetchOptions);
-      if (cachedData) {
-        debug("[Campaign] Using cached response");
-        const responseData = cachedData.data || {};
-        const list = Array.isArray(responseData.requests) ? responseData.requests : [];
-        const totalCount = responseData.count ?? list.length;
-        
-        setRequests(list);
-        setTotalRequestsCount(totalCount);
-        setIsServerPaged(totalCount > list.length);
-        setRequestsError("");
-        
-        if (responseData.statusCounts) {
-          setRequestCounts({
-            all: responseData.statusCounts.all ?? 0,
-            approved: responseData.statusCounts.approved ?? 0,
-            pending: responseData.statusCounts.pending ?? 0,
-            rejected: responseData.statusCounts.rejected ?? 0,
-          });
+      // Check cache first - show cached data immediately if available (skip if force refresh)
+      const forceRefresh = options?.forceRefresh || false;
+      if (!forceRefresh) {
+        const cachedData = getCachedResponse(url, fetchOptions);
+        if (cachedData) {
+          debug("[Campaign] Using cached response");
+          const responseData = cachedData.data || {};
+          const list = Array.isArray(responseData.requests) ? responseData.requests : [];
+          const totalCount = responseData.count ?? list.length;
+          
+          setRequests(list);
+          setTotalRequestsCount(totalCount);
+          setIsServerPaged(totalCount > list.length);
+          setRequestsError("");
+          
+          if (responseData.statusCounts) {
+            setRequestCounts({
+              all: responseData.statusCounts.all ?? 0,
+              approved: responseData.statusCounts.approved ?? 0,
+              pending: responseData.statusCounts.pending ?? 0,
+              rejected: responseData.statusCounts.rejected ?? 0,
+            });
+          }
+          
+          // Continue to fetch fresh data in background (don't set loading to false yet)
         }
-        
-        // Continue to fetch fresh data in background (don't set loading to false yet)
+      } else {
+        debug("[Campaign] Force refresh - skipping cache");
       }
 
       // Fetch with retry and exponential backoff
@@ -482,7 +488,7 @@ export default function CampaignPage() {
       try {
         const now = Date.now();
         const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
-        const minRefreshInterval = 500; // Minimum 500ms between refreshes
+        const minRefreshInterval = 100; // Minimum 100ms between refreshes (reduced from 500ms for faster updates)
         const forceRefresh = evt?.detail?.forceRefresh || evt?.detail?.shouldRefresh;
 
         debug(
@@ -497,13 +503,13 @@ export default function CampaignPage() {
           refreshDebounceTimerRef.current = null;
         }
 
-        // If force refresh is requested (from backend UI flags), skip debounce
+        // If force refresh is requested (from backend UI flags), skip debounce completely
         const debounceDelay = forceRefresh ? 0 : Math.max(0, minRefreshInterval - timeSinceLastRefresh);
         
-        // Cancel any pending requests for this endpoint
+        // Cancel any pending requests for this endpoint (immediate)
         cancelRequests(/event-requests/);
         
-        // Invalidate cache immediately if cache keys provided
+        // Invalidate cache immediately before any delay (synchronous)
         if (evt?.detail?.cacheKeysToInvalidate && Array.isArray(evt.detail.cacheKeysToInvalidate)) {
           evt.detail.cacheKeysToInvalidate.forEach((key: string) => {
             const cachePattern = new RegExp(key.replace(/^\/api\//, '').replace(/\//g, '.*'));
@@ -515,23 +521,48 @@ export default function CampaignPage() {
           invalidateCache(/event-requests/);
         }
         
-        refreshDebounceTimerRef.current = setTimeout(async () => {
+        // Clear permission cache immediately for faster refresh
+        if (evt?.detail?.requestId) {
+          // Try to extract event ID from the request if available
+          // This will be handled by the event card component, but we can also clear here
+          clearPermissionCache();
+        }
+        
+        // For force refresh, execute immediately without debounce
+        if (forceRefresh && debounceDelay === 0) {
           try {
             lastRefreshTimeRef.current = Date.now();
-            debug("[Campaign] Executing refresh after request change", { forceRefresh });
+            debug("[Campaign] Executing immediate force refresh after request change");
             
-            // Fetch fresh requests (cache already invalidated above)
-            await fetchRequests().catch(err => {
+            // Fetch fresh requests (cache already invalidated above, force refresh to skip cache)
+            await fetchRequests({ forceRefresh: true }).catch(err => {
               console.error("[Campaign] Error refreshing requests:", err);
             });
             
-            debug("[Campaign] Refresh completed successfully");
+            debug("[Campaign] Force refresh completed successfully");
           } catch (e) {
-            console.error("[Campaign] Error in refresh handler:", e);
-          } finally {
-            refreshDebounceTimerRef.current = null;
+            console.error("[Campaign] Error in force refresh handler:", e);
           }
-        }, debounceDelay);
+        } else {
+          // For non-force refresh, use minimal debounce
+          refreshDebounceTimerRef.current = setTimeout(async () => {
+            try {
+              lastRefreshTimeRef.current = Date.now();
+              debug("[Campaign] Executing refresh after request change", { forceRefresh });
+              
+              // Fetch fresh requests (cache already invalidated above)
+              await fetchRequests().catch(err => {
+                console.error("[Campaign] Error refreshing requests:", err);
+              });
+              
+              debug("[Campaign] Refresh completed successfully");
+            } catch (e) {
+              console.error("[Campaign] Error in refresh handler:", e);
+            } finally {
+              refreshDebounceTimerRef.current = null;
+            }
+          }, debounceDelay);
+        }
       } catch (e) {
         console.error("[Campaign] Error in event handler:", e);
       }
@@ -573,6 +604,37 @@ export default function CampaignPage() {
       }
     };
 
+    // Handler for staff-updated events (specific to staff management)
+    const staffUpdatedHandler = async (evt: any) => {
+      try {
+        const { requestId, eventId } = evt?.detail || {};
+        debug("[Campaign] unite:staff-updated received, refreshing requests", {
+          requestId,
+          eventId,
+        });
+
+        // Invalidate cache for this specific request
+        if (requestId) {
+          invalidateCache(new RegExp(`event-requests/${encodeURIComponent(requestId)}`));
+        }
+        // Also invalidate list cache
+        invalidateCache(/event-requests\?/);
+
+        // Cancel any pending requests
+        cancelRequests(/event-requests/);
+
+        // Force immediate refresh
+        lastRefreshTimeRef.current = Date.now();
+        await fetchRequests({ forceRefresh: true }).catch(err => {
+          console.error("[Campaign] Error refreshing requests after staff update:", err);
+        });
+
+        debug("[Campaign] Staff update refresh completed");
+      } catch (e) {
+        console.error("[Campaign] Error in staff updated handler:", e);
+      }
+    };
+
     if (typeof window !== "undefined") {
       window.addEventListener(
         "unite:requests-changed",
@@ -581,6 +643,10 @@ export default function CampaignPage() {
       window.addEventListener(
         "unite:force-refresh-requests",
         forceRefreshHandler as EventListener,
+      );
+      window.addEventListener(
+        "unite:staff-updated",
+        staffUpdatedHandler as EventListener,
       );
     }
 
@@ -599,6 +665,10 @@ export default function CampaignPage() {
         window.removeEventListener(
           "unite:force-refresh-requests",
           forceRefreshHandler as EventListener,
+        );
+        window.removeEventListener(
+          "unite:staff-updated",
+          staffUpdatedHandler as EventListener,
         );
       } catch (e) {}
     };
@@ -1040,6 +1110,14 @@ export default function CampaignPage() {
       
       // Invalidate cache and refresh requests list
       invalidateCache(/event-requests/);
+      
+      // Clear permission cache for this request's event
+      const eventId = reqObj?.Event_ID || reqObj?.eventId || reqObj?.event?.Event_ID || reqObj?.event?.EventId;
+      if (eventId) {
+        console.log("[CampaignPage] Clearing permission cache for event:", eventId);
+        clearPermissionCache(String(eventId));
+      }
+      
       await fetchRequests();
 
       console.log("[CampaignPage] Requests list refreshed");
@@ -1292,6 +1370,17 @@ export default function CampaignPage() {
       // Invalidate cache and refresh requests list
       console.log("[CampaignPage] 🔄 Step 7a: Invalidating cache");
       invalidateCache(/event-requests/);
+      
+      // Clear permission cache for this request's event
+      const eventId = reqObj?.Event_ID || reqObj?.eventId || reqObj?.event?.Event_ID || reqObj?.event?.EventId;
+      if (eventId) {
+        console.log("[CampaignPage] 🔄 Step 7a-perm: Clearing permission cache for event:", eventId);
+        clearPermissionCache(String(eventId));
+        console.log("[CampaignPage] ✅ Step 7a-perm COMPLETE: Permission cache cleared");
+      } else {
+        console.warn("[CampaignPage] ⚠️ Step 7a-perm: No eventId found, cannot clear permission cache");
+      }
+      
       console.log("[CampaignPage] ✅ Step 7a COMPLETE: Cache invalidated");
       
       console.log("[CampaignPage] 🔄 Step 7b: Calling fetchRequests()");
@@ -1609,9 +1698,22 @@ export default function CampaignPage() {
       
       console.log("[CampaignPage] ✅ Step 7: Starting cache invalidation and refresh");
       
-      // Invalidate cache and refresh requests list
+      // Invalidate cache and refresh requests list (immediate, synchronous)
       console.log("[CampaignPage] 🔄 Step 7a: Invalidating cache");
       invalidateCache(/event-requests/);
+      
+      // Clear permission cache for this request's event (immediate, synchronous)
+      const eventId = reqObj?.Event_ID || reqObj?.eventId || reqObj?.event?.Event_ID || reqObj?.event?.EventId;
+      if (eventId) {
+        console.log("[CampaignPage] 🔄 Step 7a-perm: Clearing permission cache for event:", eventId);
+        clearPermissionCache(String(eventId));
+        console.log("[CampaignPage] ✅ Step 7a-perm COMPLETE: Permission cache cleared");
+      } else {
+        // Clear all permission cache if eventId not available
+        clearPermissionCache();
+        console.log("[CampaignPage] 🔄 Step 7a-perm: Cleared all permission cache (eventId not available)");
+      }
+      
       console.log("[CampaignPage] ✅ Step 7a COMPLETE: Cache invalidated");
       
       console.log("[CampaignPage] 🔄 Step 7b: Calling fetchRequests()");
@@ -1624,8 +1726,8 @@ export default function CampaignPage() {
         });
         
         // Dispatch custom event to force EventCard components to check for updates
-        // Wait a bit for fetchRequests to fully update the state
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Reduced delay for faster UI updates
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         console.log("[CampaignPage] 📢 Step 7b-event: Dispatching refresh event for request:", requestId);
         try {
@@ -1635,24 +1737,11 @@ export default function CampaignPage() {
                 requestId,
                 expectedStatus: 'approved',
                 originalStatus: reqObj?.status || reqObj?.Status,
+                forceRefresh: true,
               } 
             })
           );
           console.log("[CampaignPage] ✅ Step 7b-event COMPLETE: Refresh event dispatched");
-          
-          // Dispatch a second event after a delay to ensure cards get the update
-          setTimeout(() => {
-            console.log("[CampaignPage] 📢 Step 7b-event-2: Dispatching second refresh event");
-            window.dispatchEvent(
-              new CustomEvent("unite:force-refresh-requests", { 
-                detail: { 
-                  requestId,
-                  expectedStatus: 'approved',
-                  originalStatus: reqObj?.status || reqObj?.Status,
-                } 
-              })
-            );
-          }, 300);
         } catch (eventError: any) {
           console.warn("[CampaignPage] ⚠️ Step 7b-event: Failed to dispatch event:", eventError?.message);
         }
@@ -1664,8 +1753,9 @@ export default function CampaignPage() {
         // Don't throw - we still want to return success even if refresh fails
       }
       
-      console.log("[CampaignPage] 🔄 Step 7c: Waiting 500ms for React state propagation");
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Reduced delay for faster state propagation
+      console.log("[CampaignPage] 🔄 Step 7c: Waiting 200ms for React state propagation");
+      await new Promise(resolve => setTimeout(resolve, 200));
       console.log("[CampaignPage] ✅ Step 7c COMPLETE: Delay completed");
 
       const totalElapsed = Date.now() - startTime;
@@ -1909,9 +1999,22 @@ export default function CampaignPage() {
       console.log("[CampaignPage] ✅ Step 6: Response OK, reject succeeded");
       console.log("[CampaignPage] ✅ Step 7: Starting cache invalidation and refresh");
       
-      // Invalidate cache and refresh requests list
+      // Invalidate cache and refresh requests list (immediate, synchronous)
       console.log("[CampaignPage] 🔄 Step 7a: Invalidating cache");
       invalidateCache(/event-requests/);
+      
+      // Clear permission cache for this request's event (immediate, synchronous)
+      const eventId = reqObj?.Event_ID || reqObj?.eventId || reqObj?.event?.Event_ID || reqObj?.event?.EventId;
+      if (eventId) {
+        console.log("[CampaignPage] 🔄 Step 7a-perm: Clearing permission cache for event:", eventId);
+        clearPermissionCache(String(eventId));
+        console.log("[CampaignPage] ✅ Step 7a-perm COMPLETE: Permission cache cleared");
+      } else {
+        // Clear all permission cache if eventId not available
+        clearPermissionCache();
+        console.log("[CampaignPage] 🔄 Step 7a-perm: Cleared all permission cache (eventId not available)");
+      }
+      
       console.log("[CampaignPage] ✅ Step 7a COMPLETE: Cache invalidated");
       
       console.log("[CampaignPage] 🔄 Step 7b: Calling fetchRequests()");
@@ -1924,8 +2027,8 @@ export default function CampaignPage() {
         });
         
         // Dispatch custom event to force EventCard components to check for updates
-        // Wait a bit for fetchRequests to fully update the state
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Reduced delay for faster UI updates
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         console.log("[CampaignPage] 📢 Step 7b-event: Dispatching refresh event for request:", requestId);
         try {
@@ -1935,24 +2038,11 @@ export default function CampaignPage() {
                 requestId,
                 expectedStatus: 'rejected',
                 originalStatus: reqObj?.status || reqObj?.Status,
+                forceRefresh: true,
               } 
             })
           );
           console.log("[CampaignPage] ✅ Step 7b-event COMPLETE: Refresh event dispatched");
-          
-          // Dispatch a second event after a delay to ensure cards get the update
-          setTimeout(() => {
-            console.log("[CampaignPage] 📢 Step 7b-event-2: Dispatching second refresh event");
-            window.dispatchEvent(
-              new CustomEvent("unite:force-refresh-requests", { 
-                detail: { 
-                  requestId,
-                  expectedStatus: 'rejected',
-                  originalStatus: reqObj?.status || reqObj?.Status,
-                } 
-              })
-            );
-          }, 300);
         } catch (eventError: any) {
           console.warn("[CampaignPage] ⚠️ Step 7b-event: Failed to dispatch event:", eventError?.message);
         }
@@ -1964,8 +2054,9 @@ export default function CampaignPage() {
         // Don't throw - we still want to return success even if refresh fails
       }
       
-      console.log("[CampaignPage] 🔄 Step 7c: Waiting 500ms for React state propagation");
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Reduced delay for faster state propagation
+      console.log("[CampaignPage] 🔄 Step 7c: Waiting 200ms for React state propagation");
+      await new Promise(resolve => setTimeout(resolve, 200));
       console.log("[CampaignPage] ✅ Step 7c COMPLETE: Delay completed");
 
       const totalElapsed = Date.now() - startTime;
@@ -2449,7 +2540,7 @@ export default function CampaignPage() {
         }}
         onSaved={async () => {
           invalidateCache(/event-requests/);
-          await fetchRequests();
+          await fetchRequests({ forceRefresh: true });
         }}
       />
 

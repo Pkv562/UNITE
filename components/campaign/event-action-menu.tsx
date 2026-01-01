@@ -50,8 +50,48 @@ const EventActionMenu: React.FC<Props> = ({
   onConfirm,
   showConfirmFallback,
 }) => {
+  // Extract request's allowedActions as fallback (in case allowedActionSet is stale)
+  const requestId = request?.Request_ID || request?.RequestId || request?._id || request?.requestId || 'unknown';
+  const requestAllowedActions = request?.allowedActions || request?.allowed_actions || null;
+  const allowedActionsFromSet = Array.from(allowedActionSet || []);
+  
+  // Helper to check if request has reschedule action
+  const requestHasRescheduleDirect = requestAllowedActions && Array.isArray(requestAllowedActions) && (
+    requestAllowedActions.some((a: string) => {
+      const normalized = String(a || '').trim().toLowerCase();
+      return normalized === 'reschedule' || normalized === 'resched';
+    })
+  );
+  
+  console.log("[EventActionMenu] 📥 Received props:", {
+    requestId,
+    allowedActionSetSize: allowedActionSet?.size || 0,
+    allowedActionsFromSet,
+    requestAllowedActions,
+    requestAllowedActionsIsArray: Array.isArray(requestAllowedActions),
+    requestHasRescheduleDirect,
+    setHasReschedule: allowedActionsFromSet.includes('reschedule') || allowedActionsFromSet.includes('resched'),
+    mismatch: requestHasRescheduleDirect && !allowedActionsFromSet.includes('reschedule') && !allowedActionsFromSet.includes('resched'),
+  });
+
   // Build menus similar to original file; prefer action-driven menu when present
   const buildActionMenu = () => {
+    // If allowedActionSet is empty but request has allowedActions, use those directly
+    if ((!allowedActionSet || allowedActionSet.size === 0) && requestAllowedActions && Array.isArray(requestAllowedActions)) {
+      console.log("[EventActionMenu] ⚠️ allowedActionSet is empty but request has allowedActions, using request's allowedActions");
+      // Create a temporary set from request's allowedActions
+      const tempSet = new Set<string>();
+      requestAllowedActions.forEach((action: string) => {
+        const normalized = action?.trim().toLowerCase();
+        if (normalized) tempSet.add(normalized);
+      });
+      // Use the request's allowedActions if set is empty
+      if (tempSet.size > 0) {
+        console.log("[EventActionMenu] ✅ Using request's allowedActions as fallback:", Array.from(tempSet));
+        // We'll use hasAllowedAction with the request's actions directly
+      }
+    }
+    
     if (!allowedActionSet || allowedActionSet.size === 0) return null;
 
     let actions: JSX.Element[] = [];
@@ -146,9 +186,32 @@ const EventActionMenu: React.FC<Props> = ({
       }
     }
 
-    if (flagFor("canReschedule", ["resched", "reschedule"])) {
+    // Debug reschedule check
+    const canRescheduleFlag = flagFor("canReschedule", ["resched", "reschedule"]);
+    const hasRescheduleAction = hasAllowedAction(["resched", "reschedule"]);
+    
+    // CRITICAL FIX: Use the pre-computed requestHasRescheduleDirect from component scope
+    // This ensures we check the request prop's allowedActions even if allowedActionSet is stale
+    const willShowReschedule = canRescheduleFlag || hasRescheduleAction || requestHasRescheduleDirect;
+    
+    console.log("[EventActionMenu] 🔍 Reschedule check:", {
+      canRescheduleFlag,
+      hasRescheduleAction,
+      requestHasRescheduleDirect,
+      willShowReschedule,
+      allowedActionSetSize: allowedActionSet?.size || 0,
+      allowedActions: Array.from(allowedActionSet || []),
+      requestAllowedActions,
+      requestId: request?.Request_ID || request?._id || request?.requestId,
+      status: request?.Status || request?.status,
+    });
+    
+    // Use flagFor OR hasAllowedAction OR direct check of request's allowedActions
+    // This ensures reschedule appears even if allowedActionSet is stale or from different request
+    if (willShowReschedule) {
       const k = "reschedule";
       if (!seenKeys.has(k)) {
+        console.log("[EventActionMenu] ✅ Adding Reschedule action to menu");
         actions.push(
           <DropdownItem
             key={k}
@@ -160,7 +223,11 @@ const EventActionMenu: React.FC<Props> = ({
           </DropdownItem>,
         );
         seenKeys.add(k);
+      } else {
+        console.log("[EventActionMenu] ⚠️ Reschedule key already seen, skipping");
       }
+    } else {
+      console.log("[EventActionMenu] ❌ Reschedule NOT added - flagFor returned false and hasAllowedAction returned false");
     }
 
     // Confirm action: show when explicitly allowed or when fallback requested

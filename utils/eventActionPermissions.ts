@@ -30,7 +30,7 @@ interface PermissionCacheEntry {
 }
 
 const permissionCache = new Map<string, PermissionCacheEntry>();
-const PERMISSION_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const PERMISSION_CACHE_TTL = 30 * 1000; // 30 seconds (reduced from 2 minutes to improve refresh responsiveness)
 
 /**
  * Available actions for events
@@ -546,6 +546,17 @@ export async function getEventActionPermissions(
     timestamp: Date.now(),
   });
   
+  // Invalidate cache for this event if forceRefresh was used (to ensure fresh data)
+  if (forceRefresh && eventId !== 'unknown') {
+    // Clear any stale entries for this event
+    clearPermissionCache(eventId);
+    // Re-cache with fresh data
+    permissionCache.set(cacheKey, {
+      permissions,
+      timestamp: Date.now(),
+    });
+  }
+  
   return permissions;
 }
 
@@ -583,7 +594,7 @@ export async function getAvailableActions(
  */
 export function clearPermissionCache(eventId?: string): void {
   if (eventId) {
-    // Clear all entries for this event
+    // Clear all entries for this event (immediate synchronous clearing)
     const keysToDelete: string[] = [];
     permissionCache.forEach((value, key) => {
       if (key.startsWith(`${eventId}_`)) {
@@ -591,8 +602,16 @@ export function clearPermissionCache(eventId?: string): void {
       }
     });
     keysToDelete.forEach(key => permissionCache.delete(key));
+    
+    if (keysToDelete.length > 0) {
+      console.log(`[EventActionPermissions] Cleared permission cache for event ${eventId} (${keysToDelete.length} entries)`);
+    }
   } else {
+    const clearedCount = permissionCache.size;
     permissionCache.clear();
+    if (clearedCount > 0) {
+      console.log(`[EventActionPermissions] Cleared all permission cache (${clearedCount} entries)`);
+    }
   }
 }
 
