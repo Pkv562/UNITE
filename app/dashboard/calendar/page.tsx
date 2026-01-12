@@ -1098,7 +1098,7 @@ export default function CalendarPage(props: any) {
         const organizationName = 'Bicol Transfusion Service Center'; // Default, can be made configurable (note: "Centre" is correct spelling)
         
         // Pass monthEventsByDate, currentDate, and organizationName to export function
-        const result = await exportVisualPDF(monthEventsByDate, currentDate, organizationName);
+        const result = await exportVisualPDF(monthEventsByDate, currentDate, organizationName, notesByDate);
         
         if (!result.success) {
           const errorMsg = result.error || 'Failed to export calendar';

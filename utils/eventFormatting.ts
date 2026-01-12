@@ -67,6 +67,10 @@ export function extractBloodCount(event: any): number | null {
     event.bloodCount ||
     event.Blood_Count ||
     event.target ||
+    event.categoryData?.Target_Donation ||
+    event.categoryData?.bloodTarget ||
+    event.categoryData?.bloodCount ||
+    event.categoryData?.target ||
     null;
 
   // Validate it's a number
