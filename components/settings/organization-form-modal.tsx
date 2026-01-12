@@ -144,7 +144,7 @@ export default function OrganizationFormModal({
               isInvalid={!!errors.type}
             >
               {ORG_TYPES.map((t) => (
-                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                <SelectItem key={t.value}>{t.label}</SelectItem>
               ))}
             </Select>
             <Input

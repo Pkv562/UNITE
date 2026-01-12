@@ -9,6 +9,7 @@ export interface Location {
   parent?: string | Location;
   level?: number;
   province?: string | Location;
+  district?: string | Location;
   administrativeCode?: string;
   metadata?: {
     isCity?: boolean;

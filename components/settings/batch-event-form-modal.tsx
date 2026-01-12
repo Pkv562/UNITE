@@ -504,7 +504,7 @@ export default function BatchEventFormModal({
                   isInvalid={!!errors.province}
                 >
                   {provinces.map((province) => (
-                    <SelectItem key={province._id} value={province._id}>
+                    <SelectItem key={province._id}>
                       {province.name}
                     </SelectItem>
                   ))}
@@ -524,7 +524,7 @@ export default function BatchEventFormModal({
                   isInvalid={!!errors.district}
                 >
                   {districts.map((district) => (
-                    <SelectItem key={district._id} value={district._id}>
+                    <SelectItem key={district._id}>
                       {district.name}
                     </SelectItem>
                   ))}
@@ -541,7 +541,7 @@ export default function BatchEventFormModal({
                   isDisabled={!selectedDistrict || municipalities.length === 0}
                 >
                   {municipalities.map((municipality) => (
-                    <SelectItem key={municipality._id} value={municipality._id}>
+                    <SelectItem key={municipality._id}>
                       {municipality.name}
                     </SelectItem>
                   ))}
@@ -573,7 +573,7 @@ export default function BatchEventFormModal({
                 isInvalid={!!errors.Category}
               >
                 {EVENT_CATEGORIES.map((category) => (
-                  <SelectItem key={category.value} value={category.value}>
+                  <SelectItem key={category.value}>
                     {category.label}
                   </SelectItem>
                 ))}
