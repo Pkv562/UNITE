@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { determineEventCategory, getCategoryColor, getCategoryLabel } from '@/components/calendar/calendar-event-utils';
 
 interface CalendarEvent {
   id?: string;
@@ -33,6 +34,9 @@ interface ExportEvent {
   title: string;
   units: number;
   category: string;
+  categoryLabel: string;
+  categoryType: 'blood-drive' | 'training' | 'advocacy' | 'event';
+  color: string;
   isSpecial: boolean;
 }
 
@@ -41,8 +45,21 @@ interface CalendarDay {
   dayNumber: number;
   isCurrentMonth: boolean;
   isFirstDayOfWeek: boolean;
+  dateKey: string;
   events: ExportEvent[];
+  notes: string[];
 }
+
+type NotesByDate = Record<string, { content?: string }[]>;
+
+const escapeHTML = (value: string): string => {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
 
 // Helper function to extract Target_Donation from event (similar to extractCategoryData)
 const getTargetDonation = (event: any): number | undefined => {
@@ -88,8 +105,11 @@ const transformEventsForExport = (monthEventsByDate: Record<string, any[]>): Rec
       
       // Determine category
       const category = raw.Category || raw.category || raw.categoryType || 'Event';
+      const categoryType = determineEventCategory(category);
+      const categoryLabel = getCategoryLabel(categoryType);
+      const color = getCategoryColor(categoryType);
       const categoryLower = category.toString().toLowerCase();
-      const isBloodDriveEvent = categoryLower.includes('blood') || categoryLower === 'blooddrive';
+      const isBloodDriveEvent = categoryType === 'blood-drive';
       
       // Extract units - only Target_Donation for blood drives, 0 for others
       let units = 0;
@@ -108,6 +128,9 @@ const transformEventsForExport = (monthEventsByDate: Record<string, any[]>): Rec
         title,
         units, // Only blood drive Target_Donation, 0 for others
         category,
+        categoryLabel,
+        categoryType,
+        color,
         isSpecial,
       };
     });
@@ -116,10 +139,28 @@ const transformEventsForExport = (monthEventsByDate: Record<string, any[]>): Rec
   return transformed;
 };
 
+const transformNotesForExport = (notesByDate: NotesByDate = {}): Record<string, string[]> => {
+  const output: Record<string, string[]> = {};
+
+  Object.entries(notesByDate || {}).forEach(([dateKey, notes]) => {
+    const safeNotes = (notes || [])
+      .map((note) => (note?.content || '').trim())
+      .filter(Boolean)
+      .map((note) => escapeHTML(note));
+
+    if (safeNotes.length) {
+      output[dateKey] = safeNotes;
+    }
+  });
+
+  return output;
+};
+
 // Helper function to build calendar grid
 const buildCalendarGrid = (
   currentDate: Date,
-  eventsByDate: Record<string, ExportEvent[]>
+  eventsByDate: Record<string, ExportEvent[]>,
+  notesByDate: Record<string, string[]> = {}
 ): CalendarDay[] => {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -155,7 +196,9 @@ const buildCalendarGrid = (
       dayNumber: current.getDate(),
       isCurrentMonth,
       isFirstDayOfWeek,
+      dateKey,
       events: eventsByDate[dateKey] || [],
+      notes: notesByDate[dateKey] || [],
     });
     
     current.setDate(current.getDate() + 1);
@@ -183,10 +226,16 @@ const calculateWeeklyTotals = (weeks: CalendarDay[][]): number[] => {
 const generateCalendarHTML = (
   eventsByDate: Record<string, ExportEvent[]>,
   currentDate: Date,
-  organizationName: string = 'Bicol Transfusion Service Centre'
+  organizationName: string = 'Bicol Transfusion Service Centre',
+  notesByDate: Record<string, string[]> = {}
 ): string => {
   const monthYear = currentDate.toLocaleString('default', { month: 'long', year: 'numeric' });
-  const days = buildCalendarGrid(currentDate, eventsByDate);
+  
+  // Calculate grand total early for header display
+  const allEvents = Object.values(eventsByDate).flat();
+  const grandTotal = allEvents.reduce((sum, event) => sum + event.units, 0);
+  
+  const days = buildCalendarGrid(currentDate, eventsByDate, notesByDate);
   
   // Group days into weeks (rows)
   const weeks: CalendarDay[][] = [];
@@ -216,18 +265,41 @@ const generateCalendarHTML = (
     
     week.forEach((day) => {
       const dateClass = day.isCurrentMonth ? 'date-current' : 'date-other';
-      const dateColorClass = day.isFirstDayOfWeek ? 'date-first-week' : '';
+      const eventCount = day.events.length;
+      
+      // Render events WITHOUT category chips (color-only)
       const eventsHTML = day.events.map(event => {
-        const eventClass = event.isSpecial ? 'event-special' : 'event-regular';
-        // Only show units for blood drive events (units > 0 means it's a blood drive)
         const unitsText = event.units > 0 ? ` - ${event.units}` : '';
-        return `<div class="event-block ${eventClass}">${event.title}${unitsText}</div>`;
+        const bgColor = `${event.color}22`;
+        const borderColor = `${event.color}55`;
+        const textColor = event.color;
+        return `
+          <div class="event-block ${event.isSpecial ? 'event-special' : ''}" style="background-color: ${bgColor}; color: ${textColor}; border: 1px solid ${borderColor};">
+            <div class="event-title">${escapeHTML(event.title)}${unitsText}</div>
+          </div>
+        `;
       }).join('');
+      
+      // Smart notes rendering:
+      // - Hide if 3+ events
+      // - Center if 0 events
+      // - Show below events if 1-2 events
+      let notesHTML = '';
+      if (day.notes.length > 0 && eventCount < 3) {
+        const notesCentered = eventCount === 0 ? 'notes-centered' : '';
+        notesHTML = `
+          <div class="notes-container ${notesCentered}">
+            ${day.notes.slice(0, 2).map((note) => `<div class="note-pill" title="${note}">${note}</div>`).join('')}
+            ${day.notes.length > 2 ? `<div class="note-more">+${day.notes.length - 2} more</div>` : ''}
+          </div>
+        `;
+      }
       
       calendarRowsHTML += `
         <td class="calendar-cell ${dateClass}">
-          <div class="date-number ${dateColorClass}">${day.dayNumber}</div>
+          <div class="date-number">${day.dayNumber}</div>
           <div class="events-container">${eventsHTML}</div>
+          ${notesHTML}
         </td>
       `;
     });
@@ -240,14 +312,6 @@ const generateCalendarHTML = (
     calendarRowsHTML += '</tr>';
   });
   
-  // Calculate grand total (only blood drive events)
-  const grandTotal = days.reduce((sum, day) => {
-    return sum + day.events.reduce((daySum, event) => {
-      // Only count blood drive events (units > 0 means it's a blood drive)
-      return daySum + event.units;
-    }, 0);
-  }, 0);
-  
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -255,6 +319,7 @@ const generateCalendarHTML = (
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Calendar Export - ${monthYear}</title>
   <style>
+    /* === RESET & BASE === */
     * {
       margin: 0;
       padding: 0;
@@ -262,138 +327,271 @@ const generateCalendarHTML = (
     }
     
     body {
-      font-family: Arial, sans-serif;
-      padding: 5mm;
-      background: white;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+      padding: 8mm;
+      background: #ffffff;
       margin: 0;
+      color: #1a1a1a;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
     
+    /* === CONTAINER === */
     .calendar-container {
       width: 100%;
       max-width: 100%;
-      padding: 0 5mm;
+      padding: 0;
       box-sizing: border-box;
     }
     
+    /* === HEADER SECTION === */
     .calendar-header {
-      margin-bottom: 20px;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 3px solid #c62828;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    
+    .header-left {
+      flex: 1;
+    }
+    
+    .header-right {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 20px;
     }
     
     .month-year {
-      font-size: 24px;
-      font-weight: bold;
-      color: #000;
-      margin-bottom: 5px;
+      font-size: 32px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
     }
     
     .organization-name {
       font-size: 18px;
-      font-weight: bold;
-      color: #d32f2f;
-      margin-bottom: 20px;
+      font-weight: 600;
+      color: #c62828;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     
+    .monthly-total {
+      background: linear-gradient(135deg, #c62828 0%, #b71c1c 100%);
+      color: #ffffff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(198, 40, 40, 0.25);
+    }
+    
+    .monthly-total-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      opacity: 0.9;
+      margin-bottom: 4px;
+    }
+    
+    .monthly-total-value {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    
+    .legend {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #2c2c2c;
+    }
+    
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+    
+    .legend-color.blood-drive {
+      background: #dc2626;
+    }
+    
+    .legend-color.advocacy {
+      background: #2563eb;
+    }
+    
+    .legend-color.training {
+      background: #f97316;
+    }
+    
+    /* === TABLE STRUCTURE === */
     .calendar-table {
       width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #ddd;
+      border-collapse: separate;
+      border-spacing: 0;
+      border: 2px solid #d0d0d0;
       table-layout: fixed;
-    }
-    
-    .day-header {
-      background-color: #f5f5f5;
-      font-weight: bold;
-      text-align: center;
-      padding: 8px 4px;
-      border: 1px solid #ddd;
-      font-size: 11px;
-    }
-    
-    .calendar-cell {
-      border: 1px solid #ddd;
-      padding: 4px;
-      min-height: 70px;
-      vertical-align: top;
-      width: calc((100% - 80px) / 7); /* Adjust for TOTAL column */
-      background-color: #fff;
-    }
-    
-    .date-other {
-      background-color: #f9f9f9;
-    }
-    
-    .date-number {
-      font-weight: bold;
-      margin-bottom: 5px;
-      font-size: 14px;
-    }
-    
-    .date-first-week {
-      color: #d32f2f;
-    }
-    
-    .date-current .date-number {
-      color: #000;
-    }
-    
-    .date-other .date-number {
-      color: #999;
-    }
-    
-    .events-container {
-      min-height: 50px;
-    }
-    
-    .event-block {
-      padding: 3px 5px;
-      margin: 2px 0;
-      border-radius: 3px;
-      font-size: 10px;
-      line-height: 1.2;
-      word-wrap: break-word;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border-radius: 4px;
       overflow: hidden;
     }
     
-    .event-regular {
-      background-color: #fff9c4;
-      color: #000;
+    /* === TABLE HEADERS === */
+    .day-header {
+      background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+      font-weight: 700;
+      text-align: center;
+      padding: 12px 8px;
+      border-right: 1px solid #d0d0d0;
+      border-bottom: 2px solid #c62828;
+      font-size: 11px;
+      color: #2c2c2c;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    
+    .day-header:last-child {
+      border-right: none;
+    }
+    
+    /* === CALENDAR CELLS === */
+    .calendar-cell {
+      border-right: 1px solid #e0e0e0;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 6px;
+      min-height: 85px;
+      vertical-align: top;
+      width: calc((100% - 90px) / 7);
+      background-color: #ffffff;
+      transition: background-color 0.2s ease;
+    }
+    
+    .calendar-cell:nth-child(7) {
+      border-right: 2px solid #d0d0d0;
+    }
+    
+    .date-other {
+      background-color: #fafafa;
+    }
+    
+    .date-other .date-number {
+      color: #9e9e9e;
+      font-weight: 500;
+    }
+    
+    /* === EVENTS CONTAINER === */
+    .events-container {
+      min-height: 55px;
+      margin-top: 2px;
+    }
+    
+    /* === EVENT BLOCKS === */
+    .event-block {
+      padding: 6px 8px;
+      margin: 4px 0;
+      border-radius: 6px;
+      font-size: 10px;
+      line-height: 1.4;
+      word-wrap: break-word;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      transition: all 0.2s ease;
+    }
+    
+    .event-title {
+      font-weight: 700;
+      margin-bottom: 0;
+      font-size: 10.5px;
+      line-height: 1.3;
     }
     
     .event-special {
-      background-color: #ffcdd2;
-      color: #000;
-      font-weight: bold;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+      border-width: 1.5px;
+      font-weight: 700;
+    }
+
+    /* === NOTES SECTION === */
+    .notes-container {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border-top: 1px dashed #e0e0e0;
+      padding-top: 6px;
     }
     
+    .notes-container.notes-centered {
+      border-top: none;
+      margin-top: 0;
+      padding-top: 0;
+      justify-content: center;
+      align-items: center;
+      min-height: 55px;
+    }
+    
+    .note-pill {
+      background: linear-gradient(135deg, #fffbea 0%, #fff4d6 100%);
+      color: #7c5e10;
+      border: 1px solid #f0e0b0;
+      border-left: 3px solid #f59e0b;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 9.5px;
+      line-height: 1.4;
+      word-break: break-word;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      font-weight: 500;
+    }
+    
+    .note-more {
+      color: #757575;
+      font-size: 9px;
+      padding: 2px 4px;
+      font-style: italic;
+      font-weight: 500;
+    }
+    
+    /* === TOTAL COLUMN === */
     .total-sc-cell {
-      border: 1px solid #ddd;
-      padding: 8px;
-      text-align: right;
-      font-weight: bold;
-      background-color: #f5f5f5;
-      width: 80px;
-      min-width: 80px;
-    }
-    
-    .calendar-footer {
-      margin-top: 20px;
-      padding-top: 15px;
-      border-top: 2px solid #ddd;
-      page-break-inside: avoid;
-      padding-bottom: 20px;
-    }
-    
-    .footer-total {
-      font-size: 16px;
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-    
-    .footer-label {
+      border-right: none;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 12px 10px;
+      text-align: center;
+      font-weight: 700;
       font-size: 14px;
-      color: #666;
+      background: linear-gradient(180deg, #f1f3f5 0%, #e5e7eb 100%);
+      width: 90px;
+      min-width: 90px;
+      color: #c62828;
+      letter-spacing: 0.3px;
     }
     
+    thead .total-sc-cell {
+      background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+      border-bottom: 2px solid #c62828;
+      font-size: 11px;
+      color: #2c2c2c;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    
+    /* === PRINT OPTIMIZATION === */
     @media print {
       body {
         padding: 5mm;
@@ -406,15 +604,15 @@ const generateCalendarHTML = (
       
       .calendar-table {
         page-break-inside: auto;
+        box-shadow: none;
       }
       
       .calendar-cell {
         page-break-inside: avoid;
       }
       
-      .calendar-footer {
-        page-break-inside: avoid;
-        page-break-before: avoid;
+      .event-block {
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
       }
       
       @page {
@@ -427,8 +625,30 @@ const generateCalendarHTML = (
 <body>
   <div class="calendar-container">
     <div class="calendar-header">
-      <div class="month-year">${monthYear}</div>
-      <div class="organization-name">${organizationName}</div>
+      <div class="header-left">
+        <div class="month-year">${monthYear}</div>
+        <div class="organization-name">${organizationName}</div>
+      </div>
+      <div class="header-right">
+        <div class="legend">
+          <div class="legend-item">
+            <div class="legend-color blood-drive"></div>
+            <span>Blood Drive</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color advocacy"></div>
+            <span>Advocacy</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color training"></div>
+            <span>Training</span>
+          </div>
+        </div>
+        <div class="monthly-total">
+          <div class="monthly-total-label">Monthly Target</div>
+          <div class="monthly-total-value">${grandTotal.toLocaleString()}</div>
+        </div>
+      </div>
     </div>
     
     <table class="calendar-table">
@@ -442,11 +662,6 @@ const generateCalendarHTML = (
         ${calendarRowsHTML}
       </tbody>
     </table>
-    
-    <div class="calendar-footer">
-      <div class="footer-total">GRAND TOTAL ESTIMATED COLLECTION: ${grandTotal.toLocaleString()}</div>
-      <div class="footer-label">Monthly Target Collection</div>
-    </div>
   </div>
 </body>
 </html>`;
@@ -539,17 +754,20 @@ export const useCalendarExport = () => {
   const exportVisualPDF = useCallback(async (
     monthEventsByDate: Record<string, any[]>,
     currentDate: Date,
-    organizationName?: string
+    organizationName?: string,
+    notesByDate?: NotesByDate
   ) => {
     try {
       // Transform events for export
       const transformedEvents = transformEventsForExport(monthEventsByDate);
+      const transformedNotes = transformNotesForExport(notesByDate || {});
       
       // Generate HTML calendar
       const htmlContent = generateCalendarHTML(
         transformedEvents,
         currentDate,
-        organizationName || 'Bicol Transfusion Service Centre'
+        organizationName || 'Bicol Transfusion Service Centre',
+        transformedNotes
       );
       
       // Generate PDF from HTML using html2canvas

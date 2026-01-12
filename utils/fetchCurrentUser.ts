@@ -16,6 +16,8 @@ export interface CurrentUser {
   }>;
   permissions?: Array<{ resource: string; actions: string[] }>;
   locations?: any[];
+  authority?: number;
+  isSystemAdmin?: boolean;
 }
 
 let cachedUser: CurrentUser | null = null;
@@ -59,6 +61,8 @@ export async function fetchCurrentUser(forceRefresh = false): Promise<CurrentUse
         roles: user.roles || [],
         permissions: user.permissions || [],
         locations: user.locations || [],
+        authority: user.authority,
+        isSystemAdmin: user.isSystemAdmin || (user.authority >= 80),
       };
       
       cacheTimestamp = Date.now();

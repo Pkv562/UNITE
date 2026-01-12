@@ -39,9 +39,11 @@ import EventViewModal from "@/components/calendar/event-view-modal";
 import EditEventModal from "@/components/calendar/event-edit-modal";
 import EventManageStaffModal from "@/components/calendar/event-manage-staff-modal";
 import EventRescheduleModal from "@/components/calendar/event-reschedule-modal";
+import CalendarNotesModal, { CalendarNote } from "@/components/calendar/calendar-notes-modal";
 import CalendarToolbar from "@/components/calendar/calendar-toolbar";
 import CalendarEventCard from "@/components/calendar/calendar-event-card";
 import { transformEventData } from "@/components/calendar/calendar-event-utils";
+import { formatEventSummary } from "@/utils/eventFormatting";
 import Topbar from "@/components/layout/topbar";
 import { fetchWithAuth } from "@/utils/fetchWithAuth";
 import { getUserInfo } from "@/utils/getUserInfo";
@@ -86,8 +88,10 @@ export default function CalendarPage(props: any) {
   const [monthEventsByDate, setMonthEventsByDate] = useState<
     Record<string, any[]>
   >({});
+  const [notesByDate, setNotesByDate] = useState<Record<string, CalendarNote[]>>({});
   const [detailedEvents, setDetailedEvents] = useState<Record<string, any>>({});
   const [eventsLoading, setEventsLoading] = useState(false);
+  const [notesLoading, setNotesLoading] = useState(false);
   const [isExportLoading, setIsExportLoading] = useState(false);
   // Cache for event action permissions (keyed by eventId)
   const [eventPermissionsCache, setEventPermissionsCache] = useState<
@@ -99,6 +103,10 @@ export default function CalendarPage(props: any) {
   >({});
   // Fetch current user from API
   const { user: currentUser } = useCurrentUser();
+  const [canManageNotes, setCanManageNotes] = useState(false);
+  const [notesModalDate, setNotesModalDate] = useState<string | null>(null);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
   
   const [currentUserName, setCurrentUserName] = useState<string>(
     "unite user",
@@ -119,6 +127,44 @@ export default function CalendarPage(props: any) {
         setCurrentUserEmail(currentUser.email);
       }
     }
+  }, [currentUser]);
+
+  // Determine if the user can manage shared notes (admin and above)
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkAdmin = async () => {
+      if (!currentUser) {
+        if (!cancelled) setCanManageNotes(false);
+        return;
+      }
+
+      if (
+        currentUser.isSystemAdmin ||
+        (typeof currentUser.authority === "number" && currentUser.authority >= 80)
+      ) {
+        if (!cancelled) setCanManageNotes(true);
+        return;
+      }
+
+      try {
+        const userId =
+          (currentUser as any)._id ||
+          (currentUser as any).id ||
+          (currentUser as any).userId ||
+          null;
+        const result = await isAdminByAuthority(userId);
+        if (!cancelled) setCanManageNotes(result);
+      } catch (e) {
+        if (!cancelled) setCanManageNotes(false);
+      }
+    };
+
+    checkAdmin();
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentUser]);
 
   // Check if user has permission to create events/requests - PERMISSION-BASED ONLY
@@ -422,6 +468,12 @@ export default function CalendarPage(props: any) {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   };
 
+  const getMonthRange = (d: Date) => {
+    const start = new Date(d.getFullYear(), d.getMonth(), 1);
+    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    return { start, end };
+  };
+
   // Parse server-provided dates robustly.
   // If backend sends a date-only string like '2025-11-17' treat it as local date
   // to avoid timezone shifts from UTC parsing.
@@ -584,7 +636,7 @@ export default function CalendarPage(props: any) {
   // Fetch real events from backend and populate week/month maps
   useEffect(() => {
     refreshCalendarData();
-  }, [currentDate]);
+  }, [currentDate, currentUser]);
 
   // Pre-fetch permissions for all visible events
   useEffect(() => {
@@ -1046,7 +1098,7 @@ export default function CalendarPage(props: any) {
         const organizationName = 'Bicol Transfusion Service Center'; // Default, can be made configurable (note: "Centre" is correct spelling)
         
         // Pass monthEventsByDate, currentDate, and organizationName to export function
-        const result = await exportVisualPDF(monthEventsByDate, currentDate, organizationName);
+        const result = await exportVisualPDF(monthEventsByDate, currentDate, organizationName, notesByDate);
         
         if (!result.success) {
           const errorMsg = result.error || 'Failed to export calendar';
@@ -1093,11 +1145,42 @@ export default function CalendarPage(props: any) {
     else setAdvancedFilter({});
   };
 
+  const fetchCalendarNotes = async (rangeStart: Date, rangeEnd: Date) => {
+    if (!currentUser || pathname === "/calendar") {
+      setNotesByDate({});
+      return;
+    }
+
+    try {
+      setNotesLoading(true);
+      const startKey = dateToLocalKey(rangeStart);
+      const endKey = dateToLocalKey(rangeEnd);
+
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/calendar/notes?start=${encodeURIComponent(startKey)}&end=${encodeURIComponent(endKey)}`,
+        { method: "GET" },
+      );
+
+      const body = await res.json().catch(() => ({}));
+
+      if (res.ok && body && body.success !== false) {
+        setNotesByDate(body.data || {});
+      } else {
+        setNotesByDate({});
+      }
+    } catch (e) {
+      setNotesByDate({});
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
   const refreshCalendarData = async () => {
     const year = currentDate.getFullYear();
     const monthIndex = currentDate.getMonth();
 
     try {
+      setEventsLoading(true);
       const monthStart = new Date(year, monthIndex, 1);
       const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
 
@@ -1174,10 +1257,76 @@ export default function CalendarPage(props: any) {
         setMonthEventsByDate({});
         setWeekEventsByDate({});
       }
+
+      // Load shared notes only for authenticated dashboard calendar
+      await fetchCalendarNotes(monthStart, monthEnd);
     } catch (e) {
       console.error("[refreshCalendarData] Error fetching events:", e);
       setMonthEventsByDate({});
       setWeekEventsByDate({});
+      setNotesByDate({});
+    } finally {
+      setEventsLoading(false);
+      setNotesLoading(false);
+    }
+  };
+
+  const handleOpenNotes = (dateKey: string) => {
+    if (!currentUser || pathname === "/calendar") return;
+    setNotesModalDate(dateKey);
+    setNoteError(null);
+  };
+
+  const handleSaveNote = async (content: string, noteId?: string | null) => {
+    if (!notesModalDate || !content.trim()) return;
+    setNoteSaving(true);
+    setNoteError(null);
+
+    const body = JSON.stringify({ noteDate: notesModalDate, content: content.trim() });
+    const url = noteId
+      ? `${API_BASE}/api/calendar/notes/${encodeURIComponent(noteId)}`
+      : `${API_BASE}/api/calendar/notes`;
+    const method = noteId ? "PATCH" : "POST";
+
+    try {
+      const res = await fetchWithAuth(url, { method, body });
+      const respBody = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(respBody?.message || "Failed to save note");
+      }
+
+      const { start, end } = getMonthRange(currentDate);
+      await fetchCalendarNotes(start, end);
+    } catch (err: any) {
+      setNoteError(err?.message || "Failed to save note");
+    } finally {
+      setNoteSaving(false);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    if (!noteId) return;
+    setNoteSaving(true);
+    setNoteError(null);
+
+    try {
+      const res = await fetchWithAuth(
+        `${API_BASE}/api/calendar/notes/${encodeURIComponent(noteId)}`,
+        { method: "DELETE" },
+      );
+      const respBody = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(respBody?.message || "Failed to delete note");
+      }
+
+      const { start, end } = getMonthRange(currentDate);
+      await fetchCalendarNotes(start, end);
+    } catch (err: any) {
+      setNoteError(err?.message || "Failed to delete note");
+    } finally {
+      setNoteSaving(false);
     }
   };
 
@@ -2036,11 +2185,15 @@ export default function CalendarPage(props: any) {
                   {generateMonthDays(currentDate).map((day, index) => (
                     <div
                       key={index}
-                      className={`min-h-[60px] sm:min-h-[80px] md:min-h-[100px] bg-white p-1 sm:p-2 ${
+                      className={`relative min-h-[60px] sm:min-h-[80px] md:min-h-[100px] bg-white p-1 sm:p-2 ${
                         !day.isCurrentMonth && "bg-gray-50 text-gray-400"
-                      }`}
+                      } ${currentUser && pathname !== "/calendar" ? "cursor-pointer" : ""}`}
+                      onClick={() => {
+                        if (!currentUser || pathname === "/calendar") return;
+                        handleOpenNotes(dateToLocalKey(day.date));
+                      }}
                     >
-                      <div className="flex justify-center mb-1 sm:mb-2">
+                      <div className="flex justify-center mb-1 sm:mb-2 pointer-events-none">
                         <div
                           className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold ${
                             day.isToday
@@ -2053,6 +2206,25 @@ export default function CalendarPage(props: any) {
                           {day.date.getDate()}
                         </div>
                       </div>
+
+                      {currentUser && pathname !== "/calendar" && notesByDate[dateToLocalKey(day.date)]?.length ? (
+                        <div className="space-y-1 text-[9px] sm:text-[10px] pointer-events-none">
+                          {notesByDate[dateToLocalKey(day.date)].slice(0, 1).map((note, idx) => (
+                            <div
+                              key={idx}
+                              className="bg-yellow-50 border border-yellow-200 rounded px-1.5 py-0.5 text-yellow-900 line-clamp-2"
+                              title={note.content}
+                            >
+                              {note.content}
+                            </div>
+                          ))}
+                          {notesByDate[dateToLocalKey(day.date)].length > 1 ? (
+                            <div className="text-default-500 text-[9px] px-1.5 py-0.5 italic">
+                              +{notesByDate[dateToLocalKey(day.date)].length - 1} more
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
 
                       {eventsLoading ? (
                         // Skeleton loading for month events
@@ -2069,29 +2241,37 @@ export default function CalendarPage(props: any) {
                         </div>
                       ) : (
                         <div className="space-y-1">
-                          {day.events.map((event, eventIndex) => (
-                            <div
-                              key={eventIndex}
-                              className="text-[10px] sm:text-xs p-1 rounded font-medium truncate cursor-pointer transition-colors hover:shadow-sm active:opacity-80 touch-manipulation"
-                              role="button"
-                              style={{
-                                backgroundColor: `${event.color}22`,
-                                color: event.color,
-                              }}
-                              tabIndex={0}
-                              title={`${event.categoryLabel || eventLabelsMap[event.type as EventType] || "Event"}: ${event.title}`}
-                              onClick={() => handleOpenViewEvent(event.raw)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
+                          {day.events.map((event, eventIndex) => {
+                            const { summary } = formatEventSummary(event.raw || event);
+                            
+                            return (
+                              <div
+                                key={eventIndex}
+                                className="text-[10px] sm:text-xs p-1 rounded font-medium truncate cursor-pointer transition-colors hover:shadow-sm active:opacity-80 touch-manipulation"
+                                role="button"
+                                style={{
+                                  backgroundColor: `${event.color}22`,
+                                  color: event.color,
+                                }}
+                                tabIndex={0}
+                                title={summary}
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   handleOpenViewEvent(event.raw);
-                                }
-                              }}
-                            >
-                              <div className="break-words whitespace-normal leading-tight">
-                                {event.title}
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.stopPropagation();
+                                    handleOpenViewEvent(event.raw);
+                                  }
+                                }}
+                              >
+                                <div className="break-words whitespace-normal leading-tight">
+                                  {summary}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -2102,6 +2282,23 @@ export default function CalendarPage(props: any) {
           </div>
         </div>
       </div>
+
+      {/* Shared calendar notes modal (auth-only) */}
+      <CalendarNotesModal
+        dateKey={notesModalDate}
+        notes={notesModalDate ? notesByDate[notesModalDate] || [] : []}
+        isOpen={!!notesModalDate}
+        loading={notesLoading}
+        saving={noteSaving}
+        canManage={canManageNotes}
+        error={noteError}
+        onSave={handleSaveNote}
+        onDelete={handleDeleteNote}
+        onClose={() => {
+          setNotesModalDate(null);
+          setNoteError(null);
+        }}
+      />
 
       {/* Rest of the modals remain the same */}
       <EventViewModal

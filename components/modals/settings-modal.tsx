@@ -18,7 +18,9 @@ import { useRoles, Role } from "@/hooks/useRoles";
 import RoleManagementTable from "@/components/settings/role-management-table";
 import RoleFormModal from "@/components/settings/role-form-modal";
 import LocationManagement from "@/components/settings/location-management";
+import OrganizationManagement from "@/components/settings/organization-management";
 import NotificationSettings from "@/components/settings/notification-settings";
+import BatchEventCreation from "@/components/settings/batch-event-creation";
 import { getUserAuthority } from "@/utils/getUserAuthority";
 import { decodeJwt } from "@/utils/decodeJwt";
 
@@ -28,6 +30,7 @@ interface SettingsModalProps {
 }
 
 type TabType = "general" | "requesting" | "location" | "staff";
+type RequestingSubTabType = "settings" | "batch-create";
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const router = useRouter();
@@ -55,6 +58,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   
   // Tab state management
   const [activeTab, setActiveTab] = useState<TabType>("general");
+  const [activeRequestingSubTab, setActiveRequestingSubTab] = useState<RequestingSubTabType>("settings");
+  const [activeLocationSubTab, setActiveLocationSubTab] = useState<"locations" | "organization">("locations");
   
   // Role form state
   const [showRoleForm, setShowRoleForm] = useState(false);
@@ -473,10 +478,40 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         {/* Requesting Settings Tab */}
                         {activeTab === "requesting" && permissions.canEditRequesting && (
                           <section className="w-full transition-all duration-200 ease-in-out">
-                            <h3 className="text-base font-semibold text-gray-900 mb-6">
-                              Requesting Settings
-                            </h3>
-                            <div className="divide-y divide-gray-200 w-full">
+                            <div className="mb-6">
+                              <h3 className="text-base font-semibold text-gray-900 mb-4">
+                                Requesting Settings
+                              </h3>
+                              {/* Sub-tabs for Requesting */}
+                              <div className="flex gap-2 border-b border-gray-200">
+                                <button
+                                  onClick={() => setActiveRequestingSubTab("settings")}
+                                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                    activeRequestingSubTab === "settings"
+                                      ? "border-blue-500 text-blue-600"
+                                      : "border-transparent text-gray-600 hover:text-gray-900"
+                                  }`}
+                                >
+                                  Settings
+                                </button>
+                                {userAuthority !== null && userAuthority >= 80 && (
+                                  <button
+                                    onClick={() => setActiveRequestingSubTab("batch-create")}
+                                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                      activeRequestingSubTab === "batch-create"
+                                        ? "border-blue-500 text-blue-600"
+                                        : "border-transparent text-gray-600 hover:text-gray-900"
+                                    }`}
+                                  >
+                                    Batch Create
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Settings Sub-tab */}
+                            {activeRequestingSubTab === "settings" && (
+                              <div className="divide-y divide-gray-200 w-full">
                               {renderField(
                                 "Maximum pending requests allowed",
                                 "Maximum number of pending requests a user can have.",
@@ -585,13 +620,55 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 </div>
                               </div>
                             </div>
+                            )}
+
+                            {/* Batch Create Sub-tab */}
+                            {activeRequestingSubTab === "batch-create" && userAuthority !== null && userAuthority >= 80 && (
+                              <BatchEventCreation isOpen={isOpen && activeTab === "requesting"} />
+                            )}
                           </section>
                         )}
 
                         {/* Location Settings Tab */}
                         {activeTab === "location" && permissions.canEditLocation && (
                           <section className="w-full transition-all duration-200 ease-in-out">
-                            <LocationManagement isOpen={isOpen} />
+                            <div className="mb-6">
+                              <h3 className="text-base font-semibold text-gray-900 mb-4">Location Settings</h3>
+                              <div className="flex gap-2 border-b border-gray-200">
+                                <button
+                                  onClick={() => setActiveLocationSubTab("locations")}
+                                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                    activeLocationSubTab === "locations"
+                                      ? "border-blue-500 text-blue-600"
+                                      : "border-transparent text-gray-600 hover:text-gray-900"
+                                  }`}
+                                >
+                                  Locations
+                                </button>
+                                {userAuthority !== null && userAuthority >= 80 && (
+                                  <button
+                                    onClick={() => setActiveLocationSubTab("organization")}
+                                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                      activeLocationSubTab === "organization"
+                                        ? "border-blue-500 text-blue-600"
+                                        : "border-transparent text-gray-600 hover:text-gray-900"
+                                    }`}
+                                  >
+                                    Organization
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Locations sub-tab */}
+                            {activeLocationSubTab === "locations" && (
+                              <LocationManagement isOpen={isOpen} />
+                            )}
+
+                            {/* Organization sub-tab (admin only) */}
+                            {activeLocationSubTab === "organization" && userAuthority !== null && userAuthority >= 80 && (
+                              <OrganizationManagement isOpen={isOpen} />
+                            )}
                           </section>
                         )}
 
