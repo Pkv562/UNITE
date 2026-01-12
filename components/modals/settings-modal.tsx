@@ -18,6 +18,7 @@ import { useRoles, Role } from "@/hooks/useRoles";
 import RoleManagementTable from "@/components/settings/role-management-table";
 import RoleFormModal from "@/components/settings/role-form-modal";
 import LocationManagement from "@/components/settings/location-management";
+import OrganizationManagement from "@/components/settings/organization-management";
 import NotificationSettings from "@/components/settings/notification-settings";
 import BatchEventCreation from "@/components/settings/batch-event-creation";
 import { getUserAuthority } from "@/utils/getUserAuthority";
@@ -58,6 +59,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // Tab state management
   const [activeTab, setActiveTab] = useState<TabType>("general");
   const [activeRequestingSubTab, setActiveRequestingSubTab] = useState<RequestingSubTabType>("settings");
+  const [activeLocationSubTab, setActiveLocationSubTab] = useState<"locations" | "organization">("locations");
   
   // Role form state
   const [showRoleForm, setShowRoleForm] = useState(false);
@@ -630,7 +632,43 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         {/* Location Settings Tab */}
                         {activeTab === "location" && permissions.canEditLocation && (
                           <section className="w-full transition-all duration-200 ease-in-out">
-                            <LocationManagement isOpen={isOpen} />
+                            <div className="mb-6">
+                              <h3 className="text-base font-semibold text-gray-900 mb-4">Location Settings</h3>
+                              <div className="flex gap-2 border-b border-gray-200">
+                                <button
+                                  onClick={() => setActiveLocationSubTab("locations")}
+                                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                    activeLocationSubTab === "locations"
+                                      ? "border-blue-500 text-blue-600"
+                                      : "border-transparent text-gray-600 hover:text-gray-900"
+                                  }`}
+                                >
+                                  Locations
+                                </button>
+                                {userAuthority !== null && userAuthority >= 80 && (
+                                  <button
+                                    onClick={() => setActiveLocationSubTab("organization")}
+                                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                      activeLocationSubTab === "organization"
+                                        ? "border-blue-500 text-blue-600"
+                                        : "border-transparent text-gray-600 hover:text-gray-900"
+                                    }`}
+                                  >
+                                    Organization
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Locations sub-tab */}
+                            {activeLocationSubTab === "locations" && (
+                              <LocationManagement isOpen={isOpen} />
+                            )}
+
+                            {/* Organization sub-tab (admin only) */}
+                            {activeLocationSubTab === "organization" && userAuthority !== null && userAuthority >= 80 && (
+                              <OrganizationManagement isOpen={isOpen} />
+                            )}
                           </section>
                         )}
 
