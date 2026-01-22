@@ -476,17 +476,17 @@ export function useEventUserData(
           }
         }
 
-        // For System Admin: optionally filter by coordinator's coverage
-        // For Coordinator: backend will filter by org+coverage automatically
-        let locationId: string | undefined = undefined;
+        // Always pass coordinatorId when available so backend can enforce coverage-area filtering
+        // This keeps admin and non-admin behavior consistent and avoids skipping location filters
+        const coordinatorQuery = selectedCoordinatorId
+          ? `&coordinatorId=${encodeURIComponent(selectedCoordinatorId)}`
+          : '';
 
         // Query stakeholders using unified endpoint
-        // For System Admin with coordinator selected: pass coordinatorId to use coordinator's full jurisdiction
-        // For Coordinator: backend automatically filters by their jurisdiction
-        // For Stakeholder: backend returns only self
-        const url = selectedCoordinatorId && userAuthority !== null && userAuthority >= 80
-          ? `${API_URL}/api/users/by-capability?capability=request.review&coordinatorId=${encodeURIComponent(selectedCoordinatorId)}`
-          : `${API_URL}/api/users/by-capability?capability=request.review`;
+        // Backend enforces capability + optional coordinator coverage filtering
+        const url = `${API_URL}/api/users/by-capability?capability=request.review${coordinatorQuery}`;
+
+        console.log('[fetchStakeholders] Fetching stakeholders with URL:', url);
 
         const stRes = await fetch(url, {
           headers,
@@ -499,6 +499,8 @@ export function useEventUserData(
 
         const stBody = await stRes.json();
 
+        console.log('[fetchStakeholders] Response data count:', Array.isArray(stBody.data) ? stBody.data.length : (stBody.data?.users || stBody.users || []).length);
+
         // Extract users from response (handle different response formats)
         // API returns { success: true, data: [array of users] }
         const usersList = Array.isArray(stBody.data) ? stBody.data : (stBody.data?.users || stBody.users || []);
@@ -509,6 +511,8 @@ export function useEventUserData(
           const authority = u.authority || 20;
           return authority < 60;
         });
+
+        console.log('[fetchStakeholders] Filtered stakeholders count:', stakeholderUsers.length);
 
         if (stakeholderUsers.length > 0) {
           const opts = stakeholderUsers.map((u: any) => {
@@ -530,11 +534,11 @@ export function useEventUserData(
           });
 
           setStakeholderOptions(opts);
-          if (stakeholder && !opts.find((o: any) => o.key === stakeholder)) {
-            setStakeholder('');
-          }
+          // Reset stakeholder selection when coordinator changes
+          setStakeholder('');
         } else {
           setStakeholderOptions([]);
+          setStakeholder('');
         }
       } catch (err) {
         setStakeholderError(
@@ -545,7 +549,7 @@ export function useEventUserData(
         setLoadingStakeholders(false);
       }
     },
-    [API_URL, getCurrentUserId, getAuthHeaders, stakeholder]
+    [API_URL, getCurrentUserId, getAuthHeaders]
   );
 
   // Fetch coordinators when modal opens
@@ -558,7 +562,19 @@ export function useEventUserData(
   // Fetch stakeholders when coordinator changes
   useEffect(() => {
     if (isOpen && coordinator) {
+      console.log('[useEventUserData] Coordinator changed, fetching stakeholders:', {
+        coordinator,
+        isOpen,
+        willFetch: !!(isOpen && coordinator),
+        timestamp: new Date().toISOString(),
+      });
       fetchStakeholders(coordinator);
+    } else {
+      console.log('[useEventUserData] Not fetching stakeholders:', {
+        isOpen,
+        coordinator,
+        reason: !isOpen ? 'modal not open' : 'no coordinator selected',
+      });
     }
   }, [isOpen, coordinator, fetchStakeholders]);
 
