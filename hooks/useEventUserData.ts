@@ -247,74 +247,65 @@ export function useEventUserData(
           } else {
             const coordData = await coordResolverRes.json();
             
-            // Handle response structure: data._id, data.coordinator, or data.coordinators[0]
-            const coordinatorInfo = coordData.data?._id 
-              ? { _id: coordData.data._id, ...coordData.data.coordinator }
-              : coordData.data?.coordinator 
-              ? coordData.data.coordinator
-              : coordData.data?.coordinators?.[0]
-              ? coordData.data.coordinators[0]
-              : null;
+            console.log('[useEventUserData] Raw API response:', {
+              status: coordResolverRes.status,
+              dataKeys: Object.keys(coordData),
+              dataDataKeys: Object.keys(coordData.data || {}),
+              coordinatorsPath: coordData.data?.coordinators,
+              coordinatorsLength: coordData.data?.coordinators?.length
+            });
+            
+            // API returns: { success: true, data: { coordinators: [...], primaryCoordinator: {...} } }
+            console.log('[useEventUserData] Coordinator resolution response:', {
+              hasCoordinators: !!coordData.data?.coordinators,
+              coordinatorsCount: coordData.data?.coordinators?.length || 0,
+              coordinatorIds: coordData.data?.coordinators?.map((c: any) => c._id || c.id) || []
+            });
 
-            if (coordinatorInfo && coordinatorInfo._id) {
-              const coordinatorId = coordinatorInfo._id.toString();
-              const coordFullName = coordinatorInfo.fullName || 
-                                   formatUserName(coordinatorInfo) || 
-                                   `${coordinatorInfo.firstName || ''} ${coordinatorInfo.lastName || ''}`.trim() ||
-                                   'Coordinator';
-              
-              // Get coverage area info for single coordinator
-              let coverageLabel = "";
-              if (coordinatorInfo.coverageAreas && coordinatorInfo.coverageAreas.length > 0) {
-                const firstCoverage = coordinatorInfo.coverageAreas[0];
-                if (firstCoverage.coverageAreaName) {
-                  coverageLabel = ` - ${firstCoverage.coverageAreaName}`;
-                } else if (firstCoverage.districtName) {
-                  coverageLabel = ` - ${firstCoverage.districtName}`;
-                } else if (firstCoverage.districtIds && firstCoverage.districtIds.length > 0) {
-                  coverageLabel = ` - District ${firstCoverage.districtIds[0]}`;
-                }
-              }
-              
-              // If multiple coordinators, show all options
-              if (coordData.data?.coordinators && coordData.data.coordinators.length > 1) {
-                const opts = coordData.data.coordinators.map((c: any) => {
-                  const cFullName = c.fullName || formatUserName(c) || `${c.firstName || ''} ${c.lastName || ''}`.trim();
-                  
-                  // Get coverage area info for each coordinator
-                  let cCoverageLabel = "";
-                  if (c.coverageAreas && c.coverageAreas.length > 0) {
-                    const firstCoverage = c.coverageAreas[0];
-                    if (firstCoverage.coverageAreaName) {
-                      cCoverageLabel = ` - ${firstCoverage.coverageAreaName}`;
-                    } else if (firstCoverage.districtName) {
-                      cCoverageLabel = ` - ${firstCoverage.districtName}`;
-                    } else if (firstCoverage.districtIds && firstCoverage.districtIds.length > 0) {
-                      cCoverageLabel = ` - District ${firstCoverage.districtIds[0]}`;
-                    }
+            // Handle multiple or single coordinators
+            if (coordData.data?.coordinators && Array.isArray(coordData.data.coordinators) && coordData.data.coordinators.length > 0) {
+              // Process all coordinators into dropdown options
+              const opts = coordData.data.coordinators.map((c: any) => {
+                const cId = c._id || c.id;
+                const cFullName = c.fullName || formatUserName(c) || `${c.firstName || ''} ${c.lastName || ''}`.trim();
+                
+                // Get coverage area label
+                let cCoverageLabel = "";
+                if (c.coverageAreas && c.coverageAreas.length > 0) {
+                  const firstCoverage = c.coverageAreas[0];
+                  if (firstCoverage.coverageAreaName) {
+                    cCoverageLabel = ` - ${firstCoverage.coverageAreaName}`;
+                  } else if (firstCoverage.districtName) {
+                    cCoverageLabel = ` - ${firstCoverage.districtName}`;
                   }
-                  
-                  return {
-                    key: c._id.toString(),
-                    label: `${cFullName}${cCoverageLabel}`,
-                  };
-                });
-                setCoordinatorOptions(opts);
-                setCoordinator(coordinatorId); // Auto-select first
+                }
+                
+                return {
+                  key: cId.toString(),
+                  label: `${cFullName}${cCoverageLabel}`,
+                };
+              });
+
+              setCoordinatorOptions(opts);
+              
+              // If single coordinator, auto-select; if multiple, let user choose
+              if (opts.length === 1) {
+                setCoordinator(opts[0].key);
               } else {
-                // Single coordinator - lock it
-                setCoordinator(coordinatorId);
-                setCoordinatorOptions([
-                  {
-                    key: coordinatorId,
-                    label: `${coordFullName}${coverageLabel}`,
-                  },
-                ]);
+                setCoordinator('');  // Leave empty for multiple options
               }
+              
+              setCoordinatorError(null);
             } else {
-              setCoordinatorError('No assigned coordinator found');
+              // No coordinators found
+              setCoordinatorError('No assigned coordinators found');
+              setCoordinatorOptions([]);
             }
           }
+
+          // For stakeholder: Set admin flag and locking state
+          setIsSysAdmin(false);
+          setStakeholderLocked(true);
 
           // Auto-lock stakeholder to self
           // Get municipality info from user data
