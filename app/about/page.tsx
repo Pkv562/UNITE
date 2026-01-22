@@ -25,9 +25,21 @@ const FEATURES: FeatureItem[] = [
   { title: "Real-Time Inventory", description: "Live dashboards showing blood supply by type, volume, and location. Instant visibility prevents critical shortages.", icon: Activity, color: "danger" },
   { title: "Smart Scheduling", description: "Secure portal for donors to book appointments and track donation history with automated eligibility reminders.", icon: CalendarClock, color: "primary" },
   { title: "Inter-Hospital Exchange", description: "Emergency requisition board allowing hospitals to request and share units instantly with audit trails.", icon: Building2, color: "success" },
-  { title: "Automated Alerts", description: "Configurable notifications for low stock, expiring units, and 'Code Red' events sent to key personnel.", icon: BellRing, color: "warning" },
+  { title: "Automated Alerts", description: "Configurable notifications for low stock, expiring units, and Code Red events sent to key personnel.", icon: BellRing, color: "warning" },
   { title: "Event Management", description: "Tools to organize blood drives, including venue assignment, capacity limits, and attendance tracking.", icon: Users, color: "secondary" },
-  { title: "Secure & Compliant", description: "Role-based access controls and encryption fully aligned with Data Privacy Act and DOH standards.", icon: ShieldCheck, color: "default" },
+  { title: "Secure & Compliant", description: "Role-based access controls and encryption aligned with the Data Privacy Act and DOH standards.", icon: ShieldCheck, color: "default" },
+];
+
+const VALUES = [
+  { title: "Human-First Design", description: "Every workflow is built for the people on the ground: nurses, coordinators, and donors." },
+  { title: "Regional Resilience", description: "We plan for typhoons, surges, and emergencies to keep supply stable when it matters most." },
+  { title: "Trust by Default", description: "Audit trails, access controls, and encryption keep sensitive data safe end-to-end." },
+];
+
+const TIMELINE = [
+  { year: "2023", title: "Problem Mapping", description: "Co-designed with BMC and partner hospitals to map pain points and bottlenecks." },
+  { year: "2024", title: "Prototype to Pilot", description: "Launched a regional pilot with live inventory sync and appointment flows." },
+  { year: "2025", title: "Network Expansion", description: "Scaling to more LGUs and blood drives with shared reporting and alerts." },
 ];
 
 const FeatureCard: React.FC<FeatureItem> = ({ title, description, icon: Icon, color }) => {
@@ -81,7 +93,7 @@ export default function AboutPage() {
                                 Unifying Neighborhoods In <span className="text-red-600">Transfusion Ecosystem</span>
                             </h1>
                             <p className="text-lg md:text-xl text-slate-500 max-w-xl leading-relaxed">
-                                Bridging the gap between Bicol Medical Center, local hospitals, and lifesavers like you. A centralized hub for smarter blood management.
+                                Bridging Bicol Medical Center, local hospitals, and lifesavers like you. One platform for smarter blood management, faster decisions, and safer care.
                             </p>
                             <div className="flex flex-col sm:flex-row gap-4 pt-2">
                                 <Button 
@@ -101,6 +113,13 @@ export default function AboutPage() {
                                 >
                                     Learn More
                                 </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {["BMC + Partner Hospitals", "LGU Blood Drives", "Donor Community"].map((tag) => (
+                                    <Chip key={tag} variant="flat" color="danger" className="bg-red-50 text-red-600">
+                                        {tag}
+                                    </Chip>
+                                ))}
                             </div>
                         </div>
 
@@ -145,6 +164,47 @@ export default function AboutPage() {
                     <p className="text-2xl md:text-3xl text-slate-300 font-light leading-relaxed italic">
                         "To build a resilient, technology-driven blood transfusion network that ensures every patient in the Bicol region has timely access to safe blood products."
                     </p>
+                    <div className="flex flex-wrap justify-center gap-3 pt-2">
+                        {["Fast Access", "Safe Units", "Shared Responsibility"].map((pill) => (
+                            <Chip key={pill} color="danger" variant="flat" className="bg-white/10 text-white">
+                                {pill}
+                            </Chip>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            {/* --- Story & Values --- */}
+            <section className="py-24 bg-white px-6">
+                <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
+                    <div className="lg:col-span-5 space-y-6">
+                        <h2 className="text-3xl md:text-4xl font-bold text-slate-900">Our Story</h2>
+                        <p className="text-slate-600 text-lg leading-relaxed">
+                            UNITE began as a collaboration with Bicol Medical Center to address critical delays in blood availability.
+                            We listened to frontline teams, built around their workflows, and tested in real environments before scaling.
+                        </p>
+                        <div className="space-y-4">
+                            {TIMELINE.map((item) => (
+                                <div key={item.year} className="flex gap-4">
+                                    <div className="w-16 text-red-600 font-bold">{item.year}</div>
+                                    <div>
+                                        <p className="font-semibold text-slate-900">{item.title}</p>
+                                        <p className="text-slate-500 text-sm">{item.description}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {VALUES.map((value) => (
+                            <Card key={value.title} className="border border-slate-100 shadow-md hover:shadow-lg transition-shadow">
+                                <CardBody className="p-6">
+                                    <p className="text-lg font-bold text-slate-900 mb-2">{value.title}</p>
+                                    <p className="text-slate-500 text-sm leading-relaxed">{value.description}</p>
+                                </CardBody>
+                            </Card>
+                        ))}
+                    </div>
                 </div>
             </section>
 
@@ -164,7 +224,7 @@ export default function AboutPage() {
                 </div>
             </section>
 
-             {/* --- Stakeholders & Stats (Re-adding this section for completeness) --- */}
+             {/* --- Stakeholders & Stats --- */}
             <section className="py-24 bg-white px-6">
                 <div className="max-w-7xl mx-auto">
                 <div className="lg:grid lg:grid-cols-12 lg:gap-16 items-start">
