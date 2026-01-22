@@ -80,6 +80,20 @@ export const CreateTrainingEventModal: React.FC<
     isSysAdmin,
   } = useEventUserData(isOpen, API_URL);
 
+  // Debug: Log coordinator and stakeholder state changes
+  useEffect(() => {
+    if (isOpen) {
+      console.log('[CreateTrainingEventModal] State update:', {
+        coordinator,
+        coordinatorOptionsCount: coordinatorOptions.length,
+        stakeholderOptionsCount: stakeholderOptions.length,
+        loadingStakeholders,
+        stakeholderError,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }, [isOpen, coordinator, coordinatorOptions, stakeholderOptions, loadingStakeholders, stakeholderError]);
+
   // All coordinator and stakeholder fetching logic is now handled by useEventUserData hook
 
   // Validate date when it changes
