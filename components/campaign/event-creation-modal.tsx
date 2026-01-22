@@ -230,7 +230,7 @@ export const CreateTrainingEventModal: React.FC<
                   );
                 }
 
-                // Non-admin: show locked input with coordinator full name if available
+                // Non-admin: show locked input if single coordinator, dropdown if multiple
                 if ((coordinatorOptions?.length || 0) === 0) {
                   return (
                     <Input
@@ -247,6 +247,31 @@ export const CreateTrainingEventModal: React.FC<
                   )
                 }
 
+                // Multiple coordinators: Show as dropdown for user to select
+                if (coordinatorOptions.length > 1) {
+                  return (
+                    <Select
+                      aria-label="Coordinator"
+                      classNames={{
+                        trigger:
+                          "border-default-200 hover:border-default-400 h-10",
+                        value: "text-sm",
+                      }}
+                      placeholder="Select a coordinator"
+                      selectedKeys={coordinator ? [coordinator] : []}
+                      variant="bordered"
+                      onSelectionChange={(keys) =>
+                        setCoordinator(Array.from(keys)[0] as string)
+                      }
+                    >
+                      {coordinatorOptions.map((coord) => (
+                        <SelectItem key={coord.key}>{coord.label}</SelectItem>
+                      ))}
+                    </Select>
+                  );
+                }
+
+                // Single coordinator: Show as locked input
                 const selected = coordinatorOptions.find((c) => c.key === coordinator) || coordinatorOptions[0]
 
                 return (
@@ -648,6 +673,20 @@ export const CreateBloodDriveEventModal: React.FC<
     isSysAdmin,
   } = useEventUserData(isOpen, API_URL);
 
+  // Debug: Log coordinator state changes in blood drive modal
+  useEffect(() => {
+    if (isOpen) {
+      console.log('[CreateBloodDriveEventModal] Coordinator state:', {
+        coordinator,
+        coordinatorOptionsCount: coordinatorOptions.length,
+        coordinatorOptions: coordinatorOptions.map(c => ({ key: c.key, label: c.label })),
+        loadingCoordinators,
+        coordinatorError,
+        isSysAdmin
+      });
+    }
+  }, [coordinator, coordinatorOptions, loadingCoordinators, coordinatorError, isSysAdmin, isOpen]);
+
   // All coordinator and stakeholder fetching logic is now handled by useEventUserData hook
 
   // Validate date when it changes
@@ -770,6 +809,29 @@ export const CreateBloodDriveEventModal: React.FC<
                     <SelectItem key={coord.key}>{coord.label}</SelectItem>
                   ))}
                 </Select>
+              ) : coordinatorOptions.length === 0 ? (
+                <Input
+                  disabled
+                  classNames={{ inputWrapper: "border-default-200 h-9 bg-default-100" }}
+                  radius="md"
+                  size="sm"
+                  type="text"
+                  value="No coordinators available"
+                  variant="bordered"
+                />
+              ) : coordinatorOptions.length > 1 ? (
+                <Select
+                  aria-label="Coordinator"
+                  classNames={{ trigger: "border-default-200 hover:border-default-400 h-10", value: "text-sm" }}
+                  placeholder="Select a coordinator"
+                  selectedKeys={coordinator ? [coordinator] : []}
+                  variant="bordered"
+                  onSelectionChange={(keys) => setCoordinator(Array.from(keys)[0] as string)}
+                >
+                  {coordinatorOptions.map((coord) => (
+                    <SelectItem key={coord.key}>{coord.label}</SelectItem>
+                  ))}
+                </Select>
               ) : (
                 <Input
                   disabled
@@ -777,7 +839,7 @@ export const CreateBloodDriveEventModal: React.FC<
                   radius="md"
                   size="sm"
                   type="text"
-                  value={coordinatorOptions.find((c) => c.key === coordinator)?.label || "No coordinators available"}
+                  value={coordinatorOptions.find((c) => c.key === coordinator)?.label || "Coordinator"}
                   variant="bordered"
                 />
               )}
