@@ -106,31 +106,23 @@ export async function fetchJsonWithAuth(
       const hasToken = token ? true : false;
       
       if (hasToken) {
-        // User had a token but got 401/403 - likely expired or invalid
-        console.warn('[FetchWithAuth] Authentication error - token may be expired or invalid');
-        
-        // Clear auth tokens
-        clearAuthTokens();
-        
-        // Only log permission errors when user has a token but access is denied
-        const isPermissionError = msg && (
+        const isPermissionError = res.status === 403 || (msg && (
           msg.toLowerCase().includes("permission denied") ||
           msg.toLowerCase().includes("permission")
-        );
-        
-        if (!isPermissionError) {
-          // Token is invalid/expired - redirect to login
+        ));
+
+        if (res.status === 401 && !isPermissionError) {
+          // Token invalid/expired – clear and redirect
+          console.warn('[FetchWithAuth] Authentication error - token may be expired or invalid');
+          clearAuthTokens();
           console.error(`Request failed (${res.status}):`, msg);
-          
-          // Redirect to login page if not already there
           if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth')) {
-            // Add a small delay to ensure error is thrown first
             setTimeout(() => {
               window.location.href = '/auth/signin';
             }, 100);
           }
         } else {
-          // Permission error - user is authenticated but doesn't have permission
+          // Permission error or explicit 403: keep token, surface error
           console.warn('[FetchWithAuth] Permission denied for this resource');
         }
       }
