@@ -53,20 +53,36 @@ export default function ManageStaffModal({
 
   // Get requestId
   const getRequestId = (): string | null => {
-    return (
-      propRequestId ||
-      (request &&
-        (request.Request_ID ||
-          request.RequestId ||
-          request.requestId ||
-          request._id ||
-          (request.request &&
-            (request.request.Request_ID ||
-              request.request.RequestId ||
-              request.request.requestId ||
-              request.request._id)))) ||
-      null
-    );
+    // If propRequestId is explicitly provided, use it
+    if (propRequestId) return propRequestId;
+    
+    // If request object exists, try to extract from it
+    if (request) {
+      return (
+        request.Request_ID ||
+        request.RequestId ||
+        request.requestId ||
+        request.Event_ID ||
+        request.event?.Request_ID ||
+        request.event?.RequestId ||
+        request.event?.requestId ||
+        request.event?.Event_ID ||
+        request._id ||
+        request.event?._id ||
+        (request.request &&
+          (request.request.Request_ID ||
+            request.request.RequestId ||
+            request.request.requestId ||
+            request.request.Event_ID ||
+            request.request._id))
+      );
+    }
+    
+    // Fallback: if eventId is provided but no request, use eventId
+    // This handles batch events that are passed only as eventId prop
+    if (eventId) return String(eventId);
+    
+    return null;
   };
 
   // Get eventId
@@ -119,8 +135,9 @@ export default function ManageStaffModal({
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       // Use fetchWithRetry for timeout and retry handling
+      // Call the /staff endpoint which works for both batch and request-based events
       const res = await fetchWithRetry(
-        `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}`,
+        `${API_BASE}/api/event-requests/${encodeURIComponent(rid)}/staff`,
         {
           headers,
           method: "GET",
@@ -134,11 +151,17 @@ export default function ManageStaffModal({
       const body = await res.json();
 
       if (!res.ok) {
+        // 404 for batch events without staff is expected - silently ignore
+        if (res.status === 404) {
+          console.log('[ManageStaffModal] Event/staff not found - starting with empty staff list');
+          setStaffMembers([]);
+          setError(null);
+          return;
+        }
         throw new Error(body.message || "Failed to fetch staff");
       }
 
-      const reqData = body.data?.request || body.data || body.request || body;
-      const staff = body.data?.staff || reqData?.staff || [];
+      const staff = body.data?.staff || [];
 
       setStaffMembers(
         Array.isArray(staff)
@@ -166,6 +189,26 @@ export default function ManageStaffModal({
   // Load staff when modal opens
   useEffect(() => {
     if (isOpen) {
+      // First, try to get staff from the request/event object if available
+      if (request) {
+        const existingStaff = request.staff || 
+                             request.event?.staff || 
+                             request.StaffMembers ||
+                             request.event?.StaffMembers ||
+                             [];
+        
+        if (Array.isArray(existingStaff) && existingStaff.length > 0) {
+          console.log('[ManageStaffModal] Found staff in event object:', existingStaff);
+          setStaffMembers(existingStaff.map(s => ({
+            FullName: s.Staff_FullName || s.FullName,
+            Role: s.Role
+          })));
+          setLoading(false);
+          return; // Don't fetch if we already have staff
+        }
+      }
+
+      // If no staff in object, try to fetch from API
       fetchStaff();
     } else {
       // Reset when modal closes
@@ -198,13 +241,20 @@ export default function ManageStaffModal({
     const rid = getRequestId();
     const evtId = getEventId();
 
+    // Debug logging to see what's being extracted
+    console.log('[ManageStaffModal] save() - extracted IDs:', { rid, evtId, request, eventId });
+
     if (!rid) {
-      setError("Request ID not found");
+      const msg = "Request ID not found - check console for details";
+      console.error('[ManageStaffModal]', msg, { request, eventId });
+      setError(msg);
       return;
     }
 
     if (!evtId) {
-      setError("Event ID not found");
+      const msg = "Event ID not found - check console for details";
+      console.error('[ManageStaffModal]', msg, { request, eventId });
+      setError(msg);
       return;
     }
 
@@ -271,9 +321,7 @@ export default function ManageStaffModal({
         throw new Error(resp.message || "Failed to save staff");
       }
 
-      // Invalidate cache for this request
-      invalidateCache(new RegExp(`event-requests/${encodeURIComponent(rid)}`));
-      invalidateCache(/event-requests\?/);
+      console.log('[ManageStaffModal] Save response:', resp);
 
       // Dispatch custom event to notify other components
       if (typeof window !== "undefined") {
@@ -288,18 +336,37 @@ export default function ManageStaffModal({
         );
       }
 
-      // After successful save, fetch fresh data
-      await fetchStaff();
+      // Use the staff data returned from the save response instead of fetching
+      // This avoids a second API call and handles batch events correctly
+      if (resp.data?.staff && Array.isArray(resp.data.staff)) {
+        console.log('[ManageStaffModal] Setting staff from response:', resp.data.staff);
+        setStaffMembers(resp.data.staff);
+      } else if (previousStaff.length > 0) {
+        // Fallback: use the staff we just sent if no response data
+        console.log('[ManageStaffModal] Using previousStaff as fallback');
+        setStaffMembers(previousStaff);
+      }
+      
       setIsRefreshing(false);
 
       // Clear input fields
       setNewFullName("");
       setNewRole("");
 
-      // Call onSaved callback with updated data
-      if (onSaved) {
-        onSaved();
-      }
+      // Note: We dispatch a custom event above, which is sufficient for refresh
+      // The onSaved callback often clears permission cache which is too aggressive
+      // Only call it if it exists and we need backward compatibility
+      // if (onSaved) {
+      //   console.log('[ManageStaffModal] Calling onSaved callback');
+      //   onSaved();
+      // }
+
+      // Small delay to ensure event handlers complete before closing
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Close the modal after successful save
+      console.log('[ManageStaffModal] Closing modal after successful save');
+      onClose();
     } catch (e: any) {
       setIsRefreshing(false);
       const errorMessage = e?.message || "Failed to save staff";

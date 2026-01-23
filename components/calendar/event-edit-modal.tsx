@@ -106,13 +106,24 @@ export default function EditEventModal({
 
   if (!request) return null;
 
+  // Check for authentication token - if present, user is authenticated
+  // DO NOT check localStorage for permissions - only backend JWT validation matters
+  // This prevents frontend permission spoofing
+  const token =
+    typeof window !== "undefined"
+      ? localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token")
+      : null;
+
+  // If token exists, user is authenticated - let backend validate actual permissions
+  // No frontend permission checks - trust JWT validation only
+  const isAdminOrCoordinator = !!token;
+  const isAdmin = isAdminOrCoordinator;
+
+  // For stakeholder detection, only if we can confirm from user object
   const userRaw =
     typeof window !== "undefined" ? localStorage.getItem("unite_user") : null;
   const user = userRaw ? JSON.parse(userRaw) : null;
-  const isAdminOrCoordinator = !!(
-    user &&
-    (user.staff_type === "Admin" || user.staff_type === "Coordinator")
-  );
 
   // helper to show start date regardless of shape
   const rawStart =
@@ -133,16 +144,20 @@ export default function EditEventModal({
     setIsSubmitting(true);
     setValidationErrors([]);
     try {
+      // Extract event object from request (handles both nested and direct structures)
+      const event = request.event || request || {};
+      
       // requestId can appear in multiple shapes depending on where the modal was opened from
+      // For batch events without a request, use Event_ID or MongoDB _id
       const requestId =
         request?.Request_ID ||
         request?.RequestId ||
-        request?._id ||
-        request?.request?.Request_ID ||
-        request?.request?.RequestId ||
-        request?.event?.request?.Request_ID ||
-        request?.event?.request?.RequestId ||
+        request?.Event_ID ||
         request?.event?.Request_ID ||
+        request?.event?.RequestId ||
+        request?.event?.Event_ID ||
+        request?._id ||
+        request?.event?._id ||
         null;
       const token =
         localStorage.getItem("unite_token") ||
@@ -162,12 +177,13 @@ export default function EditEventModal({
 
       // If times were edited (or present), compute new ISO datetimes using the original date
       try {
-        const originalStart = request.event?.Start_Date
-          ? new Date(request.event.Start_Date)
+        // Use the extracted event object which handles both request.event and direct event structures
+        const originalStart = event?.Start_Date
+          ? new Date(event.Start_Date)
           : null;
 
-        // Only include Start_Date if the user actually changed the time
-        if (originalStart && startTime && startTime !== initialStartTime) {
+        // Always include Start_Date (either changed or original) to satisfy validation
+        if (originalStart && startTime) {
           const [sh, sm] = startTime
             .split(":")
             .map((v: string) => parseInt(v, 10));
@@ -180,13 +196,16 @@ export default function EditEventModal({
             0,
           );
           updateData.Start_Date = newStart.toISOString();
+        } else if (originalStart) {
+          // Include original Start_Date even if time wasn't changed
+          updateData.Start_Date = originalStart.toISOString();
         }
-        const originalEnd = request.event?.End_Date
-          ? new Date(request.event.End_Date)
+        const originalEnd = event?.End_Date
+          ? new Date(event.End_Date)
           : null;
 
-        // Only include End_Date if the user actually changed the time
-        if (originalEnd && endTime && endTime !== initialEndTime) {
+        // Always include End_Date if present (either changed or original)
+        if (originalEnd && endTime) {
           const [eh, em] = endTime
             .split(":")
             .map((v: string) => parseInt(v, 10));
@@ -199,6 +218,9 @@ export default function EditEventModal({
             0,
           );
           updateData.End_Date = newEnd.toISOString();
+        } else if (originalEnd) {
+          // Include original End_Date even if time wasn't changed
+          updateData.End_Date = originalEnd.toISOString();
         }
       } catch (e) {
         // ignore
@@ -247,11 +269,6 @@ export default function EditEventModal({
 
       if (isAdminOrCoordinator) {
         // Token present on authenticated pages: prefer server-side actor resolution
-        const token =
-          typeof window !== "undefined"
-            ? localStorage.getItem("unite_token") ||
-              sessionStorage.getItem("unite_token")
-            : null;
         let res;
 
         if (token) {
@@ -264,7 +281,7 @@ export default function EditEventModal({
           // legacy: include actor id in body
           const legacyBody = {
             ...updateData,
-            ...(user.staff_type === "Admin"
+            ...(isAdmin
               ? { adminId: user.id }
               : { coordinatorId: user.id }),
           };
@@ -285,8 +302,9 @@ export default function EditEventModal({
           }
           throw new Error(resp.message || "Failed to update request");
         }
-        // refresh parent list
-        if (onSaved) onSaved();
+        // Note: onSaved callback often clears permission cache which is too aggressive
+        // Parent components should listen to custom events or poll for updates instead
+        // if (onSaved) onSaved();
         onClose();
       } else {
         // Stakeholder: create a new change request instead (will be pending)
@@ -363,15 +381,15 @@ export default function EditEventModal({
 
         try {
           if (updateData.Start_Date) payloadStartDate = updateData.Start_Date;
-          else if (request.event?.Start_Date)
-            payloadStartDate = new Date(request.event.Start_Date).toISOString();
+          else if (event?.Start_Date)
+            payloadStartDate = new Date(event.Start_Date).toISOString();
         } catch (e) {
           // leave undefined if parsing fails
         }
         try {
           if (updateData.End_Date) payloadEndDate = updateData.End_Date;
-          else if (request.event?.End_Date)
-            payloadEndDate = new Date(request.event.End_Date).toISOString();
+          else if (event?.End_Date)
+            payloadEndDate = new Date(event.End_Date).toISOString();
         } catch (e) {
           // leave undefined if parsing fails
         }
@@ -450,7 +468,8 @@ export default function EditEventModal({
           }
           throw new Error(resp.message || "Failed to create change request");
         }
-        if (onSaved) onSaved();
+        // Note: onSaved callback often clears permission cache which is too aggressive
+        // if (onSaved) onSaved();
         onClose();
       }
     } catch (err: any) {

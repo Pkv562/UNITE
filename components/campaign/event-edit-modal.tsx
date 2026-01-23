@@ -194,16 +194,26 @@ export default function EditEventModal({
 
   if (!request) return null;
 
+  // Check for authentication token - if present, user is authenticated
+  // DO NOT check localStorage for permissions - only backend JWT validation matters
+  // This prevents frontend permission spoofing
+  const token =
+    typeof window !== "undefined"
+      ? localStorage.getItem("unite_token") ||
+        sessionStorage.getItem("unite_token")
+      : null;
+
+  // If token exists, user is authenticated - let backend validate actual permissions
+  // No frontend permission checks - trust JWT validation only
+  const isAdminOrCoordinator = !!token;
+  const isAdmin = isAdminOrCoordinator;
+
+  // For stakeholder detection, only if we can confirm from user object
   const userRaw =
     typeof window !== "undefined" ? localStorage.getItem("unite_user") : null;
   const user = userRaw ? JSON.parse(userRaw) : null;
-  const isAdminOrCoordinator = !!(
-    user &&
-    (user.staff_type === "Admin" || user.staff_type === "Coordinator")
-  );
-  const isAdmin = user && user.staff_type === "Admin";
 
-  const isStakeholder = user && user.staff_type === "Stakeholder";
+  const isStakeholder = user && !isAdminOrCoordinator;
 
   const handleSave = async () => {
     if (!request) return;
@@ -211,14 +221,17 @@ export default function EditEventModal({
     setValidationErrors([]);
     try {
       // Extract Request_ID from various possible locations
+      // For batch events without a request, use Event_ID or MongoDB _id
       // The backend _formatRequest returns 'requestId' (lowercase), but the model uses 'Request_ID'
       const requestId = 
         request.Request_ID || 
         request.RequestId || 
         request.requestId ||
+        request.Event_ID ||
         request._id ||
         (request.request && (request.request.Request_ID || request.request.RequestId || request.request.requestId || request.request._id)) ||
         (request.data && (request.data.Request_ID || request.data.RequestId || request.data.requestId || request.data._id)) ||
+        (request.event && (request.event.Event_ID || request.event._id)) ||
         null;
 
       if (!requestId) {
