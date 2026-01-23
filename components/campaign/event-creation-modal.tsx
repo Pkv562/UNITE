@@ -566,9 +566,7 @@ export const CreateTrainingEventModal: React.FC<
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-medium">
-                  Contact Email<span className="text-danger ml-1">*</span>
-                </label>
+                <label className="text-xs font-medium">Contact Email</label>
                 <Input
                   classNames={{
                     inputWrapper: "border-default-200 h-9",
@@ -583,9 +581,7 @@ export const CreateTrainingEventModal: React.FC<
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium">
-                  Contact Number<span className="text-danger ml-1">*</span>
-                </label>
+                <label className="text-xs font-medium">Contact Number</label>
                 <Input
                   classNames={{
                     inputWrapper: "border-default-200 h-9",
@@ -1042,9 +1038,7 @@ export const CreateBloodDriveEventModal: React.FC<
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-medium">
-                  Contact Email<span className="text-danger ml-1">*</span>
-                </label>
+                <label className="text-xs font-medium">Contact Email</label>
                 <Input
                   classNames={{
                     inputWrapper: "border-default-200 h-9",
@@ -1059,9 +1053,7 @@ export const CreateBloodDriveEventModal: React.FC<
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium">
-                  Contact Number<span className="text-danger ml-1">*</span>
-                </label>
+                <label className="text-xs font-medium">Contact Number</label>
                 <Input
                   classNames={{
                     inputWrapper: "border-default-200 h-9",
@@ -1511,9 +1503,7 @@ export const CreateAdvocacyEventModal: React.FC<
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-medium">
-                  Contact Email<span className="text-danger ml-1">*</span>
-                </label>
+                <label className="text-xs font-medium">Contact Email</label>
                 <Input
                   classNames={{
                     inputWrapper: "border-default-200 h-9",
@@ -1528,9 +1518,7 @@ export const CreateAdvocacyEventModal: React.FC<
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium">
-                  Contact Number<span className="text-danger ml-1">*</span>
-                </label>
+                <label className="text-xs font-medium">Contact Number</label>
                 <Input
                   classNames={{
                     inputWrapper: "border-default-200 h-9",
