@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { Providers } from "./providers";
 import { LoadingOverlay } from "@/components/ui/loading-overlay";
 import ClientPerfFix from "@/components/utils/client-perf-fix";
+import BugReportFab from "@/components/ui/BugReportFab";
 
 import { siteConfig } from "@/config/site";
 import { fontSans } from "@/config/fonts";
@@ -39,6 +40,8 @@ export default function RootLayout({
           <ClientPerfFix />
           <LoadingOverlay />
           {children}
+          {/* Bug Report FAB - Available globally for authenticated users */}
+          <BugReportFab />
         </Providers>
       </body>
     </html>
