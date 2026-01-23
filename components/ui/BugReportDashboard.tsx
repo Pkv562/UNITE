@@ -140,12 +140,12 @@ export default function BugReportDashboard() {
           onChange={(e) => setStatusFilter(e.target.value)}
           className="w-48"
         >
-          <SelectItem key="all" value="all">All</SelectItem>
-          <SelectItem key="Open" value="Open">Open</SelectItem>
-          <SelectItem key="In Progress" value="In Progress">In Progress</SelectItem>
-          <SelectItem key="Resolved" value="Resolved">Resolved</SelectItem>
-          <SelectItem key="Closed" value="Closed">Closed</SelectItem>
-          <SelectItem key="Cannot Reproduce" value="Cannot Reproduce">Cannot Reproduce</SelectItem>
+          <SelectItem key="all">All</SelectItem>
+          <SelectItem key="Open">Open</SelectItem>
+          <SelectItem key="In Progress">In Progress</SelectItem>
+          <SelectItem key="Resolved">Resolved</SelectItem>
+          <SelectItem key="Closed">Closed</SelectItem>
+          <SelectItem key="Cannot Reproduce">Cannot Reproduce</SelectItem>
         </Select>
       </div>
 
@@ -284,11 +284,11 @@ export default function BugReportDashboard() {
                           selectedKeys={[selectedReport.Status]}
                           onChange={(e) => updateReportStatus(selectedReport.Report_ID, e.target.value)}
                         >
-                          <SelectItem key="Open" value="Open">Open</SelectItem>
-                          <SelectItem key="In Progress" value="In Progress">In Progress</SelectItem>
-                          <SelectItem key="Resolved" value="Resolved">Resolved</SelectItem>
-                          <SelectItem key="Closed" value="Closed">Closed</SelectItem>
-                          <SelectItem key="Cannot Reproduce" value="Cannot Reproduce">Cannot Reproduce</SelectItem>
+                          <SelectItem key="Open">Open</SelectItem>
+                          <SelectItem key="In Progress">In Progress</SelectItem>
+                          <SelectItem key="Resolved">Resolved</SelectItem>
+                          <SelectItem key="Closed">Closed</SelectItem>
+                          <SelectItem key="Cannot Reproduce">Cannot Reproduce</SelectItem>
                         </Select>
                       </div>
                       <div className="flex-1">
