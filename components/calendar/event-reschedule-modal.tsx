@@ -34,6 +34,7 @@ export default function EventRescheduleModal({
   onSaved,
 }: Props) {
   const [requestId, setRequestId] = useState<string | null>(null);
+    const [isBatchEvent, setIsBatchEvent] = useState(false);
   const [currentDateDisplay, setCurrentDateDisplay] = useState("");
   const [rescheduledDate, setRescheduledDate] = useState<any>(null);
   const [note, setNote] = useState("");
@@ -58,14 +59,23 @@ export default function EventRescheduleModal({
         if (!res.ok)
           throw new Error(body.message || "Failed to fetch event details");
         const data = body.data || body.event || body;
+        
+        console.log("Event data for reschedule:", data);
+        
         const rid =
           data?.request?.Request_ID ||
           data?.Request_ID ||
           data?.requestId ||
           data?.request?.RequestId ||
           null;
+        
+  const isBatch = !rid;
+  const eventIdForBatch = data?.Event_ID || data?._id || null;
 
-        setRequestId(rid || null);
+        console.log("Extracted requestId:", rid);
+        
+        setRequestId(rid || eventIdForBatch);
+        setIsBatchEvent(isBatch);
 
         // determine displayable current date
         let start: Date | null = null;
@@ -116,10 +126,9 @@ export default function EventRescheduleModal({
 
     if (!note || note.trim().length === 0)
       return setValidationError("Please provide a reason for rescheduling");
-    if (!requestId)
-      return setValidationError(
-        "Unable to determine request id for reschedule",
-      );
+    if (!requestId) {
+      return setValidationError("Unable to determine event/request id for reschedule");
+    }
 
     try {
       setSaving(true);
@@ -143,29 +152,56 @@ export default function EventRescheduleModal({
           : rescheduledDate instanceof Date
             ? rescheduledDate.toISOString()
             : new Date(rescheduledDate).toISOString();
-
-      const body: any = {
-        action: "reschedule",
-        note: note.trim(),
-        proposedDate: newDateISO,
-      };
       let res;
-
-      if (token) {
-        res = await fetchWithAuth(
-          `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
-          { method: "POST", body: JSON.stringify(body) },
-        );
+      
+      if (isBatchEvent) {
+        // For batch events, update the event directly
+        const body: any = {
+          Start_Date: newDateISO,
+          Event_Description: note.trim(), // Store reason in description or add notes field
+        };
+        
+        if (token) {
+          res = await fetchWithAuth(
+            `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}`,
+            { method: "PUT", body: JSON.stringify(body) },
+          );
+        } else {
+          res = await fetch(
+            `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}`,
+            {
+              method: "PUT",
+              headers,
+              body: JSON.stringify(body),
+              credentials: "include",
+            },
+          );
+        }
       } else {
-        res = await fetch(
-          `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify(body),
-            credentials: "include",
-          },
-        );
+        // For request-based events, use the actions endpoint
+        const body: any = {
+          action: "reschedule",
+          note: note.trim(),
+          proposedDate: newDateISO,
+        };
+        
+        if (token) {
+          res = await fetchWithAuth(
+            `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
+            { method: "POST", body: JSON.stringify(body) },
+          );
+        } else {
+          res = await fetch(
+            `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/actions`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify(body),
+              credentials: "include",
+            },
+          );
+        }
+      
       }
       const resp = await res.json();
 
