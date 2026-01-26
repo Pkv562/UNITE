@@ -258,3 +258,114 @@ export function getCapabilityBadges(
   return badges;
 }
 
+/**
+ * ================================
+ * V2.0 Permission Checks
+ * ================================
+ * These functions use permission-based checks for the v2.0 request flow.
+ * They replace role-based checks with capability-based authorization.
+ */
+
+/**
+ * Check if user can perform a specific action on a request (v2.0)
+ * @param user - User object with permissions
+ * @param action - Request action type (accept, reject, reschedule, confirm, decline, cancel)
+ * @param request - Request object (optional, for future context-aware checks)
+ * @returns True if user has permission to perform the action
+ */
+export function canPerformRequestActionV2(
+  user: UserWithPermissions | StaffListItem,
+  action: string,
+  request?: any
+): boolean {
+  if (!user) {
+    return false;
+  }
+
+  // Map action to required capability
+  const actionCapabilityMap: Record<string, string> = {
+    'accept': 'request.review',
+    'reject': 'request.review',
+    'reschedule': 'request.update',
+    'confirm': 'request.update',
+    'decline': 'request.update',
+    'cancel': 'request.cancel'
+  };
+
+  const requiredCapability = actionCapabilityMap[action];
+  if (!requiredCapability) {
+    return false;
+  }
+
+  return hasCapability(user, requiredCapability);
+}
+
+/**
+ * Check if user can view a specific request (v2.0)
+ * Uses broadcast visibility model - all reviewers with matching jurisdiction can view
+ * @param user - User object with permissions
+ * @param request - Request object (optional, for future jurisdiction-based checks)
+ * @returns True if user has permission to view the request
+ */
+export function canViewRequestV2(
+  user: UserWithPermissions | StaffListItem,
+  request?: any
+): boolean {
+  if (!user) {
+    return false;
+  }
+
+  // In v2.0, any user with request.review or request.create capability can view requests
+  return hasCapability(user, 'request.review') || hasCapability(user, 'request.create');
+}
+
+/**
+ * Get available actions for a user on a request (v2.0)
+ * @param user - User object with permissions
+ * @param request - Request object with current status
+ * @returns Array of available action strings
+ */
+export function getAvailableActionsV2(
+  user: UserWithPermissions | StaffListItem,
+  request: any
+): string[] {
+  if (!user || !request) {
+    return [];
+  }
+
+  const actions: string[] = [];
+  const status = request.status?.toLowerCase();
+
+  // Check each action based on current status and user capabilities
+  if (status === 'pending_approval' || status === 'pending review') {
+    if (canPerformRequestActionV2(user, 'accept', request)) {
+      actions.push('accept');
+    }
+    if (canPerformRequestActionV2(user, 'reject', request)) {
+      actions.push('reject');
+    }
+  }
+
+  if (status === 'reschedule_requested' || status === 'pending_reschedule') {
+    if (canPerformRequestActionV2(user, 'confirm', request)) {
+      actions.push('confirm');
+    }
+    if (canPerformRequestActionV2(user, 'decline', request)) {
+      actions.push('decline');
+    }
+  }
+
+  // Cancel is available for most non-terminal statuses
+  const nonCancellableStatuses = ['cancelled', 'rejected', 'completed'];
+  if (!nonCancellableStatuses.includes(status) && canPerformRequestActionV2(user, 'cancel', request)) {
+    actions.push('cancel');
+  }
+
+  // Reschedule is available for approved requests
+  if (status === 'approved' && canPerformRequestActionV2(user, 'reschedule', request)) {
+    actions.push('reschedule');
+  }
+
+  return actions;
+}
+

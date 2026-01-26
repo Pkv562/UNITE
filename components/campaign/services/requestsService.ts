@@ -619,4 +619,135 @@ export const deleteRequest = async (requestId: string) => {
   return resp;
 };
 
+// ============================================
+// BROADCAST MODEL - NEW ENDPOINTS
+// ============================================
+
+/**
+ * Override coordinator assignment (Admin only)
+ * Fixes the coordinator selection bug - ensures manual override persists
+ */
+export const overrideCoordinator = async (requestId: string, coordinatorId: string) => {
+  const token = getToken();
+  const headers: any = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const body = { coordinatorId };
+
+  let res;
+  if (token) {
+    res = await fetchWithAuth(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/override-coordinator`,
+      { method: "PUT", body: JSON.stringify(body) }
+    );
+  } else {
+    res = await fetch(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/override-coordinator`,
+      { method: "PUT", headers, body: JSON.stringify(body), credentials: "include" }
+    );
+  }
+
+  const resp = await res.json();
+  if (!res.ok) throw new Error(resp.message || "Failed to override coordinator");
+
+  // Notify other components
+  try {
+    window.dispatchEvent(new CustomEvent("unite:requests-changed", { detail: { requestId } }));
+  } catch (e) {}
+
+  return resp;
+};
+
+/**
+ * Claim request for review (Broadcast Model)
+ * Prevents duplicate actions from multiple coordinators
+ */
+export const claimRequest = async (requestId: string) => {
+  const token = getToken();
+  const headers: any = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  let res;
+  if (token) {
+    res = await fetchWithAuth(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/claim`,
+      { method: "POST" }
+    );
+  } else {
+    res = await fetch(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/claim`,
+      { method: "POST", headers, credentials: "include" }
+    );
+  }
+
+  const resp = await res.json();
+  if (!res.ok) throw new Error(resp.message || "Failed to claim request");
+
+  try {
+    window.dispatchEvent(new CustomEvent("unite:request-claimed", { detail: { requestId, claimedBy: resp.data?.claimedBy } }));
+  } catch (e) {}
+
+  return resp;
+};
+
+/**
+ * Release claim on request (Broadcast Model)
+ * Allows coordinator to hand off request to colleagues
+ */
+export const releaseRequest = async (requestId: string) => {
+  const token = getToken();
+  const headers: any = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  let res;
+  if (token) {
+    res = await fetchWithAuth(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/release`,
+      { method: "POST" }
+    );
+  } else {
+    res = await fetch(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/release`,
+      { method: "POST", headers, credentials: "include" }
+    );
+  }
+
+  const resp = await res.json();
+  if (!res.ok) throw new Error(resp.message || "Failed to release request");
+
+  try {
+    window.dispatchEvent(new CustomEvent("unite:request-released", { detail: { requestId } }));
+  } catch (e) {}
+
+  return resp;
+};
+
+/**
+ * Get valid coordinators for a request (Broadcast Model)
+ * Returns all coordinators who can see and act on this request
+ */
+export const getValidCoordinators = async (requestId: string) => {
+  const token = getToken();
+  const headers: any = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  let res;
+  if (token) {
+    res = await fetchWithAuth(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/valid-coordinators`,
+      { method: "GET" }
+    );
+  } else {
+    res = await fetch(
+      `${API_BASE}/api/event-requests/${encodeURIComponent(requestId)}/valid-coordinators`,
+      { method: "GET", headers, credentials: "include" }
+    );
+  }
+
+  const resp = await res.json();
+  if (!res.ok) throw new Error(resp.message || "Failed to get valid coordinators");
+
+  return resp;
+};
+
 export default {};

@@ -15,6 +15,11 @@ import { Avatar } from "@heroui/avatar";
 import { Persons, Droplet, Megaphone } from "@gravity-ui/icons";
 import { useLocations } from "../providers/locations-provider";
 
+// V2.0 Imports
+import { useV2RequestFlow } from "@/utils/featureFlags";
+import { useValidReviewersV2 } from "@/hooks/useValidReviewersV2";
+import { Spinner } from "@heroui/spinner";
+
 interface EventViewModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -29,6 +34,11 @@ export const EventViewModal: React.FC<EventViewModalProps> = ({
   request,
 }) => {
   const { getProvinceName, getDistrictName, getMunicipalityName, locations } = useLocations();
+  
+  // V2.0 Feature Flag and Reviewers Hook
+  const isV2Enabled = useV2RequestFlow();
+  const requestId = request?.Request_ID || request?.RequestId || request?._id || request?.requestId;
+  const { reviewers, loading: reviewersLoading } = useValidReviewersV2(requestId || "", isV2Enabled && isOpen);
   
   const event = request?.event || request || {};
   // category-specific document (Training/BloodDrive/Advocacy) attached by the backend
@@ -738,6 +748,96 @@ export const EventViewModal: React.FC<EventViewModalProps> = ({
                 variant="bordered"
               />
             </div>
+
+            {/* V2.0 Broadcast Model - Show Active Responder and Valid Reviewers */}
+            {isV2Enabled && (
+              <>
+                {/* Active Responder (Identity-Based) */}
+                {request?.activeResponder && (
+                  <div className="col-span-2 border-t pt-4 mt-4">
+                    <div className="space-y-3">
+                      <label className="text-sm font-semibold text-primary">
+                        Request Status (v2.0)
+                      </label>
+                      
+                      {/* Active Responder */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium">
+                          Awaiting Response From
+                        </label>
+                        <Chip
+                          color={
+                            request.activeResponder.relationship === 'requester'
+                              ? 'warning'
+                              : 'success'
+                          }
+                          size="sm"
+                          variant="flat"
+                          className="capitalize"
+                        >
+                          {request.activeResponder.relationship === 'requester'
+                            ? '📝 Requester'
+                            : '👥 Reviewer'}
+                        </Chip>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Valid Reviewers (Broadcast Visibility) */}
+                {reviewers && reviewers.length > 0 && (
+                  <div className="col-span-2 border-t pt-4 mt-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Persons className="w-4 h-4" />
+                        <label className="text-sm font-semibold">
+                          Valid Reviewers (Broadcast)
+                        </label>
+                      </div>
+                      
+                      {reviewersLoading ? (
+                        <div className="flex items-center justify-center py-4">
+                          <Spinner size="sm" />
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {reviewers.map((reviewer) => (
+                            <div
+                              key={reviewer._id}
+                              className="p-2 rounded-md border border-default-200 bg-default-50"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">
+                                    {reviewer.fullName}
+                                  </p>
+                                  <p className="text-xs text-default-500 truncate">
+                                    {reviewer.email}
+                                  </p>
+                                  {reviewer.organizationType && (
+                                    <Chip
+                                      size="sm"
+                                      variant="flat"
+                                      className="mt-1"
+                                    >
+                                      {reviewer.organizationType}
+                                    </Chip>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      <p className="text-xs text-default-500 italic mt-2">
+                        All reviewers with matching jurisdiction can see and act on this request.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </ModalBody>
 
