@@ -16,6 +16,7 @@ import CampaignCalendar from "@/components/campaign/campaign-calendar";
 import EventCard from "@/components/campaign/event-card";
 import EventViewModal from "@/components/campaign/event-view-modal";
 import EditEventModal from "@/components/campaign/event-edit-modal";
+import { VersionIndicator } from "@/components/campaign/version-indicator";
 // Notification UI handled by `MobileNav` for mobile
 
 import { useLoading } from "@/components/ui/loading-overlay";
@@ -25,12 +26,27 @@ import { performRequestAction, performConfirmAction } from "@/components/campaig
 import { getCachedResponse, cacheResponse, invalidateCache, DEFAULT_TTL } from "@/utils/requestCache";
 import { clearPermissionCache } from "@/utils/eventActionPermissions";
 
+// V2.0 Imports
+import { useV2RequestFlow } from "@/utils/featureFlags";
+import { useEventRequestsV2 } from "@/hooks/useEventRequestsV2";
+import { useRequestActionsV2 } from "@/hooks/useRequestActionsV2";
+import type { V2RequestFilters } from "@/services/eventRequestsV2Service";
+
 /**
  * Campaign Page Component
  * Main campaign management page with topbar, toolbar, and content area.
  */
 
 export default function CampaignPage() {
+  // V2.0 Feature Flag
+  const isV2Enabled = useV2RequestFlow();
+  
+  // Log which version is being used
+  useEffect(() => {
+    console.log(`[CampaignPage] Version: ${isV2Enabled ? 'V2.0' : 'V1.0'}`);
+    console.log(`[CampaignPage] isV2Enabled = ${isV2Enabled}`);
+  }, [isV2Enabled]);
+  
   // Defer initializing selectedDate to after hydration to avoid any
   // server/client time differences during initial render.
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
@@ -100,6 +116,53 @@ export default function CampaignPage() {
   const isRefreshingRef = useRef(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+
+  const mapTabToStatusParam = (tab: string) => {
+    if (!tab || tab === "all") return undefined;
+    // Normalize to lowercase for case-insensitive matching
+    const normalizedTab = tab.toLowerCase().trim();
+    // Backend expects "pending" (not "pending-review") to map to status group
+    // The backend's _mapStatusFilterToStatusGroup maps "pending" to [PENDING_REVIEW, REVIEW_RESCHEDULED]
+    if (normalizedTab === "approved") return "approved";
+    if (normalizedTab === "pending") return "pending";
+    if (normalizedTab === "rejected") return "rejected";
+
+    return normalizedTab;
+  };
+
+  // V2.0 Request Hook (only active when feature flag is enabled)
+  const v2Filters = useMemo((): V2RequestFilters => {
+    const filters: V2RequestFilters = {};
+    
+    // Status filter
+    const statusParam = selectedTab !== "all" ? mapTabToStatusParam(selectedTab) : undefined;
+    if (statusParam) filters.status = statusParam;
+    
+    // Category filter
+    if (quickFilter?.category && quickFilter.category !== "all") {
+      filters.category = quickFilter.category;
+    }
+    
+    // Location filters
+    if (quickFilter?.province) filters.province = String(quickFilter.province);
+    if (quickFilter?.district) filters.district = String(quickFilter.district);
+    if (quickFilter?.municipality) filters.municipalityId = String(quickFilter.municipality);
+    
+    // Pagination
+    filters.page = currentPage;
+    filters.limit = pageSize;
+    
+    return filters;
+  }, [selectedTab, quickFilter, currentPage, pageSize]);
+
+  const v2RequestData = useEventRequestsV2({
+    filters: v2Filters,
+    enableCache: true,
+    autoRefresh: false, // Manual refresh control
+  });
+
+  // V2.0 Actions Hook
+  const { executeAction: executeActionV2 } = useRequestActionsV2();
 
   const [provinces, setProvinces] = useState<any[]>([]);
   const [districts, setDistricts] = useState<any[]>([]);
@@ -207,23 +270,18 @@ export default function CampaignPage() {
     return null;
   };
 
-  const mapTabToStatusParam = (tab: string) => {
-    if (!tab || tab === "all") return undefined;
-    // Normalize to lowercase for case-insensitive matching
-    const normalizedTab = tab.toLowerCase().trim();
-    // Backend expects "pending" (not "pending-review") to map to status group
-    // The backend's _mapStatusFilterToStatusGroup maps "pending" to [PENDING_REVIEW, REVIEW_RESCHEDULED]
-    if (normalizedTab === "approved") return "approved";
-    if (normalizedTab === "pending") return "pending";
-    if (normalizedTab === "rejected") return "rejected";
-
-    return normalizedTab;
-  };
-
   // Note: fetchGlobalCounts removed - counts are now included in fetchRequests response
 
   // Optimized fetchRequests with caching, retry, and deduplication
   const fetchRequests = async (options?: { forceRefresh?: boolean }): Promise<void> => {
+    // If v2.0 is enabled, use the hook's refresh method instead
+    if (isV2Enabled) {
+      debug("[Campaign] Using v2.0 request flow");
+      await v2RequestData.refresh();
+      return;
+    }
+
+    // V1.0 logic (existing)
     setIsLoadingRequests(true);
     setRequestsError("");
 
@@ -642,7 +700,11 @@ export default function CampaignPage() {
   // Note: Counts are now included in fetchRequests response, so no separate fetch needed
 
   // Re-fetch requests whenever filters, pagination, or tab change
+  // DISABLED WHEN V2 IS ENABLED - v2 hook handles fetching
   useEffect(() => {
+    // Skip if v2 is enabled - the useEventRequestsV2 hook handles fetching
+    if (isV2Enabled) return;
+    
     // fetchRequests is defined above in the component scope
     (async () => {
       try {
@@ -651,12 +713,14 @@ export default function CampaignPage() {
         // errors handled inside fetchRequests
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentPage,
     selectedTab,
     searchQuery,
     quickFilterMemo,
     advancedFilterMemo,
+    isV2Enabled,
   ]);
 
   // Debounce timer ref for refresh operations
@@ -863,6 +927,69 @@ export default function CampaignPage() {
       setIsLoading(false);
     }
   }, [initialLoadDone, setIsLoading]);
+
+  // V2.0: Sync v2 hook data to component state
+  useEffect(() => {
+    if (!isV2Enabled) {
+      console.log("[Campaign V2] V2 disabled, skipping sync");
+      return;
+    }
+
+    console.log("[Campaign V2] Syncing v2 data to component state", {
+      loading: v2RequestData.loading,
+      requestCount: v2RequestData.requests.length,
+      hasError: !!v2RequestData.error,
+      hasPagination: !!v2RequestData.pagination,
+      currentRequestsLength: requests.length,
+      currentIsLoadingRequests: isLoadingRequests,
+    });
+
+    // Update requests list
+      console.log("[Campaign V2] Setting requests:", v2RequestData.requests.length, "items");
+    setRequests(v2RequestData.requests);
+    
+    // Update loading state
+      console.log("[Campaign V2] Setting isLoadingRequests to:", v2RequestData.loading);
+    setIsLoadingRequests(v2RequestData.loading);
+    
+    // Update error state
+    if (v2RequestData.error) {
+      setRequestsError(v2RequestData.error);
+    } else {
+      setRequestsError("");
+    }
+    
+    // Update pagination and counts
+    if (v2RequestData.pagination) {
+      setTotalRequestsCount(v2RequestData.pagination.totalCount || 0);
+      setIsServerPaged((v2RequestData.pagination.totalCount || 0) > (v2RequestData.pagination.limit || 0));
+      
+      // Calculate status counts from fetched requests
+      // Note: v2.0 backend doesn't return statusCounts in pagination yet
+      // So we calculate from current page data
+      const counts = {
+        all: v2RequestData.pagination.totalCount || 0,
+        approved: 0,
+        pending: 0,
+        rejected: 0,
+      };
+      
+      v2RequestData.requests.forEach(req => {
+        const status = (req.status || "").toLowerCase();
+        if (status === "approved") counts.approved++;
+        else if (status.includes("pending") || status.includes("rescheduled")) counts.pending++;
+        else if (status === "rejected" || status === "cancelled") counts.rejected++;
+      });
+      
+      setRequestCounts(counts);
+    }
+    
+    // Mark initial load as done
+    if (!initialLoadDone && !v2RequestData.loading) {
+      console.log("[Campaign V2] Initial load complete");
+      setInitialLoadDone(true);
+    }
+  }, [isV2Enabled, v2RequestData.requests, v2RequestData.loading, v2RequestData.error, v2RequestData.pagination, initialLoadDone]);
 
   
 
@@ -1330,6 +1457,64 @@ export default function CampaignPage() {
     }
 
     try {
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled) {
+        try {
+          const v2Response = await executeActionV2(requestId, 'accept', { note });
+          
+          // Update local state with the returned request
+          if (v2Response?.data?.request) {
+            setRequests((prev) =>
+              Array.isArray(prev)
+                ? prev.map((r) => {
+                    const id = r?.Request_ID || r?.RequestId || r?._id || r?.requestId;
+                    const updatedId =
+                      v2Response.data.request?.Request_ID ||
+                      v2Response.data.request?.RequestId ||
+                      v2Response.data.request?._id ||
+                      v2Response.data.request?.requestId;
+                    if (id && updatedId && String(id) === String(updatedId)) {
+                      return { ...r, ...v2Response.data.request };
+                    }
+                    return r;
+                  })
+                : prev
+            );
+          }
+
+          // Refresh v2.0 data
+          await v2RequestData.refresh();
+          
+          // Clear permission cache
+          const eventId =
+            v2Response?.data?.request?.Event_ID ||
+            v2Response?.data?.request?.eventId ||
+            reqObj?.Event_ID ||
+            reqObj?.eventId;
+          if (eventId) {
+            clearPermissionCache(String(eventId));
+          }
+
+          // Dispatch event for real-time updates
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("unite:requests-changed", { 
+                detail: { 
+                  requestId,
+                  action: "accept",
+                  forceRefresh: true,
+                } 
+              })
+            );
+          }
+
+          return v2Response;
+        } catch (v2Error: any) {
+          console.error("[CampaignPage] V2 accept action failed:", v2Error);
+          throw v2Error;
+        }
+      }
+
       // Centralized action helper handles retries only for network/5xx and avoids replays on 4xx.
       const resp = await performRequestAction(requestId, "accept");
 
@@ -1413,6 +1598,29 @@ export default function CampaignPage() {
     }
 
     try {
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled) {
+        try {
+          const v2Response = await executeActionV2(requestId, 'confirm', {});
+          
+          // Refresh v2.0 data
+          await v2RequestData.refresh();
+          
+          // Clear permission cache
+          const eventId = reqObj?.Event_ID || reqObj?.eventId || reqObj?.event?.Event_ID || reqObj?.event?.EventId;
+          if (eventId) {
+            clearPermissionCache(String(eventId));
+          } else {
+            clearPermissionCache();
+          }
+
+          return v2Response;
+        } catch (v2Error: any) {
+          console.error("[CampaignPage] V2 confirm action failed:", v2Error);
+          throw v2Error;
+        }
+      }
+
       const token =
         localStorage.getItem("unite_token") ||
         sessionStorage.getItem("unite_token");
@@ -1474,6 +1682,46 @@ export default function CampaignPage() {
     }
 
     try {
+      // V2.0: Use executeActionV2 when enabled
+      console.log(`[handleRejectEvent] isV2Enabled = ${isV2Enabled}, requestId = ${requestId}`);
+      
+      if (isV2Enabled) {
+        console.log(`[handleRejectEvent] Using V2.0 API for reject action`);
+        try {
+          const v2Response = await executeActionV2(requestId, 'reject', { note });
+          
+          // Refresh v2.0 data
+          await v2RequestData.refresh();
+          
+          // Clear permission cache
+          const eventId = reqObj?.Event_ID || reqObj?.eventId || reqObj?.event?.Event_ID || reqObj?.event?.EventId;
+          if (eventId) {
+            clearPermissionCache(String(eventId));
+          } else {
+            clearPermissionCache();
+          }
+
+          // Dispatch event for real-time updates
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("unite:requests-changed", { 
+                detail: { 
+                  requestId,
+                  action: "reject",
+                  forceRefresh: true,
+                } 
+              })
+            );
+          }
+
+          return v2Response;
+        } catch (v2Error: any) {
+          console.error("[CampaignPage] V2 reject action failed:", v2Error);
+          throw v2Error;
+        }
+      }
+
+      console.log(`[handleRejectEvent] V2 not enabled or failed, using V1.0 API`);
       const token =
         localStorage.getItem("unite_token") ||
         sessionStorage.getItem("unite_token");
@@ -1557,6 +1805,29 @@ export default function CampaignPage() {
     }
 
     try {
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled) {
+        try {
+          const v2Response = await executeActionV2(requestId, 'cancel', {});
+          
+          // Refresh v2.0 data
+          await v2RequestData.refresh();
+          
+          // Clear permission cache
+          const eventId = reqObj?.Event_ID || reqObj?.eventId || reqObj?.event?.Event_ID || reqObj?.event?.EventId;
+          if (eventId) {
+            clearPermissionCache(String(eventId));
+          } else {
+            clearPermissionCache();
+          }
+
+          return v2Response;
+        } catch (v2Error: any) {
+          console.error("[CampaignPage] V2 cancel action failed:", v2Error);
+          throw v2Error;
+        }
+      }
+
       const rawUser = localStorage.getItem("unite_user");
       const user = rawUser ? JSON.parse(rawUser) : null;
       const token =
@@ -1652,7 +1923,10 @@ export default function CampaignPage() {
   };
 
   // Memoize filtered requests (currently just requests, but ready for client-side filtering if needed)
-  const filteredRequests = useMemo(() => requests, [requests]);
+  // Ensure filteredRequests is always an array to avoid runtime errors
+  const filteredRequests = useMemo(() => {
+    return Array.isArray(requests) ? requests : [];
+  }, [requests]);
 
   // Client-side pagination calculations
   // When server returns paged results, use server's total count; otherwise
@@ -1682,7 +1956,10 @@ export default function CampaignPage() {
     <div className="min-h-screen bg-white">
       {/* Page Header */}
       <div className="px-6 pt-6 pb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Campaign</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold">Campaign</h1>
+          <VersionIndicator />
+        </div>
           <MobileNav currentUserName={currentUserName} currentUserEmail={currentUserEmail} />
       </div>
 

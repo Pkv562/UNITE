@@ -64,6 +64,15 @@ import {
   API_BASE,
 } from "./event-card.constants";
 
+// V2.0 imports
+import { useV2RequestFlow } from "@/utils/featureFlags";
+import { useRequestActionsV2 } from "@/hooks/useRequestActionsV2";
+import { 
+  canPerformRequestActionV2, 
+  canViewRequestV2,
+  getAvailableActionsV2 
+} from "@/utils/permissionUtils";
+
 interface EventCardProps {
   title: string;
   organization: string;
@@ -137,6 +146,15 @@ const EventCard: React.FC<EventCardProps> = ({
   const isReschedulingRef = React.useRef(false);
 
   const { getDistrictName, getProvinceName, locations } = useLocations();
+
+  // V2.0 Feature Flag and Actions Hook
+  const isV2Enabled = useV2RequestFlow();
+  const { 
+    executeAction: executeActionV2, 
+    loading: v2Loading, 
+    error: v2Error,
+    clearError: clearV2Error
+  } = useRequestActionsV2();
 
   // Resolve district and province names using the centralized provider
   // Enhanced to handle ObjectId references and nested location structures
@@ -743,6 +761,23 @@ const EventCard: React.FC<EventCardProps> = ({
       setRescheduleOpen(false);
       setIsRescheduling(true);
 
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled && resolvedRequestId) {
+        try {
+          await executeActionV2(resolvedRequestId, 'reschedule', { 
+            note: noteText,
+            proposedDate: rescheduledISO 
+          });
+          if (viewOpen) {
+            await openViewRequest();
+          }
+          return;
+        } catch (v2Error: any) {
+          console.error("[EventCard] V2 reschedule action failed:", v2Error);
+          throw v2Error;
+        }
+      }
+
       if (onRescheduleEvent) {
         await onRescheduleEvent(currentDateStr, rescheduledISO, noteText);
       } else {
@@ -906,6 +941,18 @@ const EventCard: React.FC<EventCardProps> = ({
       // Note: Cancel actions don't include notes in the request body
       // The note is for UI/display purposes only, not sent to backend
       // Backend validator doesn't allow note for cancel actions
+      
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled && resolvedRequestId) {
+        try {
+          await executeActionV2(resolvedRequestId, 'cancel', {});
+          setCancelOpen(false);
+          return;
+        } catch (v2Error: any) {
+          console.error("[EventCard] V2 cancel action failed:", v2Error);
+          throw v2Error;
+        }
+      }
       
       if (resolvedRequestId) {
         await svcPerformRequestAction(
@@ -1096,6 +1143,17 @@ const EventCard: React.FC<EventCardProps> = ({
       // Close modal after setting loading state
       setAcceptOpen(false);
       
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled && resolvedRequestId) {
+        try {
+          await executeActionV2(resolvedRequestId, 'accept', { note });
+          return;
+        } catch (v2Error: any) {
+          console.error("[EventCard] V2 accept action failed:", v2Error);
+          throw v2Error;
+        }
+      }
+      
       // Check if callback is provided (preferred path - direct refresh from page)
       if (onAcceptEvent) {
         try {
@@ -1142,6 +1200,17 @@ const EventCard: React.FC<EventCardProps> = ({
       // Close modal first so user can see the loading animation
       setRejectOpen(false);
       setIsRejecting(true);
+      
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled && resolvedRequestId) {
+        try {
+          await executeActionV2(resolvedRequestId, 'reject', { note });
+          return;
+        } catch (v2Error: any) {
+          console.error("[EventCard] V2 reject action failed:", v2Error);
+          throw v2Error;
+        }
+      }
       
       // Check if callback is provided (preferred path - direct refresh from page)
       if (onRejectEvent && request) {
@@ -1458,6 +1527,17 @@ const EventCard: React.FC<EventCardProps> = ({
 
     try {
       setIsConfirming(true);
+      
+      // V2.0: Use executeActionV2 when enabled
+      if (isV2Enabled && resolvedRequestId) {
+        try {
+          await executeActionV2(resolvedRequestId, 'confirm', {});
+          return;
+        } catch (v2Error: any) {
+          console.error("[EventCard] V2 confirm action failed:", v2Error);
+          throw v2Error;
+        }
+      }
       
       // Check if callback is provided (preferred path - direct refresh from page)
       if (onConfirmEvent) {
@@ -2748,6 +2828,7 @@ const EventCard: React.FC<EventCardProps> = ({
         isOpen={rescheduleOpen}
         onClose={() => setRescheduleOpen(false)}
         currentDate={date}
+        requestId={resolvedRequestId}
         onConfirm={handleRescheduleConfirm}
       />
 

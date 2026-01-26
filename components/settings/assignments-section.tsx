@@ -215,9 +215,22 @@ export default function AssignmentsSection({ isOpen }: AssignmentsSectionProps) 
               ) : (
                 filteredAssignments.map((assignment) => {
                   const user =
-                    typeof assignment.userId === "object"
+                    typeof assignment.userId === "object" && assignment.userId
                       ? assignment.userId
-                      : { _id: assignment.userId, name: "Unknown", email: "" };
+                      : { _id: assignment.userId, fullName: "Unknown", firstName: "", lastName: "", email: "" };
+                  
+                  // Extract user display name (handle various field names)
+                  const userName = 
+                    (user as any)?.fullName || 
+                    (user as any)?.name ||
+                    [
+                      (user as any)?.firstName,
+                      (user as any)?.lastName
+                    ].filter(Boolean).join(" ") ||
+                    "Unknown";
+                  
+                  const userEmail = (user as any)?.email || "";
+                  
                   const coverageArea =
                     typeof assignment.coverageAreaId === "object"
                       ? assignment.coverageAreaId
@@ -231,9 +244,9 @@ export default function AssignmentsSection({ isOpen }: AssignmentsSectionProps) 
                     >
                       <td className="px-6 py-4">
                         <div>
-                          <span className="text-sm font-medium text-gray-900">{user.name}</span>
-                          {user.email && (
-                            <p className="text-xs text-gray-500">{user.email}</p>
+                          <span className="text-sm font-medium text-gray-900">{userName}</span>
+                          {userEmail && (
+                            <p className="text-xs text-gray-500">{userEmail}</p>
                           )}
                         </div>
                       </td>

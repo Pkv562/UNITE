@@ -56,7 +56,11 @@ export default function RoleAssignmentSection({
 
   // Filter roles based on capabilities or allowed staff types
   const availableRoles = useMemo(() => {
-    let filtered = baseRoles;
+    // Always enforce authority range: authority >= 60 and authority < 100
+    let filtered = baseRoles.filter((role) => {
+      const auth = role.authority;
+      return typeof auth === 'number' && auth >= 60 && auth < 100;
+    });
 
     // Priority: Use capability-based filtering if provided
     if (requiredCapabilities && requiredCapabilities.length > 0) {
@@ -66,13 +70,6 @@ export default function RoleAssignmentSection({
           roleHasCapability(role, capability)
         );
       });
-    } else if (allowedStaffTypes && allowedStaffTypes.length > 0) {
-      // Fallback to role code filtering (backward compatibility)
-      if (allowedStaffTypes.includes("*")) {
-        filtered = baseRoles; // "*" means all roles allowed
-      } else {
-        filtered = baseRoles.filter((role) => allowedStaffTypes.includes(role.code));
-      }
     }
 
     return filtered;

@@ -316,18 +316,46 @@ export default function CoverageAssignmentModal({
           }
         }
 
-        // Find coverage area that contains ALL selected locations
-        const matchingCoverageArea = Array.from(coverageAreaMap.values()).find((ca) => {
-          const caLocationIds = ca.geographicUnits.map((unit: any) =>
-            typeof unit === "string" ? unit : unit._id
+        // Strategy: Find EXACT match first, then CLOSEST match (smallest containing coverage area)
+        // Priority 1: Exact match (coverage area has exactly the same locations)
+        const exactMatch = Array.from(coverageAreaMap.values()).find((ca) => {
+          const caLocationIds = new Set(
+            ca.geographicUnits.map((unit: any) =>
+              typeof unit === "string" ? unit : unit._id
+            )
           );
-          return locationIdsArray.every((id) => caLocationIds.includes(id));
+          // Exact match: same count and all are contained
+          return (
+            caLocationIds.size === locationIdsArray.length &&
+            locationIdsArray.every((id) => caLocationIds.has(id))
+          );
         });
 
-        if (matchingCoverageArea) {
-          setSuggestedCoverageArea(matchingCoverageArea);
+        if (exactMatch) {
+          setSuggestedCoverageArea(exactMatch);
+          setCreateNewCoverageArea(false);
+          return;
+        }
+
+        // Priority 2: Closest match (smallest coverage area that contains ALL selected locations)
+        const containingCoverageAreas = Array.from(coverageAreaMap.values())
+          .filter((ca) => {
+            const caLocationIds = ca.geographicUnits.map((unit: any) =>
+              typeof unit === "string" ? unit : unit._id
+            );
+            return locationIdsArray.every((id) => caLocationIds.includes(id));
+          })
+          .sort((a, b) => {
+            // Sort by size (ascending) - smallest coverage area that contains selection wins
+            return a.geographicUnits.length - b.geographicUnits.length;
+          });
+
+        if (containingCoverageAreas.length > 0) {
+          // Return the smallest match, but indicate that it's not exact
+          setSuggestedCoverageArea(containingCoverageAreas[0]);
           setCreateNewCoverageArea(false);
         } else {
+          // No match found - force create new
           setSuggestedCoverageArea(null);
           setCreateNewCoverageArea(true);
         }

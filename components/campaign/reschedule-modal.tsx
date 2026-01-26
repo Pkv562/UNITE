@@ -10,13 +10,20 @@ import {
 import { Button } from "@heroui/button";
 import { DatePicker } from "@heroui/date-picker";
 import { Avatar } from "@heroui/avatar";
-import { Clock } from "@gravity-ui/icons";
+import { Clock, Persons } from "@gravity-ui/icons";
 import { Textarea } from "@heroui/input";
+import { Chip } from "@heroui/chip";
+import { Spinner } from "@heroui/spinner";
+
+// V2.0 Imports
+import { useV2RequestFlow } from "@/utils/featureFlags";
+import { useValidReviewersV2 } from "@/hooks/useValidReviewersV2";
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   currentDate?: string;
+  requestId?: string;
   onConfirm: (
     currentDate: string,
     rescheduledDateISO: string,
@@ -28,6 +35,7 @@ const RescheduleModal: React.FC<Props> = ({
   isOpen,
   onClose,
   currentDate,
+  requestId,
   onConfirm,
 }) => {
   const [rescheduledDate, setRescheduledDate] = React.useState<any>(null);
@@ -36,6 +44,13 @@ const RescheduleModal: React.FC<Props> = ({
     null,
   );
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  // V2.0 Feature Flag and Reviewers Hook
+  const isV2Enabled = useV2RequestFlow();
+  const { reviewers, loading: reviewersLoading } = useValidReviewersV2(
+    requestId || "",
+    isV2Enabled && isOpen
+  );
 
   const handleConfirm = async () => {
     setValidationError(null);
@@ -138,6 +153,45 @@ const RescheduleModal: React.FC<Props> = ({
                 onChange={(e) => setNote(e.target.value)}
               />
             </div>
+
+            {/* V2.0 Valid Reviewers - Show who will respond to this reschedule */}
+            {isV2Enabled && reviewers && reviewers.length > 0 && (
+              <div className="border-t pt-3 mt-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Persons className="w-4 h-4" />
+                  <label className="text-xs font-semibold">
+                    Will Respond To Reschedule
+                  </label>
+                </div>
+                {reviewersLoading ? (
+                  <div className="flex items-center justify-center py-2">
+                    <Spinner size="sm" />
+                  </div>
+                ) : (
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {reviewers.slice(0, 3).map((reviewer) => (
+                      <div
+                        key={reviewer._id}
+                        className="flex items-center justify-between p-1.5 rounded border border-default-200 bg-default-50 text-xs"
+                      >
+                        <span className="truncate">{reviewer.fullName}</span>
+                        {reviewer.organizationType && (
+                          <Chip size="sm" variant="flat">
+                            {reviewer.organizationType}
+                          </Chip>
+                        )}
+                      </div>
+                    ))}
+                    {reviewers.length > 3 && (
+                      <p className="text-xs text-default-500 italic">
+                        +{reviewers.length - 3} more reviewers
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {validationError ? (
               <div className="text-sm text-danger">{validationError}</div>
             ) : null}
