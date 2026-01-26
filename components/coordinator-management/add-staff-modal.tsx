@@ -529,8 +529,8 @@ export default function AddStaffModal({
                       setSelectedRoleId(id);
                       setRoleError("");
                     }}
-                    allowedStaffTypes={allowedStaffTypes.length > 0 ? allowedStaffTypes : undefined}
                     requiredCapabilities={undefined}
+                    useAssignableRoles={false}
                     isRequired
                     error={roleError}
                   />
