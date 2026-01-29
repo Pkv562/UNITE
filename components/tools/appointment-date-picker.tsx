@@ -138,9 +138,7 @@ export default function AppointmentDatePicker({ value, onChange }: AppointmentDa
   };
 
   let isDateUnavailable = (date: DateValue) => {
-    // block weekends only when weekends are not allowed by settings
-    if (!allowWeekendEvents && isWeekend(date, locale)) return true;
-
+    // Check specific blocked weekdays first (more granular control)
     const dow = getDayOfWeek(date, locale); // 0..6
     if (blockedWeekdays.includes(dow)) return true;
 
