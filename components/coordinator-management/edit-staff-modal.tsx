@@ -211,8 +211,14 @@ export default function EditStaffModal({
         middleName: middleName || undefined,
         lastName,
         phoneNumber: phoneNumber || undefined,
-        organizationIds: selectedOrganizations,
       };
+
+      // Only include organizationIds if it has actually changed
+      const originalOrgIds = staff?.organizations?.map(org => org.id) || [];
+      const orgsChanged = JSON.stringify(selectedOrganizations.sort()) !== JSON.stringify(originalOrgIds.sort());
+      if (orgsChanged) {
+        updateData.organizationIds = selectedOrganizations;
+      }
 
       // Include password if provided
       if (newPassword) {
