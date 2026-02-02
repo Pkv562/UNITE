@@ -1,317 +1,573 @@
 "use client";
-
 import React from "react";
-import { useRouter } from "next/navigation"; // Production Import
+import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/layout/navbar";
-
-// Production HeroUI Imports for Page Content
 import { Button } from "@heroui/button";
 import { Card, CardHeader, CardBody, CardFooter } from "@heroui/card";
 import { Chip } from "@heroui/chip";
 import { Divider } from "@heroui/divider";
-
-import { Heart, Activity, CalendarClock, Building2, BellRing, ShieldCheck, Users, ArrowRight, ChevronRight, MapPin, Phone, Mail } from "lucide-react";
+import { 
+  Heart, 
+  Activity, 
+  CalendarClock, 
+  Building2, 
+  BellRing, 
+  ShieldCheck, 
+  Users, 
+  ArrowRight, 
+  MapPin, 
+  Phone, 
+  Mail,
+  Droplet,
+  Target,
+  Zap,
+  Award,
+  TrendingUp,
+  Globe
+} from "lucide-react";
 
 // --- Data Configuration ---
-
 interface FeatureItem {
   title: string;
   description: string;
   icon: React.ElementType;
-  color: "danger" | "primary" | "success" | "warning" | "secondary" | "default";
+  gradient: string;
 }
 
 const FEATURES: FeatureItem[] = [
-  { title: "Real-Time Inventory", description: "Live dashboards showing blood supply by type, volume, and location. Instant visibility prevents critical shortages.", icon: Activity, color: "danger" },
-  { title: "Smart Scheduling", description: "Secure portal for donors to book appointments and track donation history with automated eligibility reminders.", icon: CalendarClock, color: "primary" },
-  { title: "Inter-Hospital Exchange", description: "Emergency requisition board allowing hospitals to request and share units instantly with audit trails.", icon: Building2, color: "success" },
-  { title: "Automated Alerts", description: "Configurable notifications for low stock, expiring units, and 'Code Red' events sent to key personnel.", icon: BellRing, color: "warning" },
-  { title: "Event Management", description: "Tools to organize blood drives, including venue assignment, capacity limits, and attendance tracking.", icon: Users, color: "secondary" },
-  { title: "Secure & Compliant", description: "Role-based access controls and encryption fully aligned with Data Privacy Act and DOH standards.", icon: ShieldCheck, color: "default" },
+  { 
+    title: "Real-Time Inventory", 
+    description: "Live blood supply tracking across all partner facilities with predictive analytics for shortage prevention.", 
+    icon: Activity, 
+    gradient: "from-red-500 to-rose-600" 
+  },
+  { 
+    title: "Smart Scheduling", 
+    description: "Intelligent appointment system that maximizes donor convenience and operational efficiency.", 
+    icon: CalendarClock, 
+    gradient: "from-blue-500 to-indigo-600" 
+  },
+  { 
+    title: "Hospital Network", 
+    description: "Seamless inter-facility blood sharing with emergency protocols and real-time coordination.", 
+    icon: Building2, 
+    gradient: "from-emerald-500 to-teal-600" 
+  },
+  { 
+    title: "Emergency Alerts", 
+    description: "Multi-channel notification system for critical shortages and Code Red situations.", 
+    icon: BellRing, 
+    gradient: "from-amber-500 to-orange-600" 
+  },
+  { 
+    title: "Community Drives", 
+    description: "End-to-end blood drive management from planning to post-event analytics.", 
+    icon: Users, 
+    gradient: "from-purple-500 to-violet-600" 
+  },
+  { 
+    title: "Data Security", 
+    description: "Bank-grade encryption with full DOH compliance and comprehensive audit trails.", 
+    icon: ShieldCheck, 
+    gradient: "from-slate-600 to-slate-700" 
+  },
 ];
 
-const FeatureCard: React.FC<FeatureItem> = ({ title, description, icon: Icon, color }) => {
-    const colorMap = {
-      danger: "text-red-600 bg-red-50",
-      primary: "text-blue-600 bg-blue-50",
-      success: "text-emerald-600 bg-emerald-50",
-      warning: "text-amber-600 bg-amber-50",
-      secondary: "text-purple-600 bg-purple-50",
-      default: "text-slate-600 bg-slate-100",
-    };
-    const style = colorMap[color];
-  
-    return (
-      <Card className="border-none shadow-md hover:shadow-xl transition-shadow duration-300 overflow-hidden h-full">
-        <CardHeader className="flex gap-4 items-center pb-2">
-          <div className={`p-3 rounded-xl ${style}`}>
-            <Icon className="w-6 h-6" />
-          </div>
-          <div className="flex flex-col">
-            <p className="text-lg font-bold text-slate-900">{title}</p>
-          </div>
-        </CardHeader>
-        <CardBody className="pt-2">
-          <p className="text-slate-500 text-sm leading-relaxed">{description}</p>
-        </CardBody>
-      </Card>
-    );
+const IMPACT_STATS = [
+  { value: "24/7", label: "System Uptime", icon: Zap },
+  { value: "100%", label: "DOH Compliant", icon: Award },
+  { value: "<2min", label: "Avg Response", icon: TrendingUp },
+  { value: "6+", label: "Partner Hospitals", icon: Globe },
+];
+
+const TIMELINE = [
+  { 
+    year: "2023", 
+    quarter: "Q4",
+    title: "Discovery Phase", 
+    description: "Deep collaboration with BMC staff to map workflows and identify critical pain points in blood management." 
+  },
+  { 
+    year: "2024", 
+    quarter: "Q2",
+    title: "Alpha Launch", 
+    description: "Deployed core inventory management system with real-time sync across three pilot facilities." 
+  },
+  { 
+    year: "2024", 
+    quarter: "Q4",
+    title: "Beta Expansion", 
+    description: "Added donor portal, mobile app, and emergency requisition features based on frontline feedback." 
+  },
+  { 
+    year: "2025", 
+    quarter: "Q1",
+    title: "Regional Scale", 
+    description: "Expanding to full Bicol network with LGU partnerships and community blood drive integration." 
+  },
+];
+
+const VALUES = [
+  { 
+    title: "Life-Centered Design", 
+    description: "Every feature is built to save time in emergencies and prevent critical shortages.",
+    icon: Heart
+  },
+  { 
+    title: "Evidence-Based", 
+    description: "Decisions driven by real hospital data, not assumptions. We measure what matters.",
+    icon: Target
+  },
+  { 
+    title: "Radical Transparency", 
+    description: "Open data sharing, clear audit trails, and accessible reporting for all stakeholders.",
+    icon: Globe
+  },
+];
+
+const FeatureCard: React.FC<FeatureItem> = ({ title, description, icon: Icon, gradient }) => {
+  return (
+    <Card className="group border border-slate-200/60 shadow-sm hover:shadow-2xl hover:border-slate-300 transition-all duration-500 overflow-hidden bg-white relative">
+      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-500`} />
+      <CardBody className="p-6 relative z-10">
+        <div className={`inline-flex p-3 rounded-2xl bg-gradient-to-br ${gradient} mb-4 shadow-lg group-hover:scale-110 transition-transform duration-500`}>
+          <Icon className="w-6 h-6 text-white" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-900 mb-3 group-hover:text-red-700 transition-colors duration-300">
+          {title}
+        </h3>
+        <p className="text-slate-600 leading-relaxed text-sm">
+          {description}
+        </p>
+      </CardBody>
+    </Card>
+  );
 };
 
-
 export default function AboutPage() {
-    const router = useRouter(); 
+  const router = useRouter();
 
-    // Helper for smooth scrolling to sections
-    const scrollToMission = () => {
-        document.getElementById('mission')?.scrollIntoView({ behavior: 'smooth' });
-    };
+  return (
+    <div className="min-h-screen bg-white font-sans text-slate-900">
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap');
+        
+        body {
+          font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        h1, h2, h3, .heading-font {
+          font-family: 'Fraunces', Georgia, serif;
+        }
 
-    return (
-        <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
-            {/* Reusable Navbar */}
-            <Navbar /> 
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
 
-            {/* --- Hero Section (pt-24 pushes content below fixed navbar) --- */}
-            <section className="relative pt-32 pb-16 md:pt-40 md:pb-24 overflow-hidden bg-white">
-                <div className="max-w-7xl mx-auto px-6 lg:px-8 relative z-10">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-                        <div className="space-y-8">
-                            <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-slate-900 leading-[1.1]">
-                                Unifying Neighborhoods In <span className="text-red-600">Transfusion Ecosystem</span>
-                            </h1>
-                            <p className="text-lg md:text-xl text-slate-500 max-w-xl leading-relaxed">
-                                Bridging the gap between Bicol Medical Center, local hospitals, and lifesavers like you. A centralized hub for smarter blood management.
-                            </p>
-                            <div className="flex flex-col sm:flex-row gap-4 pt-2">
-                                <Button 
-                                    size="lg" 
-                                    variant="shadow" 
-                                    color="danger"
-                                    endContent={<ArrowRight size={18} />}
-                                    onPress={() => router.push('/auth/signup')}
-                                >
-                                    Get Started
-                                </Button>
-                                <Button 
-                                    size="lg" 
-                                    variant="bordered"
-                                    color="danger"
-                                    onPress={scrollToMission}
-                                >
-                                    Learn More
-                                </Button>
-                            </div>
-                        </div>
+        @keyframes pulse-slow {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.6;
+          }
+        }
 
-                        {/* Abstract Visual Placeholder */}
-                        <div className="relative h-full min-h-[400px] flex items-center justify-center">
-                             <div className="absolute inset-0 bg-gradient-to-tr from-red-50 to-white rounded-full opacity-60 blur-3xl" />
-                             <Card className="w-full max-w-md bg-white/80 backdrop-blur-sm shadow-xl border border-slate-100 z-20">
-                               <CardBody className="p-6 gap-6">
-                                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                                      <div className="flex items-center gap-3">
-                                          <div className="p-2 bg-red-100 rounded-lg text-red-600">
-                                              <Activity size={24} />
-                                          </div>
-                                          <div>
-                                              <p className="text-sm font-semibold text-slate-900">Inventory Status</p>
-                                              <p className="text-xs text-slate-500">Bicol Medical Center</p>
-                                          </div>
-                                      </div>
-                                      <Chip size="sm" color="success">NORMAL</Chip>
-                                  </div>
-                                  <div className="space-y-5">
-                                      {/* Inventory Bars Placeholder */}
-                                      <div className="flex justify-between items-center"><span className="text-sm font-medium">Type A+</span><div className="w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-red-500 w-[80%] rounded-full"></div></div></div>
-                                      <div className="flex justify-between items-center"><span className="text-sm font-medium">Type O+</span><div className="w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-amber-500 w-[45%] rounded-full"></div></div></div>
-                                      <div className="flex justify-between items-center"><span className="text-sm font-medium">Type B-</span><div className="w-32 h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-red-700 w-[20%] rounded-full"></div></div></div>
-                                  </div>
-                                  <Button size="md" className="w-full mt-4" variant="solid" color="default" onPress={() => router.push('/dashboard')}>
-                                      View Full Dashboard
-                                  </Button>
-                               </CardBody>
-                             </Card>
-                        </div>
-                    </div>
-                </div>
-            </section>
+        .animate-fade-in-up {
+          animation: fadeInUp 0.8s ease-out forwards;
+        }
 
-            {/* --- Mission Statement --- */}
-            <section id="mission" className="bg-slate-900 py-24 px-6">
-                <div className="max-w-4xl mx-auto text-center space-y-8">
-                    <h2 className="text-3xl font-bold text-white">Our Mission</h2>
-                    <Divider className="border-slate-700 w-24 mx-auto" />
-                    <p className="text-2xl md:text-3xl text-slate-300 font-light leading-relaxed italic">
-                        "To build a resilient, technology-driven blood transfusion network that ensures every patient in the Bicol region has timely access to safe blood products."
-                    </p>
-                </div>
-            </section>
+        .animate-pulse-slow {
+          animation: pulse-slow 3s ease-in-out infinite;
+        }
 
-            {/* --- Features Grid --- */}
-            <section className="py-24 bg-slate-50 px-6">
-                <div className="max-w-7xl mx-auto">
-                    <div className="text-center mb-16 space-y-4">
-                        <h2 className="text-red-600 font-bold uppercase tracking-wider text-sm">Core Capabilities</h2>
-                        <h3 className="text-3xl md:text-4xl font-bold text-slate-900">Technology that Saves Lives</h3>
-                        <p className="text-slate-500 max-w-2xl mx-auto text-lg">
-                            UNITE integrates critical blood banking functions into one secure, accessible cloud platform.
-                        </p>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {FEATURES.map((feature, index) => (<FeatureCard key={index} {...feature} />))}
-                    </div>
-                </div>
-            </section>
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+        .stagger-4 { animation-delay: 0.4s; }
+      `}</style>
 
-             {/* --- Stakeholders & Stats (Re-adding this section for completeness) --- */}
-            <section className="py-24 bg-white px-6">
-                <div className="max-w-7xl mx-auto">
-                <div className="lg:grid lg:grid-cols-12 lg:gap-16 items-start">
-                    
-                    {/* Left Content */}
-                    <div className="lg:col-span-7 space-y-10 mb-12 lg:mb-0">
-                    <div>
-                        <h2 className="text-3xl font-bold text-slate-900 mb-4">Empowering the Ecosystem</h2>
-                        <p className="text-slate-600 text-lg leading-relaxed">
-                            We don't just connect data; we connect people. UNITE serves as the digital bridge between institutions and the community.
-                        </p>
-                    </div>
-                    
-                    <div className="space-y-8">
-                        {[
-                        { title: "Bicol Medical Center & Hospitals", desc: "Streamline inventory and reduce wastage through inter-hospital transfers." },
-                        { title: "Health Workers & Coordinators", desc: "Simplify blood drive organization with automated reporting logs." },
-                        { title: "Individual Donors", desc: "Experience a hassle-free donation process with online booking and history tracking." }
-                        ].map((item, idx) => (
-                        <div key={idx} className="flex gap-5">
-                            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-700 font-bold text-lg border border-red-200">
-                                {idx + 1}
-                            </div>
-                            <div>
-                                <h4 className="text-xl font-bold text-slate-900 mb-1">{item.title}</h4>
-                                <p className="text-slate-500">{item.desc}</p>
-                            </div>
-                        </div>
-                        ))}
-                    </div>
-                    </div>
+      <Navbar />
 
-                    {/* Right Stats Card */}
-                    <div className="lg:col-span-5">
-                    <Card className="bg-slate-50 border border-slate-200 shadow-2xl relative overflow-hidden">
-                        <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-red-500 rounded-full opacity-10 blur-xl"></div>
-                        <CardHeader className="pb-0 pt-8 px-8">
-                            <h3 className="text-xl font-bold text-slate-800">System Impact</h3>
-                        </CardHeader>
-                        <CardBody className="grid grid-cols-2 gap-4 p-8">
-                            {[
-                                { val: "24/7", label: "Availability", color: "text-red-600" },
-                                { val: "100%", label: "DOH Compliant", color: "text-blue-600" },
-                                { val: "Real-Time", label: "Data Sync", color: "text-emerald-600" },
-                                { val: "AES-256", label: "Encryption", color: "text-purple-600" },
-                            ].map((stat, i) => (
-                                <div key={i} className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 text-center hover:shadow-md transition-shadow">
-                                    <p className={`text-3xl font-extrabold ${stat.color}`}>{stat.val}</p>
-                                    <p className="text-xs text-slate-400 font-bold uppercase mt-2 tracking-wide">{stat.label}</p>
-                                </div>
-                            ))}
-                        </CardBody>
-                        <CardFooter className="px-8 pb-8 pt-0">
-                            <Button 
-                                as="a" 
-                                href="#" 
-                                fullWidth
-                                color="danger" 
-                                variant="flat"
-                                endContent={<ChevronRight size={16} />}
-                                onPress={() => console.log('View Reports Clicked')}
-                            >
-                                View Public Reports
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                    </div>
-                </div>
-                </div>
-            </section>
-
-            {/* --- CTA --- */}
-            <section className="py-24 bg-red-700 px-6 relative overflow-hidden">
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                <div className="max-w-4xl mx-auto text-center space-y-10 relative z-10">
-                    <h2 className="text-3xl md:text-5xl font-bold text-white tracking-tight">Ready to make a difference?</h2>
-                    <p className="text-red-100 text-xl max-w-2xl mx-auto">
-                        Join the UNITE network today.
-                    </p>
-                    <div className="flex flex-col sm:flex-row gap-5 justify-center">
-                        <Button 
-                          size="lg" 
-                          className="bg-white text-red-700 font-bold shadow-xl hover:bg-slate-100"
-                          onPress={() => router.push('/auth/signup')}
-                        >
-                            Register as Donor
-                        </Button>
-                        <Button 
-                          size="lg" 
-                          variant="bordered" 
-                          className="text-white border-white font-bold hover:bg-white/10"
-                          onPress={() => router.push('/auth/signin')}
-                        >
-                            Partner with Us
-                        </Button>
-                    </div>
-                </div>
-            </section>
-
-            {/* --- Footer (Using standard HTML structure and Lucide icons) --- */}
-            <footer className="bg-slate-900 text-slate-300">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-                        <div className="col-span-1 md:col-span-2">
-                            <div className="flex items-center gap-2 mb-4">
-                                <Heart className="h-6 w-6 text-red-500 fill-current" />
-                                <span className="font-bold text-xl text-white">UNITE</span>
-                            </div>
-                            <p className="text-sm text-slate-400 mb-4 max-w-sm">
-                                Unifying Neighborhoods In Transfusion Ecosystem. A project dedicated to modernizing blood banking in the Bicol Region through accessible technology.
-                            </p>
-                        </div>
-                        
-                        <div>
-                            <h3 className="text-white font-semibold mb-4">Quick Links</h3>
-                            <ul className="space-y-2 text-sm">
-                                <li><a href="/about" className="hover:text-white transition-colors">About Us</a></li>
-                                <li><a href="/calendar" className="hover:text-white transition-colors">Find a Blood Drive</a></li>
-                                <li><button onClick={() => router.push('/auth/signin')} className="hover:text-white transition-colors text-left">Hospital Login</button></li>
-                                <li><a href="#" className="hover:text-white transition-colors">Privacy Policy</a></li>
-                            </ul>
-                        </div>
-
-                        <div>
-                            <h3 className="text-white font-semibold mb-4">Contact</h3>
-                            <ul className="space-y-3 text-sm">
-                                <li className="flex items-start gap-3">
-                                <MapPin size={18} className="text-red-500 mt-0.5" />
-                                <span>Bicol Medical Center,<br/>Naga City, Camarines Sur</span>
-                                </li>
-                                <li className="flex items-center gap-3">
-                                <Phone size={18} className="text-red-500" />
-                                <span>(054) 472-XXXX</span>
-                                </li>
-                                <li className="flex items-center gap-3">
-                                <Mail size={18} className="text-red-500" />
-                                <span>support@unite-project.ph</span>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div className="border-t border-slate-800 mt-12 pt-8 text-sm text-center text-slate-500">
-                        &copy; {new Date().getFullYear()} UNITE Project. All rights reserved.
-                    </div>
-                </div>
-            </footer>
-
+      {/* Hero Section */}
+      <section className="relative pt-32 pb-20 md:pt-40 md:pb-32 overflow-hidden bg-gradient-to-b from-red-50/30 via-white to-white">
+        {/* Background Elements */}
+        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-red-100/20 rounded-full blur-3xl -z-10" />
+        <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-blue-100/20 rounded-full blur-3xl -z-10" />
+        
+        <div className="max-w-7xl mx-auto px-6 lg:px-8 relative z-10">
+          <div className="max-w-4xl mx-auto text-center space-y-8">
+            <div className="inline-flex items-center gap-2 bg-red-100 text-red-700 px-4 py-2 rounded-full text-sm font-semibold animate-fade-in-up opacity-0">
+              <Droplet className="w-4 h-4" />
+              Bicol's Blood Banking Revolution
+            </div>
+            
+            <h1 className="text-5xl md:text-7xl font-black tracking-tight text-slate-900 leading-[1.1] animate-fade-in-up opacity-0 stagger-1">
+              Technology That{" "}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-rose-600">
+                Saves Lives
+              </span>
+            </h1>
+            
+            <p className="text-xl md:text-2xl text-slate-600 max-w-3xl mx-auto leading-relaxed font-medium animate-fade-in-up opacity-0 stagger-2">
+              UNITE connects Bicol Medical Center, partner hospitals, and community donors into one intelligent ecosystem—ensuring the right blood reaches the right patient at the right time.
+            </p>
+            
+            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4 animate-fade-in-up opacity-0 stagger-3">
+              <Button 
+                size="lg" 
+                className="bg-gradient-to-r from-red-600 to-rose-600 text-white font-bold shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-300"
+                endContent={<ArrowRight size={20} />}
+                onPress={() => router.push('/auth/signup')}
+              >
+                Join as Donor
+              </Button>
+              <Button 
+                size="lg" 
+                variant="bordered"
+                className="border-2 border-slate-900 text-slate-900 font-bold hover:bg-slate-900 hover:text-white transition-all duration-300"
+                onPress={() => router.push('/auth/signin')}
+              >
+                Hospital Portal
+              </Button>
+            </div>
+          </div>
         </div>
-    );
+      </section>
+
+      {/* Mission Statement */}
+      <section className="py-24 bg-slate-900 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-5">
+          <div className="absolute top-0 left-1/4 w-96 h-96 bg-red-500 rounded-full blur-3xl" />
+          <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-blue-500 rounded-full blur-3xl" />
+        </div>
+        
+        <div className="max-w-5xl mx-auto px-6 relative z-10">
+          <div className="text-center space-y-8">
+            <div className="inline-flex items-center gap-3 mb-4">
+              <div className="h-px w-12 bg-red-500" />
+              <span className="text-red-400 font-bold uppercase tracking-wider text-sm">Our Mission</span>
+              <div className="h-px w-12 bg-red-500" />
+            </div>
+            
+            <blockquote className="text-3xl md:text-4xl text-white font-bold leading-relaxed italic">
+              "To eliminate preventable deaths from blood shortages by building the Philippines' most reliable, transparent, and accessible blood management network."
+            </blockquote>
+            
+            <div className="flex flex-wrap justify-center gap-3 pt-6">
+              {["Zero Waste", "Maximum Access", "Full Transparency"].map((value) => (
+                <Chip 
+                  key={value} 
+                  className="bg-white/10 text-white border border-white/20 backdrop-blur-sm font-medium px-4 py-2"
+                  variant="flat"
+                >
+                  {value}
+                </Chip>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Core Values */}
+      <section className="py-24 bg-gradient-to-b from-white to-slate-50">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-4">
+              Built on Principles That Matter
+            </h2>
+            <p className="text-xl text-slate-600 max-w-2xl mx-auto">
+              Every decision we make is guided by these core values
+            </p>
+          </div>
+          
+          <div className="grid md:grid-cols-3 gap-8">
+            {VALUES.map((value, idx) => (
+              <Card 
+                key={idx} 
+                className="border border-slate-200 shadow-lg hover:shadow-2xl transition-all duration-500 group bg-white overflow-hidden"
+              >
+                <CardBody className="p-8 relative">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-red-100 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-full blur-2xl" />
+                  <div className="relative z-10">
+                    <div className="inline-flex p-4 rounded-2xl bg-gradient-to-br from-red-50 to-rose-50 mb-6 group-hover:scale-110 transition-transform duration-500">
+                      <value.icon className="w-8 h-8 text-red-600" />
+                    </div>
+                    <h3 className="text-2xl font-bold text-slate-900 mb-4">
+                      {value.title}
+                    </h3>
+                    <p className="text-slate-600 leading-relaxed">
+                      {value.description}
+                    </p>
+                  </div>
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Journey Timeline */}
+      <section className="py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="grid lg:grid-cols-12 gap-12 items-start">
+            <div className="lg:col-span-5 sticky top-32">
+              <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6">
+                Our Journey
+              </h2>
+              <p className="text-xl text-slate-600 leading-relaxed mb-8">
+                From listening sessions with hospital staff to a regional platform serving thousands—built step by step with frontline feedback.
+              </p>
+              <div className="flex gap-4">
+                <div className="text-center">
+                  <div className="text-4xl font-black text-red-600">2023</div>
+                  <div className="text-sm text-slate-500 font-medium">Started</div>
+                </div>
+                <div className="flex items-center">
+                  <ArrowRight className="text-slate-300" />
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-black text-red-600">2025</div>
+                  <div className="text-sm text-slate-500 font-medium">Today</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="lg:col-span-7 space-y-8">
+              {TIMELINE.map((item, idx) => (
+                <div 
+                  key={idx} 
+                  className="flex gap-6 group"
+                >
+                  <div className="flex flex-col items-center">
+                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-600 to-rose-600 flex items-center justify-center text-white font-black text-sm shadow-lg group-hover:scale-110 transition-transform duration-300">
+                      {item.quarter}
+                    </div>
+                    {idx < TIMELINE.length - 1 && (
+                      <div className="w-0.5 h-full bg-gradient-to-b from-slate-200 to-transparent mt-4" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 pb-12">
+                    <div className="text-sm font-bold text-red-600 mb-2">{item.year}</div>
+                    <h3 className="text-2xl font-bold text-slate-900 mb-3 group-hover:text-red-600 transition-colors duration-300">
+                      {item.title}
+                    </h3>
+                    <p className="text-slate-600 leading-relaxed">
+                      {item.description}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Grid */}
+      <section className="py-24 bg-gradient-to-b from-slate-50 to-white">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <div className="inline-flex items-center gap-3 mb-4">
+              <div className="h-px w-12 bg-red-500" />
+              <span className="text-red-600 font-bold uppercase tracking-wider text-sm">Platform Capabilities</span>
+              <div className="h-px w-12 bg-red-500" />
+            </div>
+            <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6">
+              Six Pillars of Modern Blood Banking
+            </h2>
+            <p className="text-xl text-slate-600 max-w-3xl mx-auto">
+              Every feature designed to reduce friction, prevent waste, and save lives in emergencies
+            </p>
+          </div>
+          
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {FEATURES.map((feature, idx) => (
+              <FeatureCard key={idx} {...feature} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Impact Stats */}
+      <section className="py-24 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-red-500 rounded-full blur-3xl animate-pulse-slow" />
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500 rounded-full blur-3xl animate-pulse-slow" style={{ animationDelay: '1.5s' }} />
+        </div>
+        
+        <div className="max-w-7xl mx-auto px-6 relative z-10">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
+              Built for Reliability
+            </h2>
+            <p className="text-xl text-slate-300">
+              When lives are on the line, performance isn't optional
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
+            {IMPACT_STATS.map((stat, idx) => (
+              <div 
+                key={idx} 
+                className="text-center group"
+              >
+                <div className="mb-6 flex justify-center">
+                  <div className="p-4 rounded-2xl bg-white/10 backdrop-blur-sm group-hover:bg-white/20 transition-all duration-300 group-hover:scale-110">
+                    <stat.icon className="w-8 h-8 text-red-400" />
+                  </div>
+                </div>
+                <div className="text-5xl md:text-6xl font-black text-white mb-3 group-hover:text-red-400 transition-colors duration-300">
+                  {stat.value}
+                </div>
+                <div className="text-slate-400 font-semibold uppercase tracking-wider text-sm">
+                  {stat.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-32 bg-gradient-to-br from-red-600 via-rose-600 to-red-700 relative overflow-hidden">
+        <div className="absolute inset-0">
+          <div className="absolute top-0 left-0 w-full h-full opacity-10">
+            <div className="absolute top-1/4 right-1/4 w-96 h-96 bg-white rounded-full blur-3xl" />
+            <div className="absolute bottom-1/4 left-1/3 w-80 h-80 bg-white rounded-full blur-3xl" />
+          </div>
+        </div>
+        
+        <div className="max-w-4xl mx-auto px-6 text-center relative z-10">
+          <Heart className="w-20 h-20 text-white/80 mx-auto mb-8 animate-pulse-slow" />
+          <h2 className="text-4xl md:text-6xl font-black text-white mb-6 leading-tight">
+            Ready to Make a Difference?
+          </h2>
+          <p className="text-xl md:text-2xl text-red-100 mb-12 max-w-2xl mx-auto leading-relaxed">
+            Whether you're a donor, hospital, or community organizer—there's a place for you in the UNITE network.
+          </p>
+          
+          <div className="flex flex-col sm:flex-row gap-6 justify-center">
+            <Button 
+              size="lg" 
+              className="bg-white text-red-700 font-bold shadow-2xl hover:shadow-3xl hover:scale-105 transition-all duration-300 px-8 py-6 text-lg"
+              endContent={<ArrowRight size={20} />}
+              onPress={() => router.push('/auth/signup')}
+            >
+              Become a Donor
+            </Button>
+            <Button 
+              size="lg" 
+              variant="bordered" 
+              className="border-2 border-white text-white font-bold hover:bg-white hover:text-red-700 transition-all duration-300 px-8 py-6 text-lg"
+              onPress={() => router.push('/auth/signin')}
+            >
+              Partner with UNITE
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-slate-900 text-slate-300 border-t border-slate-800">
+        <div className="max-w-7xl mx-auto px-6 py-16">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
+            <div className="col-span-1 md:col-span-2">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-gradient-to-br from-red-600 to-rose-600 rounded-xl">
+                  <Heart className="h-6 w-6 text-white fill-current" />
+                </div>
+                <span className="font-black text-2xl text-white heading-font">UNITE</span>
+              </div>
+              <p className="text-slate-400 leading-relaxed max-w-md mb-6">
+                Unifying Neighborhoods In Transfusion Ecosystem—modernizing blood banking across the Bicol Region through technology, transparency, and community.
+              </p>
+              <div className="flex gap-4">
+                <Button 
+                  size="sm" 
+                  variant="flat" 
+                  className="bg-slate-800 text-slate-300 hover:bg-slate-700"
+                >
+                  Privacy Policy
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="flat" 
+                  className="bg-slate-800 text-slate-300 hover:bg-slate-700"
+                >
+                  Terms of Use
+                </Button>
+              </div>
+            </div>
+            
+            <div>
+              <h3 className="text-white font-bold mb-6 text-lg">Quick Links</h3>
+              <ul className="space-y-4">
+                {[
+                  { label: "About UNITE", href: "/about" },
+                  { label: "Find Blood Drives", href: "/calendar" },
+                  { label: "Hospital Login", action: () => router.push('/auth/signin') },
+                  { label: "Donor Portal", action: () => router.push('/auth/signup') },
+                ].map((link, idx) => (
+                  <li key={idx}>
+                    {link.href ? (
+                      <a href={link.href} className="text-slate-400 hover:text-red-400 transition-colors duration-200 flex items-center gap-2 group">
+                        <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                        {link.label}
+                      </a>
+                    ) : (
+                      <button onClick={link.action} className="text-slate-400 hover:text-red-400 transition-colors duration-200 flex items-center gap-2 group">
+                        <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                        {link.label}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            
+            <div>
+              <h3 className="text-white font-bold mb-6 text-lg">Contact Us</h3>
+              <ul className="space-y-4">
+                <li className="flex items-start gap-3">
+                  <MapPin size={20} className="text-red-500 mt-1 flex-shrink-0" />
+                  <span className="text-slate-400 leading-relaxed">
+                    Bicol Medical Center<br />
+                    Naga City, Camarines Sur<br />
+                    Philippines
+                  </span>
+                </li>
+                <li className="flex items-center gap-3">
+                  <Phone size={20} className="text-red-500 flex-shrink-0" />
+                  <span className="text-slate-400">(054) 472-XXXX</span>
+                </li>
+                <li className="flex items-center gap-3">
+                  <Mail size={20} className="text-red-500 flex-shrink-0" />
+                  <span className="text-slate-400">support@unite-ph.org</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+          
+          <div className="border-t border-slate-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+            <p className="text-slate-500 text-sm">
+              &copy; {new Date().getFullYear()} UNITE Project. All rights reserved.
+            </p>
+            <div className="flex items-center gap-2 text-slate-500 text-sm">
+              <span>Made with</span>
+              <Heart className="w-4 h-4 text-red-500 fill-current" />
+              <span>for Bicol</span>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
 }
