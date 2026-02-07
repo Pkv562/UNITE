@@ -28,6 +28,7 @@ export const EventViewModal: React.FC<EventViewModalProps> = ({
   request,
 }) => {
   const { user } = useCurrentUser(false); // Don't auto-fetch on mount, just check if logged in
+  const showPrivateFields = !!user;
   
   React.useEffect(() => {
     // logging removed
@@ -332,7 +333,7 @@ export const EventViewModal: React.FC<EventViewModalProps> = ({
               </>
             )}
 
-            {category === "Blood Drive" && (
+            {category === "Blood Drive" && showPrivateFields && (
               <div>
                 <label className="text-xs text-default-700">
                   Target donation
@@ -382,31 +383,39 @@ export const EventViewModal: React.FC<EventViewModalProps> = ({
               </>
             )}
 
-            <div>
-              <label className="text-xs text-default-700">Contact Email</label>
-              <Input
-                disabled
-                classNames={{
-                  inputWrapper: "h-10 bg-default-100",
-                  input: "text-sm",
-                }}
-                value={contactEmail}
-                variant="bordered"
-              />
-            </div>
+            {showPrivateFields && (
+              <div>
+                <label className="text-xs text-default-700">
+                  Contact Email
+                </label>
+                <Input
+                  disabled
+                  classNames={{
+                    inputWrapper: "h-10 bg-default-100",
+                    input: "text-sm",
+                  }}
+                  value={contactEmail}
+                  variant="bordered"
+                />
+              </div>
+            )}
 
-            <div>
-              <label className="text-xs text-default-700">Contact Number</label>
-              <Input
-                disabled
-                classNames={{
-                  inputWrapper: "h-10 bg-default-100",
-                  input: "text-sm",
-                }}
-                value={contactNumber}
-                variant="bordered"
-              />
-            </div>
+            {showPrivateFields && (
+              <div>
+                <label className="text-xs text-default-700">
+                  Contact Number
+                </label>
+                <Input
+                  disabled
+                  classNames={{
+                    inputWrapper: "h-10 bg-default-100",
+                    input: "text-sm",
+                  }}
+                  value={contactNumber}
+                  variant="bordered"
+                />
+              </div>
+            )}
 
             <div className="col-span-2">
               <label className="text-xs text-default-700">Description</label>

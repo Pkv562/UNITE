@@ -159,11 +159,15 @@ export const resolveEventLocations = (
 export const extractCategoryData = (
   event: any,
   detailedEvent: any | null,
-  category: string
+  category: string,
+  options?: {
+    showPrivateCounts?: boolean;
+  }
 ): {
   countType: string;
   count: string;
 } => {
+  const showPrivateCounts = options?.showPrivateCounts !== false;
   // Helper to find count values across shapes (main event or categoryData)
   // Backend returns categoryData directly on event, so check event.categoryData first
   const getVal = (keys: string[]) => {
@@ -223,8 +227,13 @@ export const extractCategoryData = (
   ]);
 
   if (category === "blood-drive" && targetDonation !== undefined) {
-    countType = "Goal Count";
-    count = `${targetDonation} u.`;
+    if (showPrivateCounts) {
+      countType = "Goal Count";
+      count = `${targetDonation} u.`;
+    } else {
+      countType = "Details";
+      count = "View event";
+    }
   } else if (category === "training" && maxParticipants !== undefined) {
     countType = "Participant Count";
     count = `${maxParticipants} no.`;
@@ -289,6 +298,9 @@ export const transformEventData = (
     getProvinceName: (id: string) => string;
     getDistrictName: (id: string) => string;
     getMunicipalityName: (id: string) => string;
+  },
+  options?: {
+    showPrivateCounts?: boolean;
   }
 ): {
   title: string;
@@ -361,7 +373,12 @@ export const transformEventData = (
   const categoryLabel = getCategoryLabel(category);
 
   // Extract category-specific data
-  const categoryData = extractCategoryData(event, detailedEvent, category);
+  const categoryData = extractCategoryData(
+    event,
+    detailedEvent,
+    category,
+    options,
+  );
 
   // Extract event title
   const title = 

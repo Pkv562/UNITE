@@ -39,6 +39,7 @@ interface CalendarToolbarProps {
   onCreateEvent?: (eventType: string, eventData: any) => void;
   showCreate?: boolean;
   showExport?: boolean;
+  showAdvanced?: boolean;
   isMobile?: boolean;
   isExporting?: boolean;
 }
@@ -50,6 +51,7 @@ export default function CalendarToolbar({
   onCreateEvent,
   showCreate = true,
   showExport = true,
+  showAdvanced = true,
   isMobile = false,
   isExporting = false,
 }: CalendarToolbarProps) {
@@ -243,7 +245,7 @@ export default function CalendarToolbar({
         </DropdownMenu>
       </Dropdown>
 
-      {!isMobile && (
+      {showAdvanced && !isMobile && (
         <Button
           className="border-default-200 bg-white font-medium text-xs"
           endContent={<ChevronDown className="w-3 h-3 sm:w-4 sm:h-4" />}
@@ -354,7 +356,7 @@ export default function CalendarToolbar({
       )}
 
       {/* Advanced Filter Modal (matches Campaign Toolbar) */}
-      {!isMobile && (
+      {showAdvanced && !isMobile && (
         <Modal
           isOpen={isAdvancedModalOpen}
           placement="center"

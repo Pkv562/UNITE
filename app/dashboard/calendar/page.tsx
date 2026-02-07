@@ -103,6 +103,7 @@ export default function CalendarPage(props: any) {
   >({});
   // Fetch current user from API
   const { user: currentUser } = useCurrentUser();
+  const isPublicView = !currentUser || pathname === "/calendar";
   const [canManageNotes, setCanManageNotes] = useState(false);
   const [notesModalDate, setNotesModalDate] = useState<string | null>(null);
   const [noteSaving, setNoteSaving] = useState(false);
@@ -1062,6 +1063,9 @@ export default function CalendarPage(props: any) {
           getProvinceName,
           getDistrictName,
           getMunicipalityName,
+        },
+        {
+          showPrivateCounts: !!currentUser,
         }
       );
 
@@ -2038,7 +2042,8 @@ export default function CalendarPage(props: any) {
           <div className="w-full lg:w-auto">
             <CalendarToolbar
               showCreate={allowCreate}
-              showExport={activeView === 'month'}
+              showExport={!isPublicView && activeView === "month"}
+              showAdvanced={!isPublicView}
               isMobile={isMobile}
               isExporting={isExportLoading}
               onAdvancedFilter={handleAdvancedFilter}
@@ -2149,6 +2154,9 @@ export default function CalendarPage(props: any) {
                               getProfileInitial={getProfileInitial}
                               getProfileColor={getProfileColor}
                               color={event.color}
+                              showDetails
+                              showCount={!isPublicView}
+                              showOwner={!isPublicView}
                             />
                           ))}
                         </div>
@@ -2242,7 +2250,10 @@ export default function CalendarPage(props: any) {
                       ) : (
                         <div className="space-y-1">
                           {day.events.map((event, eventIndex) => {
-                            const { summary } = formatEventSummary(event.raw || event);
+                            const { summary } = formatEventSummary(
+                              event.raw || event,
+                              { showBloodCount: !isPublicView },
+                            );
                             
                             return (
                               <div
