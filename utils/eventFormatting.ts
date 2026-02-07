@@ -101,7 +101,13 @@ export function isBloodDriveEvent(event: any): boolean {
  * @param event - Event object from API
  * @returns Formatted event summary and metadata
  */
-export function formatEventSummary(event: any): FormattedEventData {
+export function formatEventSummary(
+  event: any,
+  options?: {
+    showBloodCount?: boolean;
+  }
+): FormattedEventData {
+  const showBloodCount = options?.showBloodCount !== false;
   const title = (event.Event_Title || event.title || event.Title || 'Event').toString();
   const location = extractEventLocation(event);
   const eventType = (event.category || event.Category || event.type || 'Event').toString();
@@ -115,7 +121,7 @@ export function formatEventSummary(event: any): FormattedEventData {
 
   // For blood drive events, append blood target count
   const isBloodDrive = isBloodDriveEvent(event);
-  if (isBloodDrive) {
+  if (isBloodDrive && showBloodCount) {
     const bloodCount = extractBloodCount(event);
     if (bloodCount !== null) {
       summary = `${summary} - ${bloodCount}`;
@@ -126,7 +132,7 @@ export function formatEventSummary(event: any): FormattedEventData {
     summary,
     title,
     location,
-    bloodCount: isBloodDrive ? extractBloodCount(event) : null,
+    bloodCount: isBloodDrive && showBloodCount ? extractBloodCount(event) : null,
     eventType,
   };
 }
@@ -138,8 +144,14 @@ export function formatEventSummary(event: any): FormattedEventData {
  * @param maxLength - Optional max character length (CSS handles visual truncation)
  * @returns Display-ready formatted string
  */
-export function getEventDisplayText(event: any, maxLength?: number): string {
-  const formatted = formatEventSummary(event);
+export function getEventDisplayText(
+  event: any,
+  maxLength?: number,
+  options?: {
+    showBloodCount?: boolean;
+  }
+): string {
+  const formatted = formatEventSummary(event, options);
   let text = formatted.summary;
 
   if (maxLength && text.length > maxLength) {

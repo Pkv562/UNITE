@@ -30,6 +30,9 @@ export interface CalendarEventCardProps {
   countType?: string;
   count?: string;
   color?: string;
+  showDetails?: boolean;
+  showCount?: boolean;
+  showOwner?: boolean;
   
   // Event handlers
   onViewEvent?: (rawEvent: any) => void;
@@ -93,6 +96,9 @@ const CalendarEventCard: React.FC<CalendarEventCardProps> = ({
     return `hsl(${hue}deg 65% 40%)`;
   },
   color = "#3b82f6",
+  showDetails = true,
+  showCount = true,
+  showOwner = true,
 }) => {
   // Validate required props
   if (!title || !rawEvent) {
@@ -152,21 +158,23 @@ const CalendarEventCard: React.FC<CalendarEventCardProps> = ({
       </div>
 
       {/* Profile */}
-      <div className="flex items-center gap-1 mb-2">
-        <div
-          className="h-4 w-4 sm:h-6 sm:w-6 rounded-full flex-shrink-0 flex items-center justify-center"
-          style={{
-            backgroundColor: getProfileColor(ownerName),
-          }}
-        >
-          <span className="text-white text-[10px] sm:text-xs">
-            {getProfileInitial(ownerName)}
+      {showOwner && (
+        <div className="flex items-center gap-1 mb-2">
+          <div
+            className="h-4 w-4 sm:h-6 sm:w-6 rounded-full flex-shrink-0 flex items-center justify-center"
+            style={{
+              backgroundColor: getProfileColor(ownerName),
+            }}
+          >
+            <span className="text-white text-[10px] sm:text-xs">
+              {getProfileInitial(ownerName)}
+            </span>
+          </div>
+          <span className="text-[10px] sm:text-xs text-gray-600 truncate">
+            {ownerName}
           </span>
         </div>
-        <span className="text-[10px] sm:text-xs text-gray-600 truncate">
-          {ownerName}
-        </span>
-      </div>
+      )}
 
       {/* Time and Type Badges */}
       <div className="flex gap-2 mb-3">
@@ -183,57 +191,62 @@ const CalendarEventCard: React.FC<CalendarEventCardProps> = ({
         </div>
       </div>
 
-      {/* Province */}
-      <div className="mb-1">
-        <div className="text-xs font-medium text-gray-700 mb-0.5">
-          Province
-        </div>
-        <div className="text-xs text-gray-600 line-clamp-1">
-          {displayProvince}
-        </div>
-      </div>
+      {showDetails && (
+        <>
+          {/* Province */}
+          <div className="mb-1">
+            <div className="text-xs font-medium text-gray-700 mb-0.5">
+              Province
+            </div>
+            <div className="text-xs text-gray-600 line-clamp-1">
+              {displayProvince}
+            </div>
+          </div>
 
-      {/* District */}
-      <div className="mb-1">
-        <div className="text-xs font-medium text-gray-700 mb-0.5">
-          District
-        </div>
-        <div className="text-xs text-gray-600 line-clamp-1">
-          {displayDistrict}
-        </div>
-      </div>
+          {/* District */}
+          <div className="mb-1">
+            <div className="text-xs font-medium text-gray-700 mb-0.5">
+              District
+            </div>
+            <div className="text-xs text-gray-600 line-clamp-1">
+              {displayDistrict}
+            </div>
+          </div>
 
-      {/* Municipality */}
-      <div className="mb-1">
-        <div className="text-xs font-medium text-gray-700 mb-0.5">
-          Municipality
-        </div>
-        <div className="text-xs text-gray-600 line-clamp-1">
-          {displayMunicipality}
-        </div>
-      </div>
+          {/* Municipality */}
+          <div className="mb-1">
+            <div className="text-xs font-medium text-gray-700 mb-0.5">
+              Municipality
+            </div>
+            <div className="text-xs text-gray-600 line-clamp-1">
+              {displayMunicipality}
+            </div>
+          </div>
 
-      {/* Location */}
-      <div className="mb-2">
-        <div className="text-xs font-medium text-gray-700 mb-0.5">
-          Location
-        </div>
-        <div className="text-xs text-gray-600 line-clamp-2">
-          {displayLocation}
-        </div>
-      </div>
+          {/* Location */}
+          <div className="mb-2">
+            <div className="text-xs font-medium text-gray-700 mb-0.5">
+              Location
+            </div>
+            <div className="text-xs text-gray-600 line-clamp-2">
+              {displayLocation}
+            </div>
+          </div>
+        </>
+      )}
 
-      {/* Count */}
-      <div className="border-t border-gray-200 pt-1 sm:pt-2">
-        <div className="flex justify-between items-center">
-          <span className="text-xs text-gray-600">
-            {displayCountType}
-          </span>
-          <span className="text-sm sm:text-lg font-bold text-red-500">
-            {displayCount}
-          </span>
+      {showCount && (
+        <div className="border-t border-gray-200 pt-1 sm:pt-2">
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-gray-600">
+              {displayCountType}
+            </span>
+            <span className="text-sm sm:text-lg font-bold text-red-500">
+              {displayCount}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
