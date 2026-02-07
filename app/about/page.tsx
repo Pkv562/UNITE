@@ -3,9 +3,8 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/layout/navbar";
 import { Button } from "@heroui/button";
-import { Card, CardHeader, CardBody, CardFooter } from "@heroui/card";
+import { Card, CardBody } from "@heroui/card";
 import { Chip } from "@heroui/chip";
-import { Divider } from "@heroui/divider";
 import { 
   Heart, 
   Activity, 
@@ -75,9 +74,9 @@ const FEATURES: FeatureItem[] = [
 
 const IMPACT_STATS = [
   { value: "24/7", label: "System Uptime", icon: Zap },
-  { value: "100%", label: "DOH Compliant", icon: Award },
+  { value: "Quality-First", label: "Built for Trust", icon: Award },
   { value: "<2min", label: "Avg Response", icon: TrendingUp },
-  { value: "6+", label: "Partner Hospitals", icon: Globe },
+  { value: "Scalable", label: "Regional-Ready", icon: Globe },
 ];
 
 const TIMELINE = [
@@ -150,16 +149,6 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900">
       <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700;900&display=swap');
-        
-        body {
-          font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-        
-        h1, h2, h3, .heading-font {
-          font-family: 'Fraunces', Georgia, serif;
-        }
-
         @keyframes fadeInUp {
           from {
             opacity: 0;
@@ -484,7 +473,7 @@ export default function AboutPage() {
                 <div className="p-2 bg-gradient-to-br from-red-600 to-rose-600 rounded-xl">
                   <Heart className="h-6 w-6 text-white fill-current" />
                 </div>
-                <span className="font-black text-2xl text-white heading-font">UNITE</span>
+                <span className="font-black text-2xl text-white">UNITE</span>
               </div>
               <p className="text-slate-400 leading-relaxed max-w-md mb-6">
                 Unifying Neighborhoods In Transfusion Ecosystem—modernizing blood banking across the Bicol Region through technology, transparency, and community.
