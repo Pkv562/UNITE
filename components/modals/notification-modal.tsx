@@ -11,14 +11,7 @@ import {
   DropdownItem,
 } from "@heroui/dropdown";
 import { Select, SelectItem } from "@heroui/select";
-import { DateRangePicker } from "@heroui/date-picker";
-import { DateValue } from "@react-types/datepicker";
-
-// Define the RangeValue type inline
-type RangeValue<T> = {
-  start: T;
-  end: T;
-};
+import { DateRangePicker, DateRangePickerProps } from "@heroui/date-picker";
 import { today, getLocalTimeZone } from "@internationalized/date";
 import { Tabs, Tab } from "@heroui/tabs";
 import {
@@ -81,9 +74,8 @@ export default function NotificationModal({
 
   // Quick Filter states
   const [qEventType, setQEventType] = useState<string>("");
-  const [qDateRange, setQDateRange] = useState<RangeValue<DateValue> | null>(
-    null,
-  );
+  type DateRangeValue = DateRangePickerProps["value"];
+  const [qDateRange, setQDateRange] = useState<DateRangeValue>(null);
   const [dateFilterLabel, setDateFilterLabel] = useState("Today");
 
   // View Modal state
