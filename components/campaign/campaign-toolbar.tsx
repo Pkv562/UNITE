@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Input } from "@heroui/input";
-import { DatePicker, DateRangePicker } from "@heroui/date-picker";
+import { DatePicker, DateRangePicker, DateRangePickerProps } from "@heroui/date-picker";
 import { Tabs, Tab } from "@heroui/tabs";
 import { Button, ButtonGroup } from "@heroui/button";
 import {
@@ -24,8 +24,6 @@ import {
   ModalBody,
   ModalFooter,
 } from "@heroui/modal";
-import { RangeValue } from "@react-types/shared";
-import { DateValue } from "@internationalized/date";
 import { useLocations } from "../providers/locations-provider";
 import { getUserInfo } from "../../utils/getUserInfo";
 import { decodeJwt } from "../../utils/decodeJwt";
@@ -272,7 +270,8 @@ export default function CampaignToolbar({
 
   // Quick Filter States
   const [qEventType, setQEventType] = useState<string>("");
-  const [qDateRange, setQDateRange] = useState<RangeValue<DateValue> | null>(
+  type DateRangeValue = DateRangePickerProps["value"];
+  const [qDateRange, setQDateRange] = useState<DateRangeValue>(
     null,
   );
   const [qProvince, setQProvince] = useState<string>("");
@@ -302,8 +301,7 @@ export default function CampaignToolbar({
   const [advStakeholderOptions, setAdvStakeholderOptions] = useState<
     { key: string; label: string }[]
   >([]);
-  const [advDateRange, setAdvDateRange] =
-    useState<RangeValue<DateValue> | null>(null);
+  const [advDateRange, setAdvDateRange] = useState<DateRangeValue>(null);
 
   // Event type labels and descriptions
   const eventLabelsMap = {
@@ -414,7 +412,7 @@ export default function CampaignToolbar({
   // Helper to apply quick filter
   const applyQuickFilter = (
     eventType: string,
-    dateRange: RangeValue<DateValue> | null,
+    dateRange: DateRangeValue,
     province: string,
     district: string,
     municipality: string,
