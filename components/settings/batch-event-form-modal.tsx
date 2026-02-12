@@ -6,7 +6,7 @@ import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
-import { DatePicker } from "@heroui/date-picker";
+import { DatePicker } from "@heroui/react";
 import { DateValue, parseDate, getLocalTimeZone } from "@internationalized/date";
 import { useLocations } from "@/hooks/useLocations";
 
@@ -366,6 +366,7 @@ export default function BatchEventFormModal({
       onClose={handleClose}
       size="3xl"
       scrollBehavior="inside"
+      isDismissable={false}
       classNames={{
         base: "max-h-[95vh]",
         body: "overflow-y-auto max-h-[calc(95vh-80px)] py-4",

@@ -6,7 +6,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
 import { Button } from "@heroui/button";
 import { Switch } from "@heroui/switch";
 import { Input } from "@heroui/input";
-import { DatePicker } from "@heroui/date-picker";
+import { DatePicker } from "@heroui/react";
 import { DateValue } from "@react-types/datepicker";
 import { CheckboxGroup, Checkbox } from "@heroui/checkbox";
 import { Chip } from "@heroui/chip";
@@ -277,7 +277,10 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const blockedDateValues = settings.blockedDates.map((dateStr) => {
     const [year, month, day] = dateStr.split("-").map(Number);
-    return parseDate(`${year}-${month}-${day}`);
+    const y = String(year).padStart(4, "0");
+    const m = String(month).padStart(2, "0");
+    const d = String(day).padStart(2, "0");
+    return parseDate(`${y}-${m}-${d}`);
   });
 
   const renderField = (
@@ -318,6 +321,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         isOpen={isOpen}
         scrollBehavior="inside"
         size="5xl"
+        isDismissable={false}
         classNames={{
           base: "!m-0 !p-0 !w-full !h-full !max-h-full !max-w-none !rounded-none md:!rounded-xl md:!h-[85vh] md:!max-h-[900px] md:!m-auto md:!w-[90vw] md:!max-w-[1200px]",
           wrapper: "!p-0 md:!p-10",
@@ -341,6 +345,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       isOpen={isOpen}
       scrollBehavior="inside"
       size="5xl"
+      isDismissable={false}
       classNames={{
         base: "!m-0 !p-0 !w-full !h-full !max-h-full !max-w-none !rounded-none md:!rounded-xl md:!h-[85vh] md:!max-h-[900px] md:!m-auto md:!w-[90vw] md:!max-w-[1200px]",
         wrapper: "!p-0 md:!p-10",
