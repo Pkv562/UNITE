@@ -11,7 +11,7 @@ import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
-import { DatePicker } from "@heroui/date-picker";
+import { DatePicker } from "@heroui/react";
 import { Avatar } from "@heroui/avatar";
 import { Person, Droplet, Megaphone } from "@gravity-ui/icons";
 
@@ -228,6 +228,7 @@ const GenericCreateEventModal: React.FC<GenericCreateEventModalProps> = ({
       placement="center"
       scrollBehavior="inside"
       size="2xl"
+      isDismissable={false}
       onClose={onClose}
     >
       <ModalContent>
