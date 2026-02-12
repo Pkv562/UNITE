@@ -4,10 +4,10 @@ import { useState, useEffect } from "react";
 import { Switch } from "@heroui/switch";
 import { CheckboxGroup, Checkbox } from "@heroui/checkbox";
 import { Select, SelectItem } from "@heroui/select";
-import { DatePicker } from "@heroui/date-picker";
+import { DatePicker, DatePickerProps } from "@heroui/date-picker";
 import { Button } from "@heroui/button";
 import { useNotificationPreferences, NotificationPreferences } from "@/hooks/useNotificationPreferences";
-import { parseDate, CalendarDate, today, getLocalTimeZone } from "@internationalized/date";
+import { parseDate, today, getLocalTimeZone } from "@internationalized/date";
 
 // Critical notification types (cannot be disabled)
 const CRITICAL_TYPES = [
@@ -44,7 +44,9 @@ export default function NotificationSettings({ isOpen }: NotificationSettingsPro
 
   const [localPreferences, setLocalPreferences] = useState<Partial<NotificationPreferences>>({});
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [muteDate, setMuteDate] = useState<CalendarDate | null>(null);
+  type MuteDateValue = DatePickerProps["value"];
+  type MuteDate = NonNullable<MuteDateValue>;
+  const [muteDate, setMuteDate] = useState<MuteDateValue>(null);
 
   // Initialize local state when preferences load
   useEffect(() => {
@@ -62,7 +64,7 @@ export default function NotificationSettings({ isOpen }: NotificationSettingsPro
           const mutedDate = new Date(preferences.mutedUntil);
           if (!isNaN(mutedDate.getTime())) {
             const dateStr = mutedDate.toISOString().split("T")[0];
-            setMuteDate(parseDate(dateStr));
+            setMuteDate(parseDate(dateStr) as unknown as MuteDateValue);
           } else {
             setMuteDate(null);
           }
@@ -115,7 +117,7 @@ export default function NotificationSettings({ isOpen }: NotificationSettingsPro
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         await muteNotifications(tomorrow);
-        setMuteDate(parseDate(tomorrow.toISOString().split("T")[0]));
+        setMuteDate(parseDate(tomorrow.toISOString().split("T")[0]) as unknown as MuteDateValue);
       } else {
         await muteNotifications(null);
         setMuteDate(null);
@@ -127,10 +129,11 @@ export default function NotificationSettings({ isOpen }: NotificationSettingsPro
     }
   };
 
-  const handleMuteDateChange = async (date: CalendarDate | null) => {
+  const handleMuteDateChange = async (date: MuteDateValue) => {
     setMuteDate(date);
     if (date) {
-      const muteUntil = new Date(date.year, date.month - 1, date.day, 23, 59, 59);
+      const pickedDate = date as MuteDate;
+      const muteUntil = new Date(pickedDate.year, pickedDate.month - 1, pickedDate.day, 23, 59, 59);
       await muteNotifications(muteUntil);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -341,14 +344,21 @@ export default function NotificationSettings({ isOpen }: NotificationSettingsPro
                 </p>
               </div>
               <div className="w-full md:w-auto min-w-[200px]">
-                <DatePicker
-                  value={muteDate}
-                  onChange={handleMuteDateChange}
-                  minValue={today(getLocalTimeZone())}
-                  maxValue={today(getLocalTimeZone()).add({ days: 30 })}
-                  aria-label="Mute until date"
-                  isDisabled={saving}
-                />
+                {(() => {
+                  const minMuteDate = today(getLocalTimeZone()) as unknown as MuteDate;
+                  const maxMuteDate = minMuteDate.add({ days: 30 }) as unknown as MuteDate;
+
+                  return (
+                    <DatePicker
+                      value={muteDate}
+                      onChange={handleMuteDateChange}
+                      minValue={minMuteDate}
+                      maxValue={maxMuteDate}
+                      aria-label="Mute until date"
+                      isDisabled={saving}
+                    />
+                  );
+                })()}
               </div>
             </div>
           )}

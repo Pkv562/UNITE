@@ -6,8 +6,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
 import { Button } from "@heroui/button";
 import { Switch } from "@heroui/switch";
 import { Input } from "@heroui/input";
-import { DatePicker } from "@heroui/react";
-import { DateValue } from "@react-types/datepicker";
+import { DatePicker, DatePickerProps } from "@heroui/react";
 import { CheckboxGroup, Checkbox } from "@heroui/checkbox";
 import { Chip } from "@heroui/chip";
 import { ScrollShadow } from "@heroui/scroll-shadow";
@@ -179,13 +178,13 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     router.push("/");
   };
 
-  const handleBlockedDateAdd = (date: DateValue | null) => {
-    if (date) {
-      const dateStr = `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
+  type DatePickerValue = DatePickerProps["value"];
+  const handleBlockedDateAdd = (date: DatePickerValue) => {
+    if (!date) return;
+    const dateStr = `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`;
 
-      if (!settings.blockedDates.includes(dateStr)) {
-        updateSettings({ blockedDates: [...settings.blockedDates, dateStr] });
-      }
+    if (!settings.blockedDates.includes(dateStr)) {
+      updateSettings({ blockedDates: [...settings.blockedDates, dateStr] });
     }
   };
 
