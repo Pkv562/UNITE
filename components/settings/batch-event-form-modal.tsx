@@ -153,7 +153,9 @@ export default function BatchEventFormModal({
         try {
           const startDate = new Date(event.Start_Date);
           const dateStr = startDate.toISOString().split("T")[0];
-          setDate(parseDate(dateStr));
+          const parsedDate = parseDate(dateStr);
+          // Cast to the DatePicker's value type to avoid duplicate @internationalized/date instances in Vercel builds.
+          setDate(parsedDate as DatePickerValue);
           setStartTime(
             `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`
           );
