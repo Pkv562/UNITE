@@ -8,7 +8,7 @@ import {
   ModalFooter,
 } from "@heroui/modal";
 import { Button } from "@heroui/button";
-import { DatePicker } from "@heroui/date-picker";
+import { DatePicker } from "@heroui/react";
 import { Avatar } from "@heroui/avatar";
 import { Clock, Persons } from "@gravity-ui/icons";
 import { Textarea } from "@heroui/input";
@@ -110,6 +110,7 @@ const RescheduleModal: React.FC<Props> = ({
       isOpen={isOpen} 
       placement="center" 
       size="md" 
+      isDismissable={false}
       onClose={isSubmitting ? undefined : onClose}
     >
       <ModalContent>

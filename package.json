@@ -51,11 +51,11 @@
     "@heroui/system": "2.4.23",
     "@heroui/table": "2.2.27",
     "@heroui/tabs": "2.2.24",
-    "@heroui/theme": "2.4.23",
+    "@heroui/theme": "2.4.26",
     "@heroui/toast": "2.0.17",
     "@heroui/tooltip": "2.2.24",
     "@heroui/user": "2.2.22",
-    "@internationalized/date": "^3.10.0",
+    "@internationalized/date": "3.10.1",
     "@react-aria/i18n": "^3.12.13",
     "@react-aria/ssr": "3.9.10",
     "@react-aria/visually-hidden": "3.8.28",
@@ -101,5 +101,8 @@
     "tailwind-variants": "3.1.1",
     "tailwindcss": "4.1.11",
     "typescript": "5.6.3"
+  },
+  "overrides": {
+    "@internationalized/date": "3.10.1"
   }
 }

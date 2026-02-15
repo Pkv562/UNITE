@@ -8,7 +8,7 @@ import {
   ModalFooter,
 } from "@heroui/modal";
 import { Clock } from "@gravity-ui/icons";
-import { DatePicker } from "@heroui/date-picker";
+import { DatePicker } from "@heroui/react";
 import { Button } from "@heroui/button";
 
 import { fetchWithAuth } from "@/utils/fetchWithAuth";
@@ -218,7 +218,13 @@ export default function EventRescheduleModal({
   };
 
   return (
-    <Modal isOpen={isOpen} placement="center" size="md" onClose={onClose}>
+    <Modal
+      isOpen={isOpen}
+      placement="center"
+      size="md"
+      isDismissable={false}
+      onClose={onClose}
+    >
       <ModalContent>
         <ModalHeader className="flex items-center gap-2">
           <div className="flex items-center justify-center w-10 h-10 rounded-full bg-default-100">

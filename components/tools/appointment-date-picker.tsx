@@ -1,15 +1,18 @@
-import {DatePicker} from "@heroui/react";
-import {today, isWeekend, getLocalTimeZone, DateValue, getDayOfWeek} from "@internationalized/date";
-import {useLocale} from "@react-aria/i18n";
+import { DatePicker, DatePickerProps } from "@heroui/react";
+import { today, getLocalTimeZone, getDayOfWeek } from "@internationalized/date";
+import { useLocale } from "@react-aria/i18n";
 import { useState, useEffect } from 'react';
 import { fetchJsonWithAuth } from '../../utils/fetchWithAuth';
 
 interface AppointmentDatePickerProps {
-  value: DateValue | null;
-  onChange: (value: DateValue | null) => void;
+  value: DatePickerProps["value"];
+  onChange: (value: DatePickerProps["value"]) => void;
 }
 
 export default function AppointmentDatePicker({ value, onChange }: AppointmentDatePickerProps) {
+  type DatePickerValue = DatePickerProps["value"];
+  type DatePickerDate = NonNullable<DatePickerValue>;
+  type GetDayOfWeekDate = Parameters<typeof getDayOfWeek>[0];
   const [blockedWeekdays, setBlockedWeekdays] = useState<number[]>([]);
   const [blockedDates, setBlockedDates] = useState<string[]>([]);
   const [allowWeekendEvents, setAllowWeekendEvents] = useState<boolean>(false);
@@ -18,7 +21,7 @@ export default function AppointmentDatePicker({ value, onChange }: AppointmentDa
 
   // No hardcoded disabled ranges by default. If you need ranges, add them to settings and
   // update this component to read and apply them. For now keep empty to avoid unexpected blocks.
-  const disabledRanges: Array<[DateValue, DateValue]> = [];
+  const disabledRanges: Array<[DatePickerDate, DatePickerDate]> = [];
 
   let {locale} = useLocale();
 
@@ -77,7 +80,7 @@ export default function AppointmentDatePicker({ value, onChange }: AppointmentDa
 
         // Normalize blocked dates to YYYY-MM-DD strings for reliable comparison
         const rawDates: any[] = payload.blockedDates || [];
-        const formatDateValue = (d: DateValue) => {
+        const formatDateValue = (d: DatePickerDate) => {
           const y = String(d.year).padStart(4, '0');
           const m = String(d.month).padStart(2, '0');
           const day = String(d.day).padStart(2, '0');
@@ -129,7 +132,7 @@ export default function AppointmentDatePicker({ value, onChange }: AppointmentDa
     fetchSettings();
   }, []);
 
-  const formatDateValue = (d: DateValue) => {
+  const formatDateValue = (d: DatePickerDate) => {
     const y = String(d.year).padStart(4, '0');
     const m = String(d.month).padStart(2, '0');
     const day = String(d.day).padStart(2, '0');
@@ -137,9 +140,9 @@ export default function AppointmentDatePicker({ value, onChange }: AppointmentDa
     return `${y}-${m}-${day}`;
   };
 
-  let isDateUnavailable = (date: DateValue) => {
+  let isDateUnavailable = (date: DatePickerDate) => {
     // Check specific blocked weekdays first (more granular control)
-    const dow = getDayOfWeek(date, locale); // 0..6
+    const dow = getDayOfWeek(date as unknown as GetDayOfWeekDate, locale); // 0..6
     if (blockedWeekdays.includes(dow)) return true;
 
     const formatted = formatDateValue(date);

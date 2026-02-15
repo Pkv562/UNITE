@@ -6,8 +6,8 @@ import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
-import { DatePicker } from "@heroui/date-picker";
-import { DateValue, parseDate, getLocalTimeZone } from "@internationalized/date";
+import { DatePicker, DatePickerProps } from "@heroui/react";
+import { parseDate, getLocalTimeZone } from "@internationalized/date";
 import { useLocations } from "@/hooks/useLocations";
 
 export interface BatchEventData {
@@ -77,7 +77,8 @@ export default function BatchEventFormModal({
   });
 
   // Date and time state (separate for better UX)
-  const [date, setDate] = useState<DateValue | null>(null);
+  type DatePickerValue = DatePickerProps["value"];
+  const [date, setDate] = useState<DatePickerValue>(null);
   const [startTime, setStartTime] = useState("08:00");
   const [endTime, setEndTime] = useState("17:00");
 
@@ -152,7 +153,9 @@ export default function BatchEventFormModal({
         try {
           const startDate = new Date(event.Start_Date);
           const dateStr = startDate.toISOString().split("T")[0];
-          setDate(parseDate(dateStr));
+          const parsedDate = parseDate(dateStr);
+          // Cast to the DatePicker's value type to avoid duplicate @internationalized/date instances in Vercel builds.
+          setDate(parsedDate as unknown as DatePickerValue);
           setStartTime(
             `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`
           );
@@ -366,6 +369,7 @@ export default function BatchEventFormModal({
       onClose={handleClose}
       size="3xl"
       scrollBehavior="inside"
+      isDismissable={false}
       classNames={{
         base: "max-h-[95vh]",
         body: "overflow-y-auto max-h-[calc(95vh-80px)] py-4",

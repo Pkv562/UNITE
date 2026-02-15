@@ -11,7 +11,7 @@ import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
 import { Select, SelectItem } from "@heroui/select";
-import { DatePicker } from "@heroui/date-picker";
+import { DatePicker } from "@heroui/react";
 import { Avatar } from "@heroui/avatar";
 import { Person, Droplet, Megaphone } from "@gravity-ui/icons";
 
@@ -175,6 +175,7 @@ export const CreateTrainingEventModal: React.FC<
       placement="center"
       scrollBehavior="inside"
       size="2xl"
+      isDismissable={false}
       onClose={onClose}
     >
       <ModalContent>
@@ -778,6 +779,7 @@ export const CreateBloodDriveEventModal: React.FC<
       placement="center"
       scrollBehavior="inside"
       size="2xl"
+      isDismissable={false}
       onClose={onClose}
     >
       <ModalContent>
@@ -1246,6 +1248,7 @@ export const CreateAdvocacyEventModal: React.FC<
       placement="center"
       scrollBehavior="inside"
       size="2xl"
+      isDismissable={false}
       onClose={onClose}
     >
       <ModalContent>
