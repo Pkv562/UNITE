@@ -8,6 +8,8 @@ import { Navbar } from "@/components/layout/navbar";
 
 export default function WaitlistPage() {
   const [email, setEmail] = useState("");
+  // Honeypot field state
+  const [companyName, setCompanyName] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -24,11 +26,41 @@ export default function WaitlistPage() {
       return;
     }
 
-    // Simulate API call registration logic here
-    setTimeout(() => {
+    try {
+      // Pull API URL strictly from environment configurations with local fallbacks
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:6700";
+      
+      const response = await fetch(`${baseUrl}/api/waitlist`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ 
+          email,
+          company_name: companyName, // Honeypot field for bot trap
+          source: "unite-website",
+          signupPage: window.location.href // Track signup conversion source dynamically
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Handle 409 Conflict (Duplicate Email) and 429 Bad Requests silently without throwing Native Errors
+        setStatus("error");
+        setErrorMessage(data.message || "Something went wrong. Please try again.");
+        return; // Early return to prevent success propagation
+      }
+
+      // Success
       setStatus("success");
       setEmail("");
-    }, 1500);
+      setCompanyName(""); // clear honeypot safely via cleanup
+      
+    } catch (err: any) {
+      setStatus("error");
+      setErrorMessage("Unable to join waitlist. Please try again later.");
+    }
   };
 
   return (
@@ -64,6 +96,20 @@ export default function WaitlistPage() {
           ) : (
             <>
               <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 w-full">
+                {/* Honeypot field hidden from screen readers and visual layout */}
+                <div style={{ display: 'none' }} aria-hidden="true">
+                  <label htmlFor="company_name">Company Name</label>
+                  <input
+                    type="text"
+                    id="company_name"
+                    name="company_name"
+                    value={companyName}
+                    onChange={(e) => setCompanyName(e.target.value)}
+                    tabIndex={-1}
+                    autoComplete="off"
+                  />
+                </div>
+                
                 <Input 
                   type="email" 
                   placeholder="Enter your email address" 
